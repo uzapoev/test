@@ -38,7 +38,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vkDebugCallback(VkDebugReportFlagsEXT flag
     return VK_FALSE;
 }
 
-
+/*
 static VKAPI_ATTR VkBool32 VKAPI_CALL _vkDebugUtilsMessengerCallbackEXT(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes,
     const VkDebugUtilsMessengerCallbackDataEXT*pCallbackData,
     void* pUserData)
@@ -46,7 +46,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL _vkDebugUtilsMessengerCallbackEXT(VkDebugU
     printf("\nvk %s", pCallbackData->pMessage);
     return VK_FALSE;
 }
-
+*/
 
 
 bool Vkrenderer::initialize(long handle)
@@ -79,7 +79,8 @@ bool Vkrenderer::initialize(long handle)
     VkCommandPoolCreateInfo poolInfo = {};
     {
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.queueFamilyIndex = 1;////!!!graphicsFamily;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = 0;////!!!graphicsFamily;
     }
 
     if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
@@ -358,6 +359,7 @@ VkInstance Vkrenderer::vk_create_instance(bool isdebug)
 
     VkInstanceCreateInfo info = {};
     {
+        info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         info.pApplicationInfo = &vkAppInfo;
         info.enabledExtensionCount = enabledInstanceExtensions.size();
         info.ppEnabledExtensionNames = enabledInstanceExtensions.data();
@@ -366,7 +368,7 @@ VkInstance Vkrenderer::vk_create_instance(bool isdebug)
         info.ppEnabledLayerNames = enabledInstanceLayers.data();
     }
 
-    VkDebugUtilsMessengerCreateInfoEXT dbg_info;
+    /*VkDebugUtilsMessengerCreateInfoEXT dbg_info;
     if (isdebug) {
         auto messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
         dbg_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -378,7 +380,7 @@ VkInstance Vkrenderer::vk_create_instance(bool isdebug)
         dbg_info.pUserData = nullptr;
         info.pNext = &dbg_info;
     }
-
+    */
 
     VkInstance instance = nullptr;
     VkResult result = vkCreateInstance(&info, nullptr, &instance);
