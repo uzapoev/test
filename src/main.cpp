@@ -2,9 +2,13 @@
 #include <tchar.h>
 
 #include <stdio.h>
+#include <sys/stat.h> // stat
 
 #include <memory>
 #include "vkrenderer.h"
+
+#include <shaderc/shaderc.h>
+
 
 long create_window(const char * caption)
 {
@@ -62,6 +66,41 @@ bool process_msg()
     return true;
 }
 
+const char * vertex =
+"in float4 position;"
+"out float4 pos;"
+"void main() {"
+"gl_Position = position;"
+"}";
+
+const char * fragment =
+"out float4 outcolor;"
+"void main() {"
+"   outcolor = float4(1.0, 0.0, 1.0, 1.0);"
+"}";
+
+
+size_t filedata(const char * path, char **buff)
+{
+#ifdef _WIN32
+    struct _stat32 st = { 0 };
+    _stat32(path, &st);
+#else
+    struct stat st = { 0 };
+    stat(path, &st);
+#endif
+    if (st.st_size == 0)
+        return st.st_size;
+
+    *buff = (char*)malloc(st.st_size);
+
+    FILE * file = fopen(path, "rb");
+    fread(*buff, 1, st.st_size, file);
+    fclose(file);
+    return st.st_size;
+}
+
+
 int main(int argc, char ** argv)
 {
     long hwnd = create_window("vk sample");
@@ -69,6 +108,27 @@ int main(int argc, char ** argv)
     auto renderer = std::make_unique<Vkrenderer>();
     if (!renderer->initialize(hwnd))
         return 0;
+
+
+    char * frag = NULL;
+    char * vert = NULL;
+    size_t fsize = filedata("../data/shaders/simple.frag.spv", &frag);
+    size_t vsize = filedata("../data/shaders/simple.vert.spv", &vert);
+
+#if 0
+    shaderc_compiler_t compiler = shaderc_compiler_initialize();
+    shaderc_compile_options_t options = shaderc_compile_options_initialize();
+
+    shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
+    if (/*debug*/1)
+        shaderc_compile_options_set_generate_debug_info(options);
+
+    unsigned int ver, rev;
+    shaderc_get_spv_version(&ver, &rev);
+#endif
+
+    uint64_t shader = renderer->create_shader(vert, vsize, frag, fsize);
+    uint64_t pipeline = renderer->create_pipeline(shader, nullptr, nullptr);
 
     while (process_msg())
     {
