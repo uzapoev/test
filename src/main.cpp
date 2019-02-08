@@ -5,10 +5,8 @@
 #include <sys/stat.h> // stat
 
 #include <memory>
+
 #include "vkrenderer.h"
-
-#include <shaderc/shaderc.h>
-
 
 long create_window(const char * caption)
 {
@@ -66,18 +64,6 @@ bool process_msg()
     return true;
 }
 
-const char * vertex =
-"in float4 position;"
-"out float4 pos;"
-"void main() {"
-"gl_Position = position;"
-"}";
-
-const char * fragment =
-"out float4 outcolor;"
-"void main() {"
-"   outcolor = float4(1.0, 0.0, 1.0, 1.0);"
-"}";
 
 
 size_t filedata(const char * path, char **buff)
@@ -109,30 +95,42 @@ int main(int argc, char ** argv)
     if (!renderer->initialize(hwnd))
         return 0;
 
-
     char * frag = NULL;
     char * vert = NULL;
     size_t fsize = filedata("../data/shaders/simple.frag.spv", &frag);
     size_t vsize = filedata("../data/shaders/simple.vert.spv", &vert);
 
-#if 0
-    shaderc_compiler_t compiler = shaderc_compiler_initialize();
-    shaderc_compile_options_t options = shaderc_compile_options_initialize();
-
-    shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
-    if (/*debug*/1)
-        shaderc_compile_options_set_generate_debug_info(options);
-
-    unsigned int ver, rev;
-    shaderc_get_spv_version(&ver, &rev);
-#endif
-
+    VertexAttribute attributes[] = {
+        { eVertexAttrib_Position,   eVertexFormat_float4},
+   //     { eVertexAttrib_Color,      eVertexFormat_byte4 }
+    };
+    float vertexes[] = {
+         0.0f, -0.5f, 0.0, 0.0,
+         0.5f,  0.5f, 0.0, 0.0,
+        -0.5f,  0.5f, 0.0, 0.0,
+    };
+    uint16_t indexes[] = {
+        0, 1, 2, 1, 2, 3
+    };
+    uint64_t vdecl = renderer->create_vdecl(attributes, _countof(attributes));
     uint64_t shader = renderer->create_shader(vert, vsize, frag, fsize);
-    uint64_t pipeline = renderer->create_pipeline(shader, nullptr, nullptr);
+    uint64_t pipeline = renderer->create_pipeline(vdecl, shader, nullptr);
+
+    uint64_t vb = renderer->create_vb(vertexes, _countof(vertexes) * sizeof(float), false);
+    uint64_t ib = renderer->create_ib(indexes,  _countof(indexes)  * sizeof(uint16_t), false);
 
     while (process_msg())
     {
         renderer->begin();
+
+
+        renderer->bind_pipeline(pipeline);
+
+        renderer->bind_vb(vb);
+
+
+        renderer->draw_array(0, 2);
+
         renderer->end();
         renderer->present();
     };

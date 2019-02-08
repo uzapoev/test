@@ -1,15 +1,25 @@
 #ifndef __SpirvAnalyzer_h__
 #define __SpirvAnalyzer_h__
 
-
+#include <assert.h>
 #include <vulkan/spirv.h>
 
 #include <string>
 #include <vector>
 #include <map>
 
+
 class SpirvAnalyzer
-{
+{ 
+    class Uniform
+    {
+        char name[256];
+        int location;
+    };
+    class Attribute
+    {
+    };
+
     enum Decoration {
         DecorationBuiltIn = 11,
         DecorationLocation = 30,
@@ -32,27 +42,44 @@ class SpirvAnalyzer
         StorageClassStorageBuffer = 12,
         StorageClassMax = 0x7fffffff,
     };
+
+#define RETURNCASE( value ) case value: return #value;
     static const char * storage2str(StorageClass s)
     {
         switch (s)
         {
-            case StorageClassUniformConstant: return "StorageClassUniformConstant";
-            case StorageClassInput:           return "StorageClassInput";
-            case StorageClassUniform:         return "StorageClassUniform";
-            case StorageClassOutput:          return "StorageClassOutput";
-            case StorageClassWorkgroup:       return "StorageClassWorkgroup";
-            case StorageClassCrossWorkgroup:  return "StorageClassCrossWorkgroup";
-            case StorageClassPrivate:         return "StorageClassPrivate";
-            case StorageClassFunction:        return "StorageClassFunction";
-            case StorageClassGeneric:         return "StorageClassGeneric";
-            case StorageClassPushConstant:    return "StorageClassPushConstant";
-            case StorageClassAtomicCounter:   return "StorageClassAtomicCounter";
-            case StorageClassImage:           return "StorageClassImage";
-            case StorageClassStorageBuffer:   return "StorageClassStorageBuffer";
+            RETURNCASE(StorageClassUniformConstant)
+            RETURNCASE(StorageClassInput          )
+            RETURNCASE(StorageClassUniform        )
+            RETURNCASE(StorageClassOutput         )
+            RETURNCASE(StorageClassWorkgroup      )
+            RETURNCASE(StorageClassCrossWorkgroup )
+            RETURNCASE(StorageClassPrivate        )
+            RETURNCASE(StorageClassFunction       )
+            RETURNCASE(StorageClassGeneric        )
+            RETURNCASE(StorageClassPushConstant   )
+            RETURNCASE(StorageClassAtomicCounter  )
+            RETURNCASE(StorageClassImage          )
+            RETURNCASE(StorageClassStorageBuffer  )
         }
         return "unknown storage";
     }
 
+    static const char * type2str(SpvOp op)
+    {
+        switch (op)
+        {
+            RETURNCASE( SpvOpTypeVoid   )   RETURNCASE( SpvOpTypeBool )         RETURNCASE( SpvOpTypeInt )
+            RETURNCASE( SpvOpTypeFloat  )   RETURNCASE( SpvOpTypeVector )       RETURNCASE( SpvOpTypeMatrix )
+            RETURNCASE( SpvOpTypeImage  )   RETURNCASE( SpvOpTypeSampler )      RETURNCASE( SpvOpTypeSampledImage )
+            RETURNCASE( SpvOpTypeArray  )   RETURNCASE( SpvOpTypeRuntimeArray ) RETURNCASE( SpvOpTypeStruct )
+            RETURNCASE( SpvOpTypeOpaque )   RETURNCASE( SpvOpTypePointer )      RETURNCASE( SpvOpTypeFunction )
+            RETURNCASE( SpvOpTypeEvent  )   RETURNCASE( SpvOpTypeDeviceEvent )  RETURNCASE( SpvOpTypeReserveId )
+            RETURNCASE( SpvOpTypeQueue  )   RETURNCASE( SpvOpTypePipe )         RETURNCASE( SpvOpTypeForwardPointer )
+        }
+        return "unknown type";
+    }
+#undef RETURNCASE
 
     static const int SPIRV_MAGIC = 0x07230203;
     static const int SPIRV_MAGIC_REV = 0x03022307;
@@ -70,7 +97,6 @@ class SpirvAnalyzer
     struct InstructionHeader
     {
         uint16_t               op;    //uint16_t opcode : 16; //
-     //   SpvOp               op:8;    //uint16_t opcode : 16; //
         uint16_t            count; //uint16_t wordCount : 16;
     };
 
@@ -89,6 +115,7 @@ class SpirvAnalyzer
         stream_view(const char * d, size_t size) :m_data(d), m_currptr(d), m_size(size){};
 
         template <class T> const T *    shift() const                       { const T * ret = (const T*)(m_data); m_data += sizeof(T); return ret; }
+        template <class T> T            read()                              { T ret; read(&ret, sizeof(T)); return ret;  }
 
         void                            read(void * data, uint32_t size)    { memcpy(data, m_data, size); m_data += size; }
         const char *                    data() const                        { return m_currptr; }
@@ -110,15 +137,35 @@ class SpirvAnalyzer
 
         void add(Decorate & decorate)   { m_childs.push_back(decorate); }
 
+        Decorate * get_child(uint32_t id) {
+            for (size_t i = 0; i < m_childs.size(); i++)
+                if (m_childs[i].id == id)
+                    return &m_childs[i];
+            return nullptr;
+        }
+
         std::string                     name;
         uint32_t                        id = UINT32_MAX;
-        uint32_t                        description = UINT32_MAX;
-        uint32_t                        binding = UINT32_MAX;
-        uint32_t                        location = UINT32_MAX;
 
-        std::vector<Decorate>           m_childs;
+        std::vector<Decorate>               m_childs;
+        std::map<SpvDecoration, uint32_t>   m_decors;
     };
 public:
+    static bool istype(SpvOp op)
+    {
+        if (op >= SpvOpTypeVoid && op <= SpvOpTypePipe)
+            return true;
+        return false;
+    }
+
+    struct constant{
+        int type;
+        union{
+            int i;
+            float f;
+        }value;
+    };
+
     static bool analyze(const void * data, size_t size)
     {
         stream_view stream((const char *)data, size);
@@ -130,47 +177,59 @@ public:
         uint16_t bufer[256] = {};
         char    cbufer[256] = {};
 
-        std::map<uint32_t, Decorate> decorates;
-        std::vector<Instruction> instructions;
-        size_t count = size - sizeof(SpirvHeader);
+        std::map<uint32_t, Decorate>    decorates;
+        std::vector<Instruction>        instructions;
+        std::map<SpvOp, int>            types;//type / parent
+        std::map<int, constant>         constants;//id, type, value
+
+        std::vector<SpvOp>ops;
         while (!stream.eof())
         {
-            size_t ss = sizeof(InstructionHeader);
             InstructionHeader * instr = (InstructionHeader*)stream.shift<InstructionHeader>();
             instructions.emplace_back(instr, instr->count - 1, stream.tell());
+
+            ops.push_back(SpvOp(instr->op));
 
             for (uint16_t i = 0; i < instr->count - 1; i++)
             {
                 stream.shift<uint32_t>();
             }
         }
-
         for (size_t i = 0; i < instructions.size(); i++)
         {
             char buff[64] = "";
+
             auto instruction = instructions[i];
             stream.seek(instruction.offset);
-            switch (instruction.header->op)
-            {
-                case 5: // name
-                {
-                    uint32_t id = 0;
-                    stream.seek(instruction.offset);
-                    stream.read(&id, sizeof(uint32_t));
-                    stream.read(buff, sizeof(uint32_t)* instruction.size - 1);
-                    size_t len = strlen(buff);
 
-                    auto it = decorates.find(id);
-                    if (it == decorates.end() && len > 0)
-                        decorates.insert(std::make_pair(id, Decorate(id, buff)));
+            SpvOp op = (SpvOp)instruction.header->op;
+            if (op == SpvOpConstant){
+
+            }
+            else if (istype(op))
+            {
+                parse_type(instruction, stream);
+                printf("\ntype %s", type2str(op));
+                continue;
+            }
+
+            switch (op)
+            {
+                case SpvOpName: //5: // name
+                {
+                    uint32_t id = stream.read<uint32_t>();
+                    stream.read(buff, sizeof(uint32_t)* instruction.size - 1);
+
+                    assert(decorates.find(id) == decorates.end());
+                    decorates.insert(std::make_pair(id, Decorate(id, buff)));
                 } break;
 
-                case 6: //member name
+                case SpvOpMemberName: //6: //member name
                 {
-                    uint32_t id = 0; uint32_t mid;
-                    stream.read(&id, sizeof(uint32_t));
-                    stream.read(&mid, sizeof(uint32_t));
-                    stream.read(buff, sizeof(uint32_t)* instruction.size - 1);
+                    uint32_t id     = stream.read<uint32_t>();
+                    uint32_t mid    = stream.read<uint32_t>();
+
+                    stream.read(buff, sizeof(uint32_t)* instruction.size - 2);
 
                     auto it = decorates.find(id);
                     it->second.add(Decorate(mid, buff));
@@ -178,62 +237,57 @@ public:
 
                 case SpvOpDecorate: // 71:// decorate
                 {
-                    uint32_t id = 0; uint32_t mid; uint32_t data = 0;
-                    stream.read(&id, sizeof(uint32_t));
-                    stream.read(&mid, sizeof(uint32_t));
+                    uint32_t id         = stream.read<uint32_t>();
+                    SpvDecoration decor = stream.read<SpvDecoration>();
+
                     auto it = decorates.find(id);
+                    const char * membername = it != decorates.end() ? it->second.name.c_str() : "";
                     for (size_t j = 0; j < instruction.size - 2; ++j)
                     {
+                        uint32_t data = 0;
                         stream.read(&data, sizeof(uint32_t));
-                        if (mid == DecorationLocation) it->second.location = data;
-                        if (mid == DecorationBinding)  it->second.binding = data;
-                        if (mid == DecorationDescriptorSet) it->second.description = data;
+
+                        if (it != decorates.end())
+                            it->second.m_decors.emplace(decor, data);
+
+                        printf("\ndecorate: %d(%s) %d %d", id, membername, decor, data);
                     }
                 }break;
 
                 case SpvOpMemberDecorate: // 72: // member decorate
                 {
-                    uint32_t id = 0; uint32_t mid;
-                    SpvDecoration decor; 
-                    SpvBuiltIn builtin;
-                    stream.read(&id, sizeof(uint32_t));
-                    stream.read(&mid, sizeof(uint32_t));
-                    stream.read(&decor, sizeof(uint32_t)); // 11 = BuiltIn
-                    stream.read(&builtin, sizeof(uint32_t));
-
+                    uint32_t id         = stream.read<uint32_t>();
+                    uint32_t mid        = stream.read<uint32_t>();
+                    SpvDecoration decor = stream.read<SpvDecoration>();
+  
                     auto it = decorates.find(id);
-                    if (it != decorates.end())
-                    {
-                        printf("\nmember decorate: %d(%s) %d %d %d", id, it->second.name.c_str(), mid, decor, builtin);
+                    if (it == decorates.end())
+                        break;
+
+                    auto child = it->second.get_child(mid);
+                    const char * membername = child ? child->name.c_str() : "";
+                    printf("\nmember decorate: %d(%s) %d(%s) %d", id, it->second.name.c_str(), mid, membername, decor);
+
+                    for (size_t j = 0; j < instruction.size - 3; ++j){
+                        uint32_t data = stream.read<uint32_t>();
+                        if (child)
+                            child->m_decors.emplace(decor, data);
+
+                        printf(" %d", data);
                     }
-                  //  printf("\nmember decorate: %d %d %d %d", id, mid, id0, mid0);
-                }break;
-
-                case SpvOpTypePointer:
-                {
-                    uint32_t tokens[4] = {};
-                    stream.read(&tokens, sizeof(uint32_t)*instruction.size);
-                    auto it = decorates.find(tokens[0]);
-                    printf("\nSpvOpTypePointer [%d] [%d] [%d] [%d]", tokens[0], tokens[1], tokens[2], tokens[3]);
-                }break;
-                case SpvOpTypeStruct:
-                {
-                                        uint32_t id, type;
-                    stream.read(&id, sizeof(uint32_t));
-                    stream.read(&type, sizeof(uint32_t));
-                    auto it = decorates.find(id);
-                    printf("");
                 }break;
 
                 case SpvOpVariable: // 59://variable 
                 {
-                    uint32_t type, id;
-                    StorageClass storage;
-                    uint32_t initializer = 0;
-                    stream.read(&type, sizeof(uint32_t));
-                    stream.read(&id, sizeof(uint32_t));
-                    stream.read(&storage, sizeof(uint32_t));
-                    instruction.size == 4 ? stream.read(&initializer, sizeof(uint32_t)) : 0;
+                    uint32_t type       = stream.read<uint32_t>();
+                    uint32_t id         = stream.read<uint32_t>();
+                    StorageClass storage= stream.read<StorageClass>();
+
+                    for (uint32_t i = 0; i < instruction.size - 3; ++i)
+                    {
+                        uint32_t data = stream.read<uint32_t>();
+                    }
+
                     auto it = decorates.find(id);
 
                     if (it != decorates.end())
@@ -243,7 +297,42 @@ public:
                 }break;
             }
         }
+        printf("\n");
         return true;
+    }
+
+    static void parse_type(const Instruction & instruction, stream_view & stream )
+    {
+        //SpvOpTypeArray: type count
+        //
+/*            SpvOpTypeVoid = 19,
+            SpvOpTypeBool = 20,
+            SpvOpTypeInt = 21,
+            SpvOpTypeFloat = 22,
+            SpvOpTypeVector = 23,
+            SpvOpTypeMatrix = 24,
+            SpvOpTypeImage = 25,
+            SpvOpTypeSampler = 26,
+            SpvOpTypeSampledImage = 27,
+            SpvOpTypeArray = 28,
+            SpvOpTypeRuntimeArray = 29,
+            SpvOpTypeStruct = 30,
+            SpvOpTypeOpaque = 31,
+            SpvOpTypePointer = 32,
+            SpvOpTypeFunction = 33,
+            SpvOpTypeEvent = 34,
+            SpvOpTypeDeviceEvent = 35,
+            SpvOpTypeReserveId = 36,
+            SpvOpTypeQueue = 37,
+            SpvOpTypePipe = 38,
+            SpvOpTypeForwardPointer = 39,
+ */
+        for (size_t i = 0; i < instruction.size - 1; i++)
+        {
+            uint32_t type = stream.read<uint32_t>();
+     //       if (instruction.header->op == SpvOpTypeArray)
+        //    types.emplace(op, type);
+        }
     }
 };
 
