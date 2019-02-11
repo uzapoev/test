@@ -137,7 +137,7 @@ class SpirvAnalyzer
 
         void add(Decorate & decorate)   { m_childs.push_back(decorate); }
 
-        Decorate * get_child(uint32_t id) {
+        Decorate * child(uint32_t id) {
             for (size_t i = 0; i < m_childs.size(); i++)
                 if (m_childs[i].id == id)
                     return &m_childs[i];
@@ -153,9 +153,7 @@ class SpirvAnalyzer
 public:
     static bool istype(SpvOp op)
     {
-        if (op >= SpvOpTypeVoid && op <= SpvOpTypePipe)
-            return true;
-        return false;
+        return op >= SpvOpTypeVoid && op <= SpvOpTypePipe;
     }
 
     struct constant{
@@ -179,9 +177,9 @@ public:
 
         std::map<uint32_t, Decorate>    decorates;
         std::vector<Instruction>        instructions;
-        std::map<SpvOp, int>            types;//type / parent
-        std::map<int, constant>         constants;//id, type, value
-
+        std::map<SpvOp, int>            types;      // type / parent
+        std::map<int, constant>         constants;  // { id, {type, value} }
+         
         std::vector<SpvOp>ops;
         while (!stream.eof())
         {
@@ -264,7 +262,7 @@ public:
                     if (it == decorates.end())
                         break;
 
-                    auto child = it->second.get_child(mid);
+                    auto child = it->second.child(mid);
                     const char * membername = child ? child->name.c_str() : "";
                     printf("\nmember decorate: %d(%s) %d(%s) %d", id, it->second.name.c_str(), mid, membername, decor);
 

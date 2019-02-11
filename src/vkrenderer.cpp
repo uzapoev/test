@@ -9,18 +9,11 @@
     #define SURFACE_EXTENSION_NAME      VK_KHR_WIN32_SURFACE_EXTENSION_NAME
 #elif defined(__ANDROID__)
     #define SURFACE_EXTENSION_NAME      VK_KHR_ANDROID_SURFACE_EXTENSION_NAME
-#elif defined(_DIRECT2DISPLAY)
-    #define SURFACE_EXTENSION_NAME      VK_KHR_DISPLAY_EXTENSION_NAME
-#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    #define SURFACE_EXTENSION_NAME      VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME
-#elif defined(__linux__)
-    #define SURFACE_EXTENSION_NAME      VK_KHR_XCB_SURFACE_EXTENSION_NAME
 #elif defined(VK_USE_PLATFORM_IOS_MVK)
     #define SURFACE_EXTENSION_NAME      VK_MVK_IOS_SURFACE_EXTENSION_NAME
 #elif defined(VK_USE_PLATFORM_MACOS_MVK)
     #define SURFACE_EXTENSION_NAME      VK_MVK_MACOS_SURFACE_EXTENSION_NAME
 #endif
-
 
 
 static const VkFormat _vformat2vkformat[eVertexFormat_Count] =
@@ -32,6 +25,7 @@ static const VkFormat _vformat2vkformat[eVertexFormat_Count] =
     VK_FORMAT_R16G16_UINT, VK_FORMAT_R16G16B16A16_UINT,    // ushort
     VK_FORMAT_R8G8B8A8_UINT    // byte
 };
+
 static const uint16_t _vformatstrides[eVertexFormat_Count] =
 {
     0, //eVertexFormat_Invalid
@@ -41,6 +35,7 @@ static const uint16_t _vformatstrides[eVertexFormat_Count] =
     4, 8, // ushort
     4    // byte4
 };
+
 static_assert(sizeof(float) == 4, "wrong float size");
 static_assert(sizeof(short) == 2, "wrong short size");
 static_assert(_countof(_vformat2vkformat) == eVertexFormat_Count, "incorrect array size");
@@ -200,8 +195,8 @@ namespace vkPipelineBuildHelper
         static VkViewport viewport = { 0, 0, w, h, 0, 1 };
         static VkRect2D scissor = { { 0, 0 }, { w, h } };
 
-        viewport.width = w;
-        viewport.height = h;
+        viewport.width = static_cast<float>(w);
+        viewport.height = static_cast<float>(h);
 
         VkPipelineViewportStateCreateInfo viewportState = {};
         {
@@ -297,7 +292,6 @@ bool Vkrenderer::initialize(long handle)
     vkGetPhysicalDeviceFeatures(m_physicaldevice, &features);
     vkGetPhysicalDeviceMemoryProperties(m_physicaldevice, &memproperies);
     
-
     //todo: refactor bullshit below
     // create_renderpasses
     // create_framebuffer( union with renderpass??)
@@ -315,7 +309,7 @@ bool Vkrenderer::initialize(long handle)
         return false;
     }
 
-    m_commandBuffers.resize(m_swapchain.image_count+2);
+    m_commandbuffers.resize(m_swapchain.image_count + 2);
 
     VkCommandPoolCreateInfo poolInfo = {};
     {
@@ -334,19 +328,19 @@ bool Vkrenderer::initialize(long handle)
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandPool = m_commandPool;
-        allocInfo.commandBufferCount = (uint32_t)m_commandBuffers.size();
+        allocInfo.commandBufferCount = (uint32_t)m_commandbuffers.size();
     }
 
-    if (vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data()) != VK_SUCCESS)
+    if (vkAllocateCommandBuffers(m_device, &allocInfo, m_commandbuffers.data()) != VK_SUCCESS)
     {
         printf("failed to allocate command buffers!");
         return false;
     }
 
     {
-        m_swapChainFramebuffers.resize(m_swapchain.image_count);
+        m_framebuffers.resize(m_swapchain.image_count);
 
-        for (size_t i = 0; i < m_swapChainFramebuffers.size(); i++)
+        for (size_t i = 0; i < m_framebuffers.size(); i++)
         {
             VkImageView attachments[] = {
                 m_swapchain.image_views[i],
@@ -362,7 +356,7 @@ bool Vkrenderer::initialize(long handle)
             framebufferInfo.height = m_swapchain.height;
             framebufferInfo.layers = 1;
 
-            if (vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_swapChainFramebuffers[i]) != VK_SUCCESS) {
+            if (vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_framebuffers[i]) != VK_SUCCESS) {
                 printf("failed to create framebuffer!");
                 return false;
             }
@@ -373,11 +367,11 @@ bool Vkrenderer::initialize(long handle)
 }
 
 
-
 void Vkrenderer::release()
 {
 
 }
+
 
 void Vkrenderer::begin()
 {
@@ -389,7 +383,7 @@ void Vkrenderer::begin()
         commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
     }
 
-    VkCommandBuffer cmd = m_commandBuffers[m_currCmdBuffer];
+    VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
     result = vkBeginCommandBuffer(cmd, &commandBufferBeginInfo);
 
     VkClearValue clearColor = { 0.1f, 0.2f, 0.3f, 1.0f };
@@ -397,7 +391,7 @@ void Vkrenderer::begin()
     {
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassInfo.renderPass = m_renderPass;
-        renderPassInfo.framebuffer = m_swapChainFramebuffers[m_currCmdBuffer];
+        renderPassInfo.framebuffer = m_framebuffers[m_currCmdBuffer];
         renderPassInfo.renderArea.offset = { 0, 0 };
         renderPassInfo.renderArea.extent.width = m_swapchain.width;
         renderPassInfo.renderArea.extent.height = m_swapchain.height;
@@ -407,9 +401,10 @@ void Vkrenderer::begin()
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 }
 
+
 void Vkrenderer::end()
 {
-    VkCommandBuffer cmdBuf = m_commandBuffers[m_currCmdBuffer];
+    VkCommandBuffer cmdBuf = m_commandbuffers[m_currCmdBuffer];
 
     vkCmdEndRenderPass(cmdBuf);
 
@@ -447,10 +442,12 @@ void Vkrenderer::end()
     result = vkQueueWaitIdle(m_presentQueue);
 }
 
+
 void Vkrenderer::present()
 {
     vkDeviceWaitIdle(m_device);
 }
+
 
 uint64_t Vkrenderer::create_vdecl(VertexAttribute * atribs, size_t count)
 {
@@ -459,7 +456,7 @@ uint64_t Vkrenderer::create_vdecl(VertexAttribute * atribs, size_t count)
     uint32_t flags = 0;
     uint32_t offset = 0;
 
-    VkVdeclaration decl;
+    VDeclaration decl;
     for (size_t i = 0; i < count; ++i)
     {
         long attrflag = 1 << atribs[i].type;
@@ -487,9 +484,10 @@ uint64_t Vkrenderer::create_vdecl(VertexAttribute * atribs, size_t count)
     return makeresource(eResurceType_vdecl, m_vdecls.size(), flags);
 }
 
+
 uint64_t Vkrenderer::create_vb(void * data, size_t size, bool dynamic)
 {
-    VkBuffer vertexBuffer = NULL;
+   /* VkBuffer vertexBuffer = NULL;
     VkDeviceMemory vertexBufferMemory = NULL;
 
     VkBufferCreateInfo bufferInfo = {};
@@ -518,12 +516,12 @@ uint64_t Vkrenderer::create_vb(void * data, size_t size, bool dynamic)
 
     void *tmpdata = NULL;
     vkMapMemory(m_device, vertexBufferMemory, 0, size, 0, &tmpdata);
-    memcpy(data, data, size);
+    memcpy(tmpdata, data, size);
     vkUnmapMemory(m_device, vertexBufferMemory);
 
     m_buffers.push_back(vertexBuffer);
-
-    /*
+    */
+    
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
     createBuffer(m_device, m_physicaldevice, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
@@ -538,22 +536,25 @@ uint64_t Vkrenderer::create_vb(void * data, size_t size, bool dynamic)
     VkDeviceMemory vertexBufferMemory;
     createBuffer(m_device, m_physicaldevice, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
 
-
     copyBuffer(m_device, m_commandPool, stagingBuffer, vertexBuffer, size);
 
     vkDestroyBuffer(m_device, stagingBuffer, nullptr);
     vkFreeMemory(m_device, stagingBufferMemory, nullptr);
 
     m_buffers.push_back(vertexBuffer);
-    */
 
     return makeresource(eResurceType_vb, m_buffers.size(), 0);
 }
 
+
 uint64_t Vkrenderer::create_ib(void * data, size_t size, bool dynamic)
 {
+    // auto buff =  create_bufer( data, size, dynamic);
+    // m_buffers.push_back(buff);
+    // return makeresource(eResurceType_ib, m_buffers.size(), 0);
     return 0;
 }
+
 
 uint64_t Vkrenderer::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
 {
@@ -614,7 +615,7 @@ uint64_t Vkrenderer::create_shader(void * vdata, size_t vsize, void * fdata, siz
         throw std::runtime_error("failed to create pipeline layout!");
     }
 
-    VkShader shader = { pipelineLayout, shaderStages[0], shaderStages[1] };
+    Shader shader = { pipelineLayout, shaderStages[0], shaderStages[1] };
     m_shaders.emplace_back(shader);
 
     return makeresource(eResurceType_shader, m_shaders.size(), 0);
@@ -627,24 +628,29 @@ uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
     }
 
     resourserunion shaderunion = { shader };
+    Shader * shaderinfo = &m_shaders[shaderunion.internalid - 1];
+
+    VkPipelineLayout pipelineLayout = shaderinfo->pipline_layout;
     VkPipelineShaderStageCreateInfo shaderStages[2] = {
-        m_shaders[shaderunion.internalid-1].vertex,
-        m_shaders[shaderunion.internalid-1].fragment
+        shaderinfo->vertex,
+        shaderinfo->fragment
     };
-    VkPipelineLayout pipelineLayout = m_shaders[shaderunion.internalid - 1].pipline_layout;
 
     resourserunion vdeclunion = { vdecl };
-    VkVdeclaration * decl = &m_vdecls[vdeclunion.internalid - 1];
+    VDeclaration * decl = &m_vdecls[vdeclunion.internalid - 1];
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
     {
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+     //   inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+     //   inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+
         inputAssembly.primitiveRestartEnable = VK_FALSE;
     }
 
-    float width = m_swapchain.width;
-    float height = m_swapchain.height;
+    int width = m_swapchain.width;
+    int height = m_swapchain.height;
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
     {
@@ -693,10 +699,24 @@ uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
     return makeresource(eResurceType_pipeline, m_pipelines.size(), 0);
 }
 
+
 uint64_t Vkrenderer::create_renderpass(/**/)
 {
     return 0;
 }
+
+
+uint32_t Vkrenderer::uniform(uint64_t shader, const char * name)
+{
+    return 0;
+}
+
+
+void Vkrenderer::update_uniform(uint32_t id, const void *data)
+{
+
+}
+
 
 void Vkrenderer::bind_pipeline(uint64_t pipeline)
 {
@@ -708,9 +728,10 @@ void Vkrenderer::bind_pipeline(uint64_t pipeline)
     resourserunion pipelineunion = { pipeline };
     auto graphicsPipeline= m_pipelines[pipelineunion.internalid - 1];
 
-    VkCommandBuffer cmd = m_commandBuffers[m_currCmdBuffer];
+    VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 }
+
 
 void Vkrenderer::bind_vb(uint64_t vb)
 {
@@ -723,14 +744,15 @@ void Vkrenderer::bind_vb(uint64_t vb)
     VkBuffer vertexBuffers[] = { m_buffers[vbunion.internalid-1] };
     VkDeviceSize offsets[] = { 0 };
 
-    VkCommandBuffer cmd = m_commandBuffers[m_currCmdBuffer];
+    VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-
 }
 
 void Vkrenderer::bind_ib(uint64_t ib)
 {
-
+    resourserunion ibunion = { ib };
+    VkBuffer vertexBuffers[] = { m_buffers[ibunion.internalid - 1] };
+    VkDeviceSize offsets[] = { 0 };
 }
 
 void Vkrenderer::bind_texture(uint64_t texture)
@@ -738,15 +760,15 @@ void Vkrenderer::bind_texture(uint64_t texture)
 
 }
 
-void Vkrenderer::draw_array(int start, int end)
+void Vkrenderer::draw_array(int start_vert, int vert_count)
 {
-    VkCommandBuffer cmd = m_commandBuffers[m_currCmdBuffer];
-    vkCmdDraw(cmd, 1, 1, 0, 0);
+    VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
+    vkCmdDraw(cmd, vert_count, 1, start_vert, 0);
 }
 
 void Vkrenderer::draw_indexed(int start, int end)
 {
-    VkCommandBuffer cmd = m_commandBuffers[m_currCmdBuffer];
+    VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
    // vkCmdDrawIndexed(cmd, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 }
 

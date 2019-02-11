@@ -105,16 +105,21 @@ int main(int argc, char ** argv)
    //     { eVertexAttrib_Color,      eVertexFormat_byte4 }
     };
     float vertexes[] = {
-         0.0f, -0.5f, 0.0, 0.0,
-         0.5f,  0.5f, 0.0, 0.0,
-        -0.5f,  0.5f, 0.0, 0.0,
+         0.0f,  0.0f, 0.0, 1.0,
+         0.0f, -0.5f, 0.0, 1.0,
+         0.5f,  0.5f, 0.0, 1.0,
+        -0.5f,  0.5f, 0.0, 1.0,
     };
     uint16_t indexes[] = {
         0, 1, 2, 1, 2, 3
     };
+
+
+    RenderStates states;
+
     uint64_t vdecl = renderer->create_vdecl(attributes, _countof(attributes));
     uint64_t shader = renderer->create_shader(vert, vsize, frag, fsize);
-    uint64_t pipeline = renderer->create_pipeline(vdecl, shader, nullptr);
+    uint64_t pipeline = renderer->create_pipeline(vdecl, shader, &states);
 
     uint64_t vb = renderer->create_vb(vertexes, _countof(vertexes) * sizeof(float), false);
     uint64_t ib = renderer->create_ib(indexes,  _countof(indexes)  * sizeof(uint16_t), false);
@@ -123,13 +128,13 @@ int main(int argc, char ** argv)
     {
         renderer->begin();
 
-
         renderer->bind_pipeline(pipeline);
 
+     //   uint32_t mvp = renderer->uniform(shader, "mvp");
+     //   renderer->update_uniform(mvp, nullptr);
+
         renderer->bind_vb(vb);
-
-
-        renderer->draw_array(0, 2);
+        renderer->draw_array(1, _countof(vertexes)/4);
 
         renderer->end();
         renderer->present();
