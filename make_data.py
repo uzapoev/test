@@ -1,5 +1,6 @@
 import os
 import stat
+from shutil import copyfile
 from shutil import rmtree
 from subprocess import check_call
 
@@ -40,12 +41,16 @@ if __name__ == "__main__":
 
     files = filelist('./art')
     for filepath in files:
-
         filename, file_extension = os.path.splitext(filepath)
-        dst = filename + file_extension + ".spv"  #'%s_spv.%s' % (filename) % (file_extension)
+        dst = filename + file_extension + ".spv"
         dst = dst.replace('./art', './data')
         directory = os.path.dirname(dst)
         makedirs_silent(directory)
-        check_call(["glslangValidator", "-H -V", filepath, "-o", dst])
+        if file_extension == ".vert" or file_extension == ".frag":
+            check_call(["glslangValidator", "-H -V", filepath, "-o", dst])
+        else:
+            dst = dst.replace('.spv', '')
+            copyfile(filepath, dst)
+
         print(filename + "|" + file_extension);
     os.chdir(build_dir)

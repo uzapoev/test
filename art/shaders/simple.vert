@@ -3,19 +3,9 @@ layout(location = 0) in vec4 position;
 //layout(location = 1) in vec4 color;
 //layout(location = 0) out vec4 ocolor;
 
-uniform UniformBufferObject
-{
-    mat4 mvp;
-    vec4 time;
-}ubo;
-/*
-uniform SkinnedUniformObject
-{
-    vec4 positions[128];
-	vec4 rotations[128];
-}skin;*/
+//layout(binding = 0)  uniform UniformBufferObject
 
 void main()
 {
-    gl_Position = ubo.mvp*position;// + skin.positions[0];
+    gl_Position = vec4(position.x, position.y, 0.0, 1.0);// + skin.positions[0];
 }

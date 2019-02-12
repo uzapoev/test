@@ -41,6 +41,31 @@ static_assert(sizeof(short) == 2, "wrong short size");
 static_assert(_countof(_vformat2vkformat) == eVertexFormat_Count, "incorrect array size");
 static_assert(_countof(_vformatstrides) == eVertexFormat_Count, "incorrect array size");
 
+union resourserunion
+{
+    uint64_t id;
+    struct{
+        uint8_t  type;
+        uint8_t  reserved;
+        uint16_t internalid;
+        uint32_t userdata;
+    };
+};
+
+static eResourceType restype(uint64_t id)
+{
+    resourserunion u = { id };
+    return static_cast<eResourceType>(u.type);
+}
+
+static uint64_t makeresourceid(eResourceType type, uint16_t internalid, uint32_t userdata)
+{
+    resourserunion u = {};
+    u.type = type;
+    u.internalid = internalid;
+    u.userdata = userdata;
+    return u.id;
+}
 
 
 
@@ -116,83 +141,11 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, Vk
     return 0;
 }
 
-static void createBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
-{
-    VkBufferCreateInfo bufferInfo = {};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-        printf("failed to create buffer!");
-        return;
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-        printf("failed to allocate buffer memory!");
-        return;
-    }
-
-    vkBindBufferMemory(device, buffer, bufferMemory, 0);
-}
-
-static void copyBuffer(VkDevice device, VkCommandPool cmdpool, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
-{
-    //VkCommandBuffer commandBuffer = beginSingleTimeCommands();
-    VkCommandBufferAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = cmdpool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo = {};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
-    /////////////////////////////
-
-    VkBufferCopy copyRegion = {};
-    copyRegion.size = size;
-    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-
-    ///////////
-    //endSingleTimeCommands(commandBuffer);
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo = {};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    VkQueue graphicsQueue;
-    vkGetDeviceQueue(device, 0/*graphicsQueueFamily*/, 0, &graphicsQueue);
-
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(graphicsQueue);
-
-    vkFreeCommandBuffers(device, cmdpool, 1, &commandBuffer);
-}
-
-
 namespace vkPipelineBuildHelper
 {
     static VkPipelineViewportStateCreateInfo createVierwportStateInfo(int w, int h)
     {
-        static VkViewport viewport = { 0, 0, w, h, 0, 1 };
+        static VkViewport viewport = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };
         static VkRect2D scissor = { { 0, 0 }, { w, h } };
 
         viewport.width = static_cast<float>(w);
@@ -481,69 +434,60 @@ uint64_t Vkrenderer::create_vdecl(VertexAttribute * atribs, size_t count)
 
     m_vdecls.push_back(decl);
 
-    return makeresource(eResurceType_vdecl, m_vdecls.size(), flags);
+    return makeresourceid(eResourceType_vdecl, m_vdecls.size(), flags);
 }
 
 
 uint64_t Vkrenderer::create_vb(void * data, size_t size, bool dynamic)
 {
-   /* VkBuffer vertexBuffer = NULL;
-    VkDeviceMemory vertexBufferMemory = NULL;
+    auto resource = VkResource{ eResourceType_vb };
+    auto & buff = resource.buffer;
 
-    VkBufferCreateInfo bufferInfo = {};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    bool useStaging = false;
+    if (useStaging)
+    {
+        const auto usageflag = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        const auto memflag = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        vk_create_buffer(m_device, m_physicaldevice, size, usageflag, memflag, buff.buffer, buff.memory);
 
-    if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &vertexBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create vertex buffer!");
+        if (data)
+        {
+            void* staging_data;
+            vkMapMemory(m_device, buff.memory, 0, size, 0, &staging_data);
+            memcpy(staging_data, data, size);
+            vkUnmapMemory(m_device, buff.memory);
+        }
+    }
+    else
+    {
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+
+        const auto stagingUseFlag = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        const auto stagingMemFlag = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+        vk_create_buffer(m_device, m_physicaldevice, size, stagingMemFlag, stagingUseFlag, stagingBuffer, stagingBufferMemory);
+
+        if (data)
+        {
+            void* staging_data;
+            vkMapMemory(m_device, stagingBufferMemory, 0, size, 0, &staging_data);
+            memcpy(staging_data, data, size);
+            vkUnmapMemory(m_device, stagingBufferMemory);
+        }
+
+        const auto bufferUseFlag = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        const auto bufferMemFlag = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+        vk_create_buffer(m_device, m_physicaldevice, size, bufferMemFlag, bufferUseFlag, buff.buffer, buff.memory);
+
+        vk_copy_buffer(m_device, m_commandPool, stagingBuffer, resource.buffer.buffer, size);
+        vk_destroy_buffer(m_device, stagingBuffer, stagingBufferMemory);
     }
 
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(m_device, vertexBuffer, &memRequirements);
+    m_resources.push_back(resource);
 
-    VkMemoryAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(m_physicaldevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &vertexBufferMemory) != VK_SUCCESS) {
-        throw std::runtime_error("failed to allocate vertex buffer memory!");
-    }
-
-    vkBindBufferMemory(m_device, vertexBuffer, vertexBufferMemory, 0);
-
-    void *tmpdata = NULL;
-    vkMapMemory(m_device, vertexBufferMemory, 0, size, 0, &tmpdata);
-    memcpy(tmpdata, data, size);
-    vkUnmapMemory(m_device, vertexBufferMemory);
-
-    m_buffers.push_back(vertexBuffer);
-    */
-    
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    createBuffer(m_device, m_physicaldevice, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-    void* staging_data;
-    vkMapMemory(m_device, stagingBufferMemory, 0, size, 0, &staging_data);
-    memcpy(staging_data, data, size);
-    vkUnmapMemory(m_device, stagingBufferMemory);
-
-
-    VkBuffer vertexBuffer;
-    VkDeviceMemory vertexBufferMemory;
-    createBuffer(m_device, m_physicaldevice, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
-
-    copyBuffer(m_device, m_commandPool, stagingBuffer, vertexBuffer, size);
-
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
-
-    m_buffers.push_back(vertexBuffer);
-
-    return makeresource(eResurceType_vb, m_buffers.size(), 0);
+    return makeresourceid(eResourceType_vb, m_resources.size(), 0);
 }
 
 
@@ -604,13 +548,12 @@ uint64_t Vkrenderer::create_shader(void * vdata, size_t vsize, void * fdata, siz
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-
-    VkPipelineLayout pipelineLayout;
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 0;
     //   pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
 
+    VkPipelineLayout pipelineLayout;
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create pipeline layout!");
     }
@@ -618,12 +561,14 @@ uint64_t Vkrenderer::create_shader(void * vdata, size_t vsize, void * fdata, siz
     Shader shader = { pipelineLayout, shaderStages[0], shaderStages[1] };
     m_shaders.emplace_back(shader);
 
-    return makeresource(eResurceType_shader, m_shaders.size(), 0);
+    return makeresourceid(eResourceType_shader, m_shaders.size(), 0);
 }
+
+
 
 uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates)
 {
-    if ( (restype(vdecl) != eResurceType_vdecl) || (restype(shader) != eResurceType_shader)){
+    if ( (restype(vdecl) != eResourceType_vdecl) || (restype(shader) != eResourceType_shader)){
         assert(false);
     }
 
@@ -643,9 +588,6 @@ uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
     {
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-     //   inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-     //   inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-
         inputAssembly.primitiveRestartEnable = VK_FALSE;
     }
 
@@ -696,7 +638,7 @@ uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
     }
 
     m_pipelines.push_back(pipeline);
-    return makeresource(eResurceType_pipeline, m_pipelines.size(), 0);
+    return makeresourceid(eResourceType_pipeline, m_pipelines.size(), 0);
 }
 
 
@@ -720,7 +662,7 @@ void Vkrenderer::update_uniform(uint32_t id, const void *data)
 
 void Vkrenderer::bind_pipeline(uint64_t pipeline)
 {
-    if (restype(pipeline) != eResurceType_pipeline){
+    if (restype(pipeline) != eResourceType_pipeline){
         printf("");
         return;
     }
@@ -735,13 +677,15 @@ void Vkrenderer::bind_pipeline(uint64_t pipeline)
 
 void Vkrenderer::bind_vb(uint64_t vb)
 {
-    if (restype(vb) != eResurceType_vb){
+    if (restype(vb) != eResourceType_vb){
         printf("");
         return;
     }
 
     resourserunion vbunion = { vb };
-    VkBuffer vertexBuffers[] = { m_buffers[vbunion.internalid-1] };
+    auto & resource = m_resources[vbunion.internalid - 1];
+
+    VkBuffer vertexBuffers[] = { resource.buffer.buffer };
     VkDeviceSize offsets[] = { 0 };
 
     VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
@@ -750,9 +694,19 @@ void Vkrenderer::bind_vb(uint64_t vb)
 
 void Vkrenderer::bind_ib(uint64_t ib)
 {
+    if (restype(ib) != eResourceType_ib){
+        printf("");
+        return;
+    }
+
     resourserunion ibunion = { ib };
-    VkBuffer vertexBuffers[] = { m_buffers[ibunion.internalid - 1] };
-    VkDeviceSize offsets[] = { 0 };
+    auto & resource = m_resources[ibunion.internalid - 1];
+
+    VkBuffer vertexBuffers =  resource.buffer.buffer ;
+    VkDeviceSize offsets = { 0 };
+
+    VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
+    vkCmdBindIndexBuffer(cmd, vertexBuffers, offsets, VK_INDEX_TYPE_UINT16);
 }
 
 void Vkrenderer::bind_texture(uint64_t texture)
@@ -760,16 +714,16 @@ void Vkrenderer::bind_texture(uint64_t texture)
 
 }
 
-void Vkrenderer::draw_array(int start_vert, int vert_count)
+void Vkrenderer::draw_array(uint32_t start_vert, uint32_t vert_count)
 {
     VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
     vkCmdDraw(cmd, vert_count, 1, start_vert, 0);
 }
 
-void Vkrenderer::draw_indexed(int start, int end)
+void Vkrenderer::draw_indexed(uint32_t idxcount)
 {
     VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
-   // vkCmdDrawIndexed(cmd, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, idxcount, 1, 0, 0, 0);
 }
 
 
@@ -881,18 +835,18 @@ VkSurfaceKHR Vkrenderer::vk_create_surface(VkInstance instance, long handle)
         createInfo.hwnd = (HWND)handle;
     VkResult result = vkCreateWin32SurfaceKHR(instance, &createInfo, NULL, &surface);
 #elif defined(VK_USE_PLATFORM_ANDROID_KHR)
-    VkAndroidSurfaceCreateInfoKHR createInfo;
+    VkAndroidSurfaceCreateInfoKHR createInfo = {};
         createInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
         createInfo.pNext = NULL;
         createInfo.flags = 0;
         createInfo.window = (struct ANativeWindow *)(handle);
-    VkResult result = vkCreateAndroidSurfaceKHR(demo->inst, &createInfo, NULL, &surface);
+    VkResult result = vkCreateAndroidSurfaceKHR(instance, &createInfo, NULL, &surface);
 #else
-    assert(false);
     static_assert(false, "not implemented");
 #endif
     return surface;
 }
+
 
 VkDevice Vkrenderer::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface)
 {
@@ -1116,4 +1070,83 @@ VkRenderPass Vkrenderer::vk_create_renderpass(VkDevice device, VkFormat colorfor
         return 0;
     }
     return renderPass;
+}
+
+
+void Vkrenderer::vk_create_buffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+{
+    VkBufferCreateInfo bufferInfo = {};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+        printf("failed to create buffer!");
+        return;
+    }
+
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, properties);
+
+    if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+        printf("failed to allocate buffer memory!");
+        return;
+    }
+
+    vkBindBufferMemory(device, buffer, bufferMemory, 0);
+}
+
+
+void Vkrenderer::vk_destroy_buffer(VkDevice device, VkBuffer buffer, VkDeviceMemory buffermemory)
+{
+    vkDestroyBuffer(device, buffer, nullptr);
+    vkFreeMemory(device, buffermemory, nullptr);
+}
+
+
+void Vkrenderer::vk_copy_buffer(VkDevice device, VkCommandPool cmdpool, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+{
+    //VkCommandBuffer commandBuffer = vk_begin_singletime_cmd(m_device);
+    VkCommandBufferAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = cmdpool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo = {};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    /////////////////////////////
+
+    VkBufferCopy copyRegion = {};
+    copyRegion.size = size;
+    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    ///////////
+    //vk_end_singletime_cmd(m_device, commandBuffer);
+    vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo = {};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    VkQueue graphicsQueue;
+    vkGetDeviceQueue(device, 0/*graphicsQueueFamily*/, 0, &graphicsQueue);
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue);
+
+    vkFreeCommandBuffers(device, cmdpool, 1, &commandBuffer);
 }

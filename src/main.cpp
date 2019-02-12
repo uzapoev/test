@@ -4,9 +4,14 @@
 #include <stdio.h>
 #include <sys/stat.h> // stat
 
+#include <d3dcompiler.h>
 #include <memory>
 
 #include "vkrenderer.h"
+#include "renderer_dx11.h"
+
+
+#pragma comment(lib, "D3dcompiler.lib")
 
 long create_window(const char * caption)
 {
@@ -86,12 +91,39 @@ size_t filedata(const char * path, char **buff)
     return st.st_size;
 }
 
+size_t dxcompiledshader(const char * data, size_t size, const char* entry, const char * target, char **blob)
+{
+    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined( DEBUG ) || defined( _DEBUG )
+    flags |= D3DCOMPILE_DEBUG;
+#endif
+    const D3D_SHADER_MACRO defines[] = { /*"EXAMPLE_DEFINE", "1",*/ NULL, NULL };
+    ID3DBlob* shaderBlob = nullptr;
+    ID3DBlob* errorBlob = nullptr;
+    D3DCompile(data, size, NULL, defines, D3D_COMPILE_STANDARD_FILE_INCLUDE, entry, target, flags, 0, &shaderBlob, &errorBlob);
+
+    if (errorBlob)
+    {
+        const char *msg = (const char*)errorBlob->GetBufferPointer();
+        printf("\n%s", msg);
+    }
+
+    *blob = (char*)shaderBlob->GetBufferPointer();
+    return shaderBlob->GetBufferSize();
+
+}
+
+
 
 int main(int argc, char ** argv)
 {
+    SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE), { 200, 600 });
+
     long hwnd = create_window("vk sample");
 
+    bool dx11 = false;
     auto renderer = std::make_unique<Vkrenderer>();
+  //  auto renderer = std::make_unique<RendererDx11>();
     if (!renderer->initialize(hwnd))
         return 0;
 
@@ -100,16 +132,25 @@ int main(int argc, char ** argv)
     size_t fsize = filedata("../data/shaders/simple.frag.spv", &frag);
     size_t vsize = filedata("../data/shaders/simple.vert.spv", &vert);
 
+    if (dx11)
+    {
+        char * dxfx = NULL;
+        size_t dxsize = filedata("../data/shaders/simple.fx", &dxfx);
+        vsize = dxcompiledshader(dxfx, dxsize, "VS", "vs_4_0", &vert);
+        fsize = dxcompiledshader(dxfx, dxsize, "PS", "ps_4_0", &frag);
+    }
+    
+
     VertexAttribute attributes[] = {
         { eVertexAttrib_Position,   eVertexFormat_float4},
-   //     { eVertexAttrib_Color,      eVertexFormat_byte4 }
+     //   { eVertexAttrib_Color,      eVertexFormat_byte4 }
     };
     float vertexes[] = {
-         0.0f,  0.0f, 0.0, 1.0,
          0.0f, -0.5f, 0.0, 1.0,
          0.5f,  0.5f, 0.0, 1.0,
         -0.5f,  0.5f, 0.0, 1.0,
     };
+
     uint16_t indexes[] = {
         0, 1, 2, 1, 2, 3
     };
