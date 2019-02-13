@@ -7,7 +7,8 @@
 #include <d3dcompiler.h>
 #include <memory>
 
-#include "vkrenderer.h"
+#include "renderer_gl.h"
+#include "renderer_vk.h"
 #include "renderer_dx11.h"
 
 
@@ -70,7 +71,6 @@ bool process_msg()
 }
 
 
-
 size_t filedata(const char * path, char **buff)
 {
 #ifdef _WIN32
@@ -83,7 +83,8 @@ size_t filedata(const char * path, char **buff)
     if (st.st_size == 0)
         return st.st_size;
 
-    *buff = (char*)malloc(st.st_size);
+    *buff = (char*)malloc(st.st_size+1);
+    memset(*buff, 0, st.st_size + 1);
 
     FILE * file = fopen(path, "rb");
     fread(*buff, 1, st.st_size, file);
@@ -110,7 +111,6 @@ size_t dxcompiledshader(const char * data, size_t size, const char* entry, const
 
     *blob = (char*)shaderBlob->GetBufferPointer();
     return shaderBlob->GetBufferSize();
-
 }
 
 
@@ -121,31 +121,50 @@ int main(int argc, char ** argv)
 
     long hwnd = create_window("vk sample");
 
-    bool dx11 = false;
-    auto renderer = std::make_unique<Vkrenderer>();
-  //  auto renderer = std::make_unique<RendererDx11>();
+    eRenderApi apitype = eRenderApi_gl;
+
+    std::unique_ptr<iRenderer> renderer;
+    switch (apitype)
+    {
+        case eRenderApi_gl: renderer = std::make_unique<RendererGl>(); break;
+        case eRenderApi_vk: renderer = std::make_unique<Vkrenderer>(); break;
+        case eRenderApi_dx11: renderer = std::make_unique<RendererDx11>(); break;
+    }
+
     if (!renderer->initialize(hwnd))
         return 0;
 
     char * frag = NULL;
     char * vert = NULL;
-    size_t fsize = filedata("../data/shaders/simple.frag.spv", &frag);
-    size_t vsize = filedata("../data/shaders/simple.vert.spv", &vert);
+    size_t fsize = 0;
+    size_t vsize = 0;
 
-    if (dx11)
+    if (apitype == eRenderApi_vk)
+    {
+        fsize = filedata("../data/shaders/simple.frag.spv", &frag);
+        vsize = filedata("../data/shaders/simple.vert.spv", &vert);
+    }
+
+    if (apitype == eRenderApi_dx11)
     {
         char * dxfx = NULL;
         size_t dxsize = filedata("../data/shaders/simple.fx", &dxfx);
         vsize = dxcompiledshader(dxfx, dxsize, "VS", "vs_4_0", &vert);
         fsize = dxcompiledshader(dxfx, dxsize, "PS", "ps_4_0", &frag);
     }
-    
 
+    if (apitype == eRenderApi_gl)
+    {
+        size_t fsize = filedata("../data/shaders/simple.frag", &frag);
+        size_t vsize = filedata("../data/shaders/simple.vert", &vert);
+    }
+    
     VertexAttribute attributes[] = {
         { eVertexAttrib_Position,   eVertexFormat_float4},
      //   { eVertexAttrib_Color,      eVertexFormat_byte4 }
     };
     float vertexes[] = {
+         0.0f,  0.0f, 0.0, 1.0,
          0.0f, -0.5f, 0.0, 1.0,
          0.5f,  0.5f, 0.0, 1.0,
         -0.5f,  0.5f, 0.0, 1.0,

@@ -108,8 +108,8 @@ bool RendererDx11::initialize(long handle)
     vp.Height = (FLOAT)height;
     vp.MinDepth = 0.0f;
     vp.MaxDepth = 1.0f;
-    vp.TopLeftX = 0;
-    vp.TopLeftY = 0;
+    vp.TopLeftX = 0.0f;
+    vp.TopLeftY = 0.0f;
     m_context->RSSetViewports(1, &vp);
 
     return true;
@@ -166,16 +166,15 @@ uint64_t RendererDx11::create_vb(void * data, size_t size, bool dynamic)
     bd.ByteWidth = size;
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
     bd.CPUAccessFlags = 0;
-    D3D11_SUBRESOURCE_DATA InitData;
-    ZeroMemory(&InitData, sizeof(InitData));
-    InitData.pSysMem = data;
 
+    D3D11_SUBRESOURCE_DATA InitData = { data , 0, 0};
+    InitData.pSysMem = data;
 
     ID3D11Buffer * buffer;
     HRESULT result = S_OK;
     result = m_device->CreateBuffer(&bd, &InitData, &buffer);
 
-    d3dRsource res;
+    d3dResource res;
     res.buffer = buffer;
     m_resources.push_back(res);
 
@@ -212,7 +211,7 @@ uint64_t RendererDx11::create_shader(void * vdata, size_t vsize, void * pdata, s
         return 0;
     }
 
-    d3dRsource res;
+    d3dResource res;
     res.shader.pixel = pixelShader;
 
     res.shader.vblob = (char*)vdata;
@@ -233,18 +232,24 @@ uint64_t RendererDx11::create_pipeline(uint64_t vdeclid, uint64_t shaderid, Rend
     size_t size = shader.vblobsize; // pVSBlob->GetBufferSize()
     HRESULT result = m_device->CreateInputLayout(layout.attributes, layout.count, vdata, size, &inputlayout);
 
+    D3D11_RASTERIZER_DESC raster = {};
+    {
+        raster.FillMode = D3D11_FILL_SOLID;
+        raster.CullMode = D3D11_CULL_NONE;
+    }
 
-    D3D11_RASTERIZER_DESC state = {};
-    state.FillMode = D3D11_FILL_SOLID;
-    state.CullMode = D3D11_CULL_NONE;
+    D3D11_RENDER_TARGET_BLEND_DESC blend = {};
+    {
 
+    }
+
+    ID3D11BlendState * blendstate = NULL;
     ID3D11RasterizerState * rasterstate = NULL;
-    result = m_device->CreateRasterizerState(&state, &rasterstate);
+    result = m_device->CreateRasterizerState(&raster, &rasterstate);
+   // result = m_device->CreateBlendState(&blend, &blendstate);
 
 
-
-
-    d3dRsource res;
+    d3dResource res = {};
     res.pipeline.stride = layout.stride;
     res.pipeline.inputlayout = inputlayout;
     res.pipeline.shader = shader;

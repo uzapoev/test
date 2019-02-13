@@ -21,6 +21,7 @@ endif(WIN32)
 
 #set(CMAKE_C_COMPILER "emcc")
 
+include_directories(./external)
 aux_source_directory(./src SOURCES)
 add_executable(Main ${SOURCES} )
 

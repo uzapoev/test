@@ -1,9 +1,8 @@
-#ifndef __VulkanRenderer_h__
-#define __VulkanRenderer_h__
+#ifndef __RendererVulkan_h__
+#define __RendererVulkan_h__
 
 #define VK_USE_PLATFORM_WIN32_KHR
 #define VK_PROTOTYPES
-
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_sdk_platform.h>
@@ -12,7 +11,7 @@
 
 #include "renderer.h"
 
-class Vkrenderer
+class Vkrenderer : public iRenderer
 {
 public:
     Vkrenderer(){}
@@ -34,10 +33,10 @@ public:
     uint64_t                    create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates /*uint64_t renderpass*/);
     uint64_t                    create_renderpass(/*colorformats * formats, siz_t count, VkFormat depthFormat*/);
 
+    void                        destroy_resource(uint64_t id);
+
     uint32_t                    uniform(uint64_t shader, const char * name);
     void                        update_uniform(uint32_t id, const void *data);
-
-    void                        destroy_resource(uint64_t id);
 
     void                        bind_pipeline(uint64_t pip);
     void                        bind_vb(uint64_t vb);

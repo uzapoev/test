@@ -1,4 +1,4 @@
-#include "vkrenderer.h"
+#include "renderer_vk.h"
 
 #include "spirvanalyzer.h"
 #pragma comment(lib, "Lib32/vulkan-1.lib")
@@ -645,6 +645,11 @@ uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
 uint64_t Vkrenderer::create_renderpass(/**/)
 {
     return 0;
+}
+
+void Vkrenderer::destroy_resource(uint64_t id)
+{
+
 }
 
 

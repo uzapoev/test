@@ -1,11 +1,22 @@
 #ifndef __Renderer_h__
 #define __Renderer_h__
 
+#include <assert.h>
 #include <stdint.h>
 
 #ifndef _countof
 #define _countof(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
+
+enum eRenderApi
+{
+    eRenderApi_gl,
+    eRenderApi_vk,
+    eRenderApi_dx11,
+    //eRenderApi_dx12
+    //eRenderApi_metal,
+    //eRenderApi_gles
+};
 
 
 enum eResourceType : uint8_t 
@@ -173,4 +184,38 @@ struct VertexAttribute
     eVertexFormat   format;
 };
 
+
+class iRenderer
+{
+public:
+    virtual             ~iRenderer() {};
+    virtual bool        initialize(long handle) = 0;
+    virtual void        release() = 0;
+
+    virtual void        begin() = 0;
+    virtual void        end() = 0;
+    virtual void        present() = 0;
+
+    virtual uint64_t    create_vdecl(VertexAttribute * atribs, size_t count) = 0;
+    virtual uint64_t    create_vb(void * data, size_t size, bool dynamic) = 0;
+    virtual uint64_t    create_ib(void * data, size_t size, bool dynamic) = 0;
+
+    virtual uint64_t    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size) = 0;
+    virtual uint64_t    create_shader(void * vdata, size_t vsize, void * pdata, size_t psize) = 0;
+    virtual uint64_t    create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates /*uint64_t renderpass*/) = 0;
+    virtual uint64_t    create_renderpass(/*colorformats * formats, siz_t count, VkFormat depthFormat*/) = 0;
+
+    virtual uint32_t    uniform(uint64_t shader, const char * name) = 0;
+    virtual void        update_uniform(uint32_t id, const void *data) = 0;
+
+    virtual void        destroy_resource(uint64_t id) = 0;
+
+    virtual void        bind_pipeline(uint64_t pip) = 0;
+    virtual void        bind_vb(uint64_t vb) = 0;
+    virtual void        bind_ib(uint64_t ib) = 0;
+    virtual void        bind_texture(uint64_t texture) = 0;
+
+    virtual void        draw_array(uint32_t start_vert, uint32_t vert_count) = 0;
+    virtual void        draw_indexed(uint32_t idxcount) = 0;
+};
 #endif
