@@ -48,9 +48,8 @@ if __name__ == "__main__":
         makedirs_silent(directory)
         if file_extension == ".vert" or file_extension == ".frag":
             check_call(["glslangValidator", "-H -V", filepath, "-o", dst])
-        else:
-            dst = dst.replace('.spv', '')
-            copyfile(filepath, dst)
+        dst = dst.replace('.spv', '')
+        copyfile(filepath, dst)
 
         print(filename + "|" + file_extension);
     os.chdir(build_dir)

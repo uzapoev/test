@@ -121,7 +121,7 @@ int main(int argc, char ** argv)
 
     long hwnd = create_window("vk sample");
 
-    eRenderApi apitype = eRenderApi_gl;
+    eRenderApi apitype = eRenderApi_vk;
 
     std::unique_ptr<iRenderer> renderer;
     switch (apitype)

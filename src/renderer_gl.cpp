@@ -288,10 +288,10 @@ void RendererGl::bind_pipeline(uint64_t pipid)
         return;
 
     auto & pipeline = m_pipelines[pipid - 1];
-
+    auto & shader = m_resources[pipeline.shader - 1];
     m_curr_vdecl = pipeline.vdecl;
 
-    glUseProgram(pipeline.shader);
+    glUseProgram(shader.id);
     CHECK_GL(__FUNCTION__, __FILE__, __LINE__);
 }
 
