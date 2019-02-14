@@ -110,23 +110,6 @@ static VkImageView createImageView(VkDevice device, VkImage image, VkFormat form
     return imageView;
 }
 
-static VkShaderModule createShaderModule(VkDevice device, const char * code, size_t size)
-{
-    VkShaderModuleCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = size;
-    createInfo.pCode = reinterpret_cast<const uint32_t*>(code);
-
-    VkShaderModule shaderModule = 0;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        printf("failed to create shader module!");
-        return 0;
-    }
-
-    return shaderModule;
-}
-
-
 uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties)
 {
     VkPhysicalDeviceMemoryProperties memProperties;
@@ -227,7 +210,7 @@ namespace vkPipelineBuildHelper
 
 
 
-bool Vkrenderer::initialize(long handle)
+bool RendererVk::initialize(long handle)
 {
     bool debug = true;
     m_instance       = vk_create_instance(debug);
@@ -320,13 +303,13 @@ bool Vkrenderer::initialize(long handle)
 }
 
 
-void Vkrenderer::release()
+void RendererVk::release()
 {
 
 }
 
 
-void Vkrenderer::begin()
+void RendererVk::begin()
 {
     VkResult result = vkAcquireNextImageKHR(m_device, m_swapchain.swapchain, UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &m_currCmdBuffer);
 
@@ -355,7 +338,7 @@ void Vkrenderer::begin()
 }
 
 
-void Vkrenderer::end()
+void RendererVk::end()
 {
     VkCommandBuffer cmdBuf = m_commandbuffers[m_currCmdBuffer];
 
@@ -396,13 +379,13 @@ void Vkrenderer::end()
 }
 
 
-void Vkrenderer::present()
+void RendererVk::present()
 {
     vkDeviceWaitIdle(m_device);
 }
 
 
-uint64_t Vkrenderer::create_vdecl(VertexAttribute * atribs, size_t count)
+uint64_t RendererVk::create_vdecl(VertexAttribute * atribs, size_t count)
 {
     assert(atribs && count && (count < eVertexAttrib_Count));
 
@@ -438,7 +421,7 @@ uint64_t Vkrenderer::create_vdecl(VertexAttribute * atribs, size_t count)
 }
 
 
-uint64_t Vkrenderer::create_vb(void * data, size_t size, bool dynamic)
+uint64_t RendererVk::create_vb(void * data, size_t size, bool dynamic)
 {
     auto resource = VkResource{ eResourceType_vb };
     auto & buff = resource.buffer;
@@ -491,7 +474,7 @@ uint64_t Vkrenderer::create_vb(void * data, size_t size, bool dynamic)
 }
 
 
-uint64_t Vkrenderer::create_ib(void * data, size_t size, bool dynamic)
+uint64_t RendererVk::create_ib(void * data, size_t size, bool dynamic)
 {
     // auto buff =  create_bufer( data, size, dynamic);
     // m_buffers.push_back(buff);
@@ -500,16 +483,33 @@ uint64_t Vkrenderer::create_ib(void * data, size_t size, bool dynamic)
 }
 
 
-uint64_t Vkrenderer::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
+uint64_t RendererVk::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
 {
     return 0;
 }
 
 
-uint64_t Vkrenderer::create_shader(void * vdata, size_t vsize, void * fdata, size_t fsize)
+//
+// https://vulkan-tutorial.com/Uniform_buffers/Descriptor_layout_and_buffer
+//
+uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, size_t fsize)
 {
-    VkShaderModule vertexShader = createShaderModule(m_device, (char*)vdata, vsize);
-    VkShaderModule fragmentShader = createShaderModule(m_device, (char*)fdata, fsize);
+    auto create_shadermodule = [=](const char * code, size_t size)->VkShaderModule{
+        auto createInfo = VkShaderModuleCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, NULL, 0, size, (uint32_t*)(code) };
+        auto shaderModule = (VkShaderModule)0;
+        if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            printf("failed to create shader module!");
+            return 0;
+        }
+        return shaderModule;
+    };
+
+    auto cerate_binding = [=](){
+
+    };
+
+    VkShaderModule vertexShader = create_shadermodule((char*)vdata, vsize);
+    VkShaderModule fragmentShader = create_shadermodule((char*)fdata, fsize);
 
     VkPipelineShaderStageCreateInfo shaderStages[2] = {};
     {
@@ -523,39 +523,55 @@ uint64_t Vkrenderer::create_shader(void * vdata, size_t vsize, void * fdata, siz
         shaderStages[1].module = fragmentShader;
         shaderStages[1].pName = "main";
     }
-
-    bool vertOk = SpirvAnalyzer::analyze(vdata, vsize);
-    bool fragOk = SpirvAnalyzer::analyze(fdata, fsize);
+    std::vector<SpirvAnalyzer::Uniform> vuniforms, funiforms;
+    bool vertOk = SpirvAnalyzer::analyze(vdata, vsize, &vuniforms);
+    bool fragOk = SpirvAnalyzer::analyze(fdata, fsize, &funiforms);
 
     std::vector<VkDescriptorSetLayoutBinding> bindings;
     //vertex
-    for (int i = 0; i < 0; ++i) {
+    for (size_t i = 0; i < vuniforms.size(); ++i) {
         VkDescriptorSetLayoutBinding binding = {};
-        binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-      //  VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+        {
+            binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+            binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            binding.descriptorCount = 1;
+        }
         bindings.push_back(binding);
     }
     //fragment
-    for (int i = 0; i < 0; ++i) {
+    for (size_t i = 0; i < funiforms.size(); ++i) {
         VkDescriptorSetLayoutBinding binding = {};
-        binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
+        {
+            binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            //  binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;// VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+        }
         bindings.push_back(binding);
     }
 
+
     VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
+    {
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+    }
+    VkDescriptorSetLayout descriptorSetLayout = NULL;
+    if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+        printf("failed to create descriptor set layout!");
+        return 0;
+    }
+
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    //   pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
-
-    VkPipelineLayout pipelineLayout;
+    {
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    }
+    VkPipelineLayout pipelineLayout = NULL;
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create pipeline layout!");
+        printf("failed to create pipeline layout!");
+        return 0;
     }
 
     Shader shader = { pipelineLayout, shaderStages[0], shaderStages[1] };
@@ -566,7 +582,7 @@ uint64_t Vkrenderer::create_shader(void * vdata, size_t vsize, void * fdata, siz
 
 
 
-uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates)
+uint64_t RendererVk::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates)
 {
     if ( (restype(vdecl) != eResourceType_vdecl) || (restype(shader) != eResourceType_shader)){
         assert(false);
@@ -588,6 +604,7 @@ uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
     {
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+      //  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
         inputAssembly.primitiveRestartEnable = VK_FALSE;
     }
 
@@ -642,30 +659,30 @@ uint64_t Vkrenderer::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
 }
 
 
-uint64_t Vkrenderer::create_renderpass(/**/)
+uint64_t RendererVk::create_renderpass(/**/)
 {
     return 0;
 }
 
-void Vkrenderer::destroy_resource(uint64_t id)
+void RendererVk::destroy_resource(uint64_t id)
 {
 
 }
 
 
-uint32_t Vkrenderer::uniform(uint64_t shader, const char * name)
+uint32_t RendererVk::uniform(uint64_t shader, const char * name)
 {
     return 0;
 }
 
 
-void Vkrenderer::update_uniform(uint32_t id, const void *data)
+void RendererVk::update_uniform(uint32_t id, const void *data)
 {
 
 }
 
 
-void Vkrenderer::bind_pipeline(uint64_t pipeline)
+void RendererVk::bind_pipeline(uint64_t pipeline)
 {
     if (restype(pipeline) != eResourceType_pipeline){
         printf("");
@@ -680,7 +697,7 @@ void Vkrenderer::bind_pipeline(uint64_t pipeline)
 }
 
 
-void Vkrenderer::bind_vb(uint64_t vb)
+void RendererVk::bind_vb(uint64_t vb)
 {
     if (restype(vb) != eResourceType_vb){
         printf("");
@@ -697,7 +714,7 @@ void Vkrenderer::bind_vb(uint64_t vb)
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
 }
 
-void Vkrenderer::bind_ib(uint64_t ib)
+void RendererVk::bind_ib(uint64_t ib)
 {
     if (restype(ib) != eResourceType_ib){
         printf("");
@@ -714,18 +731,18 @@ void Vkrenderer::bind_ib(uint64_t ib)
     vkCmdBindIndexBuffer(cmd, vertexBuffers, offsets, VK_INDEX_TYPE_UINT16);
 }
 
-void Vkrenderer::bind_texture(uint64_t texture)
+void RendererVk::bind_texture(uint64_t texture, uint16_t slot)
 {
 
 }
 
-void Vkrenderer::draw_array(uint32_t start_vert, uint32_t vert_count)
+void RendererVk::draw_array(uint32_t start_vert, uint32_t vert_count)
 {
     VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
     vkCmdDraw(cmd, vert_count, 1, start_vert, 0);
 }
 
-void Vkrenderer::draw_indexed(uint32_t idxcount)
+void RendererVk::draw_indexed(uint32_t idxcount)
 {
     VkCommandBuffer cmd = m_commandbuffers[m_currCmdBuffer];
     vkCmdDrawIndexed(cmd, idxcount, 1, 0, 0, 0);
@@ -734,7 +751,7 @@ void Vkrenderer::draw_indexed(uint32_t idxcount)
 
 
 
-VkInstance Vkrenderer::vk_create_instance(bool isdebug)
+VkInstance RendererVk::vk_create_instance(bool isdebug)
 {
     std::vector<char*> enabledInstanceLayers;
     std::vector<char*> enabledInstanceExtensions;
@@ -792,7 +809,7 @@ VkInstance Vkrenderer::vk_create_instance(bool isdebug)
     return instance;
 }
 
-VkPhysicalDevice Vkrenderer::vk_create_physdevice(VkInstance instance)
+VkPhysicalDevice RendererVk::vk_create_physdevice(VkInstance instance)
 {
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -828,7 +845,7 @@ VkPhysicalDevice Vkrenderer::vk_create_physdevice(VkInstance instance)
 }
 
 
-VkSurfaceKHR Vkrenderer::vk_create_surface(VkInstance instance, long handle)
+VkSurfaceKHR RendererVk::vk_create_surface(VkInstance instance, long handle)
 {
     VkSurfaceKHR surface = 0;
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
@@ -853,7 +870,7 @@ VkSurfaceKHR Vkrenderer::vk_create_surface(VkInstance instance, long handle)
 }
 
 
-VkDevice Vkrenderer::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface)
+VkDevice RendererVk::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface)
 {
     uint32_t queueFamilyPropertyCount = 0;
     VkBool32 supportsPresent[8] = { 0 };
@@ -861,6 +878,11 @@ VkDevice Vkrenderer::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR 
 
     vkGetPhysicalDeviceQueueFamilyProperties(physdevice, &queueFamilyPropertyCount, NULL);
     vkGetPhysicalDeviceQueueFamilyProperties(physdevice, &queueFamilyPropertyCount, queueFamilyProperties);
+
+    uint32_t extnsionCount = 0;
+    VkExtensionProperties pProperties[64] = {};
+    vkEnumerateDeviceExtensionProperties(physdevice, NULL, &extnsionCount, NULL);
+    vkEnumerateDeviceExtensionProperties(physdevice, NULL, &extnsionCount, pProperties);
 
     uint32_t graphicsQueueFamilyIndex = UINT32_MAX;
     uint32_t presentQueueFamilyIndex = UINT32_MAX;
@@ -939,7 +961,7 @@ VkDevice Vkrenderer::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR 
 
 
 
-Vkrenderer::SwapchainInfo Vkrenderer::vk_create_swapchain(VkPhysicalDevice physdevice, VkDevice device, VkSurfaceKHR surface)
+RendererVk::SwapchainInfo RendererVk::vk_create_swapchain(VkPhysicalDevice physdevice, VkDevice device, VkSurfaceKHR surface)
 {
     uint32_t formatCount = 0;
     VkSurfaceFormatKHR surfaceFormats[256] = {};
@@ -1002,7 +1024,7 @@ Vkrenderer::SwapchainInfo Vkrenderer::vk_create_swapchain(VkPhysicalDevice physd
 }
 
 
-VkRenderPass Vkrenderer::vk_create_renderpass(VkDevice device, VkFormat colorformat, VkFormat depthformat)
+VkRenderPass RendererVk::vk_create_renderpass(VkDevice device, VkFormat colorformat, VkFormat depthformat)
 {
     VkAttachmentDescription attachments[2] = {};
     {
@@ -1078,7 +1100,7 @@ VkRenderPass Vkrenderer::vk_create_renderpass(VkDevice device, VkFormat colorfor
 }
 
 
-void Vkrenderer::vk_create_buffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+void RendererVk::vk_create_buffer(VkDevice device, VkPhysicalDevice physicalDevice, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
 {
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1108,14 +1130,14 @@ void Vkrenderer::vk_create_buffer(VkDevice device, VkPhysicalDevice physicalDevi
 }
 
 
-void Vkrenderer::vk_destroy_buffer(VkDevice device, VkBuffer buffer, VkDeviceMemory buffermemory)
+void RendererVk::vk_destroy_buffer(VkDevice device, VkBuffer buffer, VkDeviceMemory buffermemory)
 {
     vkDestroyBuffer(device, buffer, nullptr);
     vkFreeMemory(device, buffermemory, nullptr);
 }
 
 
-void Vkrenderer::vk_copy_buffer(VkDevice device, VkCommandPool cmdpool, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+void RendererVk::vk_copy_buffer(VkDevice device, VkCommandPool cmdpool, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
 {
     //VkCommandBuffer commandBuffer = vk_begin_singletime_cmd(m_device);
     VkCommandBufferAllocateInfo allocInfo = {};

@@ -2,6 +2,7 @@
 #include <tchar.h>
 
 #include <stdio.h>
+#include <time.h> 
 #include <sys/stat.h> // stat
 
 #include <d3dcompiler.h>
@@ -121,13 +122,14 @@ int main(int argc, char ** argv)
 
     long hwnd = create_window("vk sample");
 
-    eRenderApi apitype = eRenderApi_vk;
+    srand(time(0));
+    auto apitype = eRenderApi_vk;
 
     std::unique_ptr<iRenderer> renderer;
     switch (apitype)
     {
         case eRenderApi_gl: renderer = std::make_unique<RendererGl>(); break;
-        case eRenderApi_vk: renderer = std::make_unique<Vkrenderer>(); break;
+        case eRenderApi_vk: renderer = std::make_unique<RendererVk>(); break;
         case eRenderApi_dx11: renderer = std::make_unique<RendererDx11>(); break;
     }
 
@@ -164,10 +166,19 @@ int main(int argc, char ** argv)
      //   { eVertexAttrib_Color,      eVertexFormat_byte4 }
     };
     float vertexes[] = {
-         0.0f,  0.0f, 0.0, 1.0,
-         0.0f, -0.5f, 0.0, 1.0,
+   /*      0.0f, -0.5f, 0.0, 1.0,
          0.5f,  0.5f, 0.0, 1.0,
-        -0.5f,  0.5f, 0.0, 1.0,
+        -0.5f,  0.5f, 0.0, 1.0,*/
+        0.0f, 0.0f, 0.0, 1.0,
+        0.0f, 1.0f, 0.0, 1.0,
+        1.0f, 1.0f, 0.0, 1.0,
+
+    };
+
+    float vertexes2[] = {
+        0.0f, 0.0f, 0.0, 1.0,
+        0.0f, -1.0f, 0.0, 1.0,
+        -1.0f, -1.0f, 0.0, 1.0,
     };
 
     uint16_t indexes[] = {
@@ -182,6 +193,8 @@ int main(int argc, char ** argv)
     uint64_t pipeline = renderer->create_pipeline(vdecl, shader, &states);
 
     uint64_t vb = renderer->create_vb(vertexes, _countof(vertexes) * sizeof(float), false);
+    uint64_t vb1 = renderer->create_vb(vertexes2, _countof(vertexes2) * sizeof(float), false);
+
     uint64_t ib = renderer->create_ib(indexes,  _countof(indexes)  * sizeof(uint16_t), false);
 
     while (process_msg())
@@ -194,7 +207,10 @@ int main(int argc, char ** argv)
      //   renderer->update_uniform(mvp, nullptr);
 
         renderer->bind_vb(vb);
-        renderer->draw_array(1, _countof(vertexes)/4);
+        renderer->draw_array(0, _countof(vertexes) / 4);
+
+        renderer->bind_vb(vb1);
+        renderer->draw_array(0, _countof(vertexes2) / 4);
 
         renderer->end();
         renderer->present();

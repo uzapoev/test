@@ -11,15 +11,6 @@
 
 class SpirvAnalyzer
 { 
-    class Uniform
-    {
-        char name[256];
-        int location;
-    };
-    class Attribute
-    {
-    };
-
     enum Decoration {
         DecorationBuiltIn = 11,
         DecorationLocation = 30,
@@ -150,7 +141,8 @@ class SpirvAnalyzer
         std::vector<Decorate>               m_childs;
         std::map<SpvDecoration, uint32_t>   m_decors;
     };
-public:
+
+
     static bool istype(SpvOp op)
     {
         return op >= SpvOpTypeVoid && op <= SpvOpTypePipe;
@@ -164,16 +156,23 @@ public:
         }value;
     };
 
-    static bool analyze(const void * data, size_t size)
+public:
+    class Uniform
+    {
+        char name[256];
+        int location;
+    };
+    class Attribute
+    {
+    };
+
+    static bool analyze(const void * data, size_t size, std::vector<Uniform> * uniforms)
     {
         stream_view stream((const char *)data, size);
 
         const SpirvHeader * h = stream.shift<SpirvHeader>();
         if (h->magic != SPIRV_MAGIC || h->version != SPIRV_VERSION)
             return false;
-
-        uint16_t bufer[256] = {};
-        char    cbufer[256] = {};
 
         std::map<uint32_t, Decorate>    decorates;
         std::vector<Instruction>        instructions;
@@ -281,13 +280,19 @@ public:
                     uint32_t id         = stream.read<uint32_t>();
                     StorageClass storage= stream.read<StorageClass>();
 
-                    for (uint32_t i = 0; i < instruction.size - 3; ++i)
+                    if (storage == StorageClass::StorageClassUniform || storage == StorageClass::StorageClassUniformConstant)
                     {
-                        uint32_t data = stream.read<uint32_t>();
+                        if (uniforms)
+                            uniforms->push_back(Uniform());
+                    }
+
+                    // attributes
+                    if (storage == StorageClass::StorageClassInput)
+                    {
+
                     }
 
                     auto it = decorates.find(id);
-
                     if (it != decorates.end())
                         printf("\nvariable: %d(%s) %d %s", type, it->second.name.c_str(), id, storage2str(storage));
                     else

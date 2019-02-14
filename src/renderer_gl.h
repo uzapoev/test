@@ -38,7 +38,7 @@ public:
     void                        bind_pipeline(uint64_t pip);
     void                        bind_vb(uint64_t vb);
     void                        bind_ib(uint64_t ib);
-    void                        bind_texture(uint64_t texture);
+    void                        bind_texture(uint64_t texture, uint16_t slot);
 
     void                        draw_array(uint32_t start_vert, uint32_t vert_count);
     void                        draw_indexed(uint32_t idxcount);
@@ -78,7 +78,6 @@ private:
         uint64_t            vdecl;
     };
 
-    bool                        m_reset_vdecl = false;
     uint64_t                    m_curr_vdecl = 0;
 
     std::vector<VDeclaration>   m_declarations;

@@ -283,9 +283,11 @@ void RendererGl::destroy_resource(uint64_t id)
 
 void RendererGl::bind_pipeline(uint64_t pipid)
 {
-    m_reset_vdecl = true;
     if (pipid == 0)
+    {
+        m_curr_vdecl = 0;
         return;
+    }
 
     auto & pipeline = m_pipelines[pipid - 1];
     auto & shader = m_resources[pipeline.shader - 1];
@@ -300,7 +302,10 @@ void RendererGl::bind_vb(uint64_t vb)
     auto & buf = m_resources[vb-1];
     glBindBuffer(buf.target, buf.id);
 
-    //bind_pipeline(m_curr_pipeline);
+    if (m_curr_vdecl){
+        apply_vdecl(m_curr_vdecl);
+    //    m_curr_vdecl = 0;
+    }
     CHECK_GL(__FUNCTION__, __FILE__, __LINE__);
 }
 
@@ -309,18 +314,13 @@ void RendererGl::bind_ib(uint64_t ib)
 
 }
 
-void RendererGl::bind_texture(uint64_t texture)
+void RendererGl::bind_texture(uint64_t texture, uint16_t slot)
 {
 
 }
 
 void RendererGl::draw_array(uint32_t start_vert, uint32_t vert_count)
 {
-    if (m_curr_vdecl){
-        apply_vdecl(m_curr_vdecl);
-        m_curr_vdecl = 0;
-    }
-
     glDrawArrays(GL_TRIANGLES, start_vert, vert_count);
 }
 

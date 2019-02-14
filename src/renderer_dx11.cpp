@@ -308,7 +308,7 @@ void RendererDx11::bind_ib(uint64_t ib)
 
 }
 
-void RendererDx11::bind_texture(uint64_t texture)
+void RendererDx11::bind_texture(uint64_t texture, uint16_t slot)
 {
 
 }

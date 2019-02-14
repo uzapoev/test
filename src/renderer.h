@@ -8,14 +8,15 @@
 #define _countof(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
+
 enum eRenderApi
 {
     eRenderApi_gl,
+//    eRenderApi_gles,
     eRenderApi_vk,
     eRenderApi_dx11,
-    //eRenderApi_dx12
-    //eRenderApi_metal,
-    //eRenderApi_gles
+//    eRenderApi_dx12,
+//    eRenderApi_metal
 };
 
 
@@ -32,6 +33,7 @@ enum eResourceType : uint8_t
     eResourceType_renerpass,
     eResourceType_fbo, //todo: is it part of renerpass ???
 };
+
 
 enum eVertexFormat
 {
@@ -54,6 +56,7 @@ enum eVertexFormat
     eVertexFormat_Count
 };
 
+
 enum eVertexAttrib
 {
     eVertexAttrib_Invalid = -1,
@@ -73,6 +76,7 @@ enum eVertexAttrib
     eVertexAttrib_BoneIndices,      //! bone matrix indexes(float 4)(max 4 bones per vertex)
     eVertexAttrib_Count
 };
+
 
 enum eCullMode
 {
@@ -199,23 +203,26 @@ public:
     virtual uint64_t    create_vdecl(VertexAttribute * atribs, size_t count) = 0;
     virtual uint64_t    create_vb(void * data, size_t size, bool dynamic) = 0;
     virtual uint64_t    create_ib(void * data, size_t size, bool dynamic) = 0;
-
+//  virtual uint64_t    create_fbo(uint16_t width, uint16_t height, ePixelFormat format) = 0;
     virtual uint64_t    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size) = 0;
     virtual uint64_t    create_shader(void * vdata, size_t vsize, void * pdata, size_t psize) = 0;
     virtual uint64_t    create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates /*uint64_t renderpass*/) = 0;
-    virtual uint64_t    create_renderpass(/*colorformats * formats, siz_t count, VkFormat depthFormat*/) = 0;
+    virtual uint64_t    create_renderpass(/*uint64_t * colorFbo, size_t count, uint64_t depthFbo*/) = 0;
 
     virtual uint32_t    uniform(uint64_t shader, const char * name) = 0;
     virtual void        update_uniform(uint32_t id, const void *data) = 0;
+//  virtual void        update_uniform(uint32_t id, int type, const void *data, size_t size) = 0;
+//  virtual uint64_t    update_bufferdata(uint64_t id, void * data, size_t size, size_t offset) = 0;
 
     virtual void        destroy_resource(uint64_t id) = 0;
 
     virtual void        bind_pipeline(uint64_t pip) = 0;
     virtual void        bind_vb(uint64_t vb) = 0;
     virtual void        bind_ib(uint64_t ib) = 0;
-    virtual void        bind_texture(uint64_t texture) = 0;
+    virtual void        bind_texture(uint64_t texture, uint16_t slot) = 0;
 
     virtual void        draw_array(uint32_t start_vert, uint32_t vert_count) = 0;
     virtual void        draw_indexed(uint32_t idxcount) = 0;
 };
+
 #endif

@@ -38,7 +38,7 @@ public:
     void                        bind_pipeline(uint64_t pip);
     void                        bind_vb(uint64_t vb);
     void                        bind_ib(uint64_t ib);
-    void                        bind_texture(uint64_t texture);
+    void                        bind_texture(uint64_t texture, uint16_t slot);
 
     void                        draw_array(uint32_t start_vert, uint32_t vert_count);
     void                        draw_indexed(uint32_t idxcount);
