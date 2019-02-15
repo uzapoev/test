@@ -203,7 +203,7 @@ public:
     virtual uint64_t    create_vdecl(VertexAttribute * atribs, size_t count) = 0;
     virtual uint64_t    create_vb(void * data, size_t size, bool dynamic) = 0;
     virtual uint64_t    create_ib(void * data, size_t size, bool dynamic) = 0;
-//  virtual uint64_t    create_fbo(uint16_t width, uint16_t height, ePixelFormat format) = 0;
+//    virtual uint64_t    create_fbo(uint16_t width, uint16_t height, ePixelFormat format) = 0;
     virtual uint64_t    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size) = 0;
     virtual uint64_t    create_shader(void * vdata, size_t vsize, void * pdata, size_t psize) = 0;
     virtual uint64_t    create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates /*uint64_t renderpass*/) = 0;

@@ -591,7 +591,7 @@ uint64_t RendererVk::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStat
     resourserunion shaderunion = { shader };
     Shader * shaderinfo = &m_shaders[shaderunion.internalid - 1];
 
-    VkPipelineLayout pipelineLayout = shaderinfo->pipline_layout;
+    VkPipelineLayout pipelineLayout = shaderinfo->pipeline_layout;
     VkPipelineShaderStageCreateInfo shaderStages[2] = {
         shaderinfo->vertex,
         shaderinfo->fragment

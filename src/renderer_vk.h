@@ -79,7 +79,7 @@ protected:
 
     struct Shader
     {
-        VkPipelineLayout                    pipline_layout;
+        VkPipelineLayout                    pipeline_layout;
         VkPipelineShaderStageCreateInfo     vertex;
         VkPipelineShaderStageCreateInfo     fragment;
         VkPipelineShaderStageCreateInfo     geometry;
@@ -89,22 +89,7 @@ protected:
     {
         eResourceType type;
         union 
-        {/*
-            struct Shader
-            {
-                VkPipelineLayout                    pipline_layout;
-                VkPipelineShaderStageCreateInfo     vertex;
-                VkPipelineShaderStageCreateInfo     fragment;
-                VkPipelineShaderStageCreateInfo     geometry;
-            } shader;
-
-            struct VDeclaration
-            {
-                size_t                              count;
-                VkVertexInputAttributeDescription   descriptions[eVertexAttrib_Count];
-                VkVertexInputBindingDescription     bining;
-            } vdecl;*/
-
+        {
             struct Buffer
             {
                 VkBuffer        buffer;
@@ -116,6 +101,11 @@ protected:
                 VkImage         image;
                 VkImageView     view;
             }image;
+
+            struct Uniforms
+            {
+                Buffer buffer;
+            };
         };
     };
 
