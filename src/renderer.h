@@ -193,12 +193,17 @@ class iRenderer
 {
 public:
     virtual             ~iRenderer() {};
+
     virtual bool        initialize(long handle) = 0;
     virtual void        release() = 0;
 
     virtual void        begin() = 0;
     virtual void        end() = 0;
     virtual void        present() = 0;
+
+    //virtual void      clear(uint32_t flags, uint32_t color, float depth, uint8_t stencil);
+    //virtual uint32_t  create_swapchain(long handle);
+    //virtual void      bind_swapchain(uint32_t swapchain);
 
     virtual uint64_t    create_vdecl(VertexAttribute * atribs, size_t count) = 0;
     virtual uint64_t    create_vb(void * data, size_t size, bool dynamic) = 0;

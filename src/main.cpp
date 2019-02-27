@@ -8,6 +8,8 @@
 #include <d3dcompiler.h>
 #include <memory>
 
+
+#include "mathlib.h"
 #include "renderer_gl.h"
 #include "renderer_vk.h"
 #include "renderer_dx11.h"

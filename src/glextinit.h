@@ -1,5 +1,5 @@
-#ifndef __GLEXTTINY_H__
-#define __GLEXTTINY_H__
+#ifndef __GLEXTINIT_H__
+#define __GLEXTINIT_H__
 
 #ifdef __cplusplus
 extern "C"

@@ -40,9 +40,9 @@ if __name__ == "__main__":
     "\n" 
     x = int(input(text))
     if x > 0 and x < 3:
-        build_dir = resolve_path("./build0")
-        rmtree_silent(build_dir)
-        makedirs_silent(build_dir)
+        build_dir = resolve_path("./build")
+       # rmtree_silent(build_dir)
+       # makedirs_silent(build_dir)
         os.chdir(build_dir)
         check_call(["cmake", ".."])
     

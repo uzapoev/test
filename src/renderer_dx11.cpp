@@ -82,10 +82,9 @@ bool RendererDx11::initialize(long handle)
     D3D_DRIVER_TYPE driverType;
     D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
 
-    for (UINT driverTypeIndex = 0; driverTypeIndex < _countof(driverTypes); driverTypeIndex++)
+    for (int i = 0; i < _countof(driverTypes); i++)
     {
-        driverType = driverTypes[driverTypeIndex];
-        hr = D3D11CreateDeviceAndSwapChain(NULL, driverType, NULL, createDeviceFlags, featureLevels, _countof(featureLevels),
+        hr = D3D11CreateDeviceAndSwapChain(NULL, driverTypes[i], NULL, createDeviceFlags, featureLevels, _countof(featureLevels),
             D3D11_SDK_VERSION, &sd, &m_swapchain, &m_device, &featureLevel, &m_context);
 
         if (SUCCEEDED(hr))
@@ -103,14 +102,16 @@ bool RendererDx11::initialize(long handle)
     if (FAILED(hr))
         return hr;
 
-    D3D11_VIEWPORT vp;
-    vp.Width = (FLOAT)width;
-    vp.Height = (FLOAT)height;
-    vp.MinDepth = 0.0f;
-    vp.MaxDepth = 1.0f;
-    vp.TopLeftX = 0.0f;
-    vp.TopLeftY = 0.0f;
-    m_context->RSSetViewports(1, &vp);
+    D3D11_VIEWPORT viewport;
+    {
+        viewport.Width = (FLOAT)width;
+        viewport.Height = (FLOAT)height;
+        viewport.MinDepth = 0.0f;
+        viewport.MaxDepth = 1.0f;
+        viewport.TopLeftX = 0.0f;
+        viewport.TopLeftY = 0.0f;
+    }
+    m_context->RSSetViewports(1, &viewport);
 
     return true;
 }
@@ -161,18 +162,18 @@ uint64_t RendererDx11::create_vdecl(VertexAttribute * atribs, size_t count)
 
 uint64_t RendererDx11::create_vb(void * data, size_t size, bool dynamic)
 {
-    D3D11_BUFFER_DESC bd = {};
-    bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.ByteWidth = size;
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    bd.CPUAccessFlags = 0;
+    D3D11_BUFFER_DESC desc = {};
+    {
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.ByteWidth = size;
+        desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        desc.CPUAccessFlags = 0;
+    }
 
-    D3D11_SUBRESOURCE_DATA InitData = { data , 0, 0};
-    InitData.pSysMem = data;
+    D3D11_SUBRESOURCE_DATA subresdata = { data, 0, 0 };
 
-    ID3D11Buffer * buffer;
-    HRESULT result = S_OK;
-    result = m_device->CreateBuffer(&bd, &InitData, &buffer);
+    ID3D11Buffer * buffer = NULL;
+    HRESULT result = m_device->CreateBuffer(&desc, &subresdata, &buffer);
 
     d3dResource res;
     res.buffer = buffer;
@@ -183,7 +184,28 @@ uint64_t RendererDx11::create_vb(void * data, size_t size, bool dynamic)
 
 uint64_t RendererDx11::create_ib(void * data, size_t size, bool dynamic)
 {
-    return 0;
+    D3D11_BUFFER_DESC desc = {};
+    {
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.ByteWidth = size;
+        desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+        desc.CPUAccessFlags = 0;
+    }
+
+    D3D11_SUBRESOURCE_DATA subresdata = { data, 0, 0 };
+    ID3D11Buffer * buffer = NULL;
+    HRESULT result = m_device->CreateBuffer(&desc, &subresdata, &buffer);
+
+    if (result != S_OK){
+        printf("\nerror while creating ib");
+        return 0;
+    }
+
+    d3dResource res;
+    res.buffer = buffer;
+    m_resources.push_back(res);
+
+    return m_resources.size();
 }
 
 uint64_t RendererDx11::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
@@ -200,23 +222,24 @@ uint64_t RendererDx11::create_shader(void * vdata, size_t vsize, void * pdata, s
     result = m_device->CreateVertexShader(vdata, vsize, NULL, &vertexShader);
 
     if (result != S_OK){
-        printf("\n Vertx shader error");
+        printf("\nerror while vertex shader create");
         return 0;
     }
 
     result = m_device->CreatePixelShader(pdata, psize, NULL, &pixelShader);
 
     if (result != S_OK){
-        printf("\n Fragment shader error");
+        printf("\nerror while fragment shader create");
         return 0;
     }
 
     d3dResource res;
-    res.shader.pixel = pixelShader;
-
-    res.shader.vblob = (char*)vdata;
-    res.shader.vblobsize = vsize;
-    res.shader.vertex = vertexShader;
+    {
+        res.shader.pixel = pixelShader;
+        res.shader.vertex = vertexShader;
+        res.shader.vblob = (char*)vdata;
+        res.shader.vblobsize = vsize;
+    }
     m_resources.push_back(res);
 
     return m_resources.size();

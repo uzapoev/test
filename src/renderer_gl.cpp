@@ -60,14 +60,16 @@ bool RendererGl::initialize(long handle)
 #ifdef _WIN32
     m_hdc = GetDC((HWND)handle);
     PIXELFORMATDESCRIPTOR pfd = { 0 };
-    pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
-    pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cAlphaBits = 8;
-    pfd.cDepthBits = 24;
-    pfd.cStencilBits = 8;
+    {
+        pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+        pfd.nVersion = 1;
+        pfd.dwFlags = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;
+        pfd.iPixelType = PFD_TYPE_RGBA;
+        pfd.cColorBits = 32;
+        pfd.cAlphaBits = 8;
+        pfd.cDepthBits = 24;
+        pfd.cStencilBits = 8;
+    }
     int pformat = ChoosePixelFormat(m_hdc, &pfd);
     if (!SetPixelFormat(m_hdc, pformat, &pfd))
         return false;
