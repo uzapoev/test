@@ -102,7 +102,7 @@ void RendererGl::release()
 void RendererGl::begin()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glClearColor(0.1, 0.2, 0.3, 1.0);
+    glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
 }
 
 void RendererGl::end()
@@ -128,7 +128,7 @@ void RendererGl::present()
 uint64_t RendererGl::create_vdecl(VertexAttribute * atribs, size_t count)
 {
     VDeclaration vdecl = {};
-    for (int i = 0; i < count; ++i)
+    for (size_t i = 0; i < count; ++i)
     {
         size_t flag = 1 << atribs[i].type;
 

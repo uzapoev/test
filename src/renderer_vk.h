@@ -114,7 +114,7 @@ private:
     static VkInstance           vk_create_instance(bool isdebug);
     static VkPhysicalDevice     vk_create_physdevice(VkInstance instance);
     static VkSurfaceKHR         vk_create_surface(VkInstance instance, long hanle);
-    static VkDevice             vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface);
+    static VkDevice             vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface, uint32_t *grapicsfamily, uint32_t * presentfamily);
 
     static SwapchainInfo        vk_create_swapchain(VkPhysicalDevice physdevice, VkDevice device, VkSurfaceKHR surface);
     static VkRenderPass         vk_create_renderpass(VkDevice device, VkFormat format, VkFormat depthformat);

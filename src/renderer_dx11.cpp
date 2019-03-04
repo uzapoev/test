@@ -79,7 +79,6 @@ bool RendererDx11::initialize(long handle)
     }
 
     HRESULT hr = S_OK;
-    D3D_DRIVER_TYPE driverType;
     D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
 
     for (int i = 0; i < _countof(driverTypes); i++)
@@ -95,12 +94,12 @@ bool RendererDx11::initialize(long handle)
     ID3D11Texture2D* pBackBuffer = NULL;
     hr = m_swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
     if (FAILED(hr))
-        return hr;
+        return false;
 
     hr = m_device->CreateRenderTargetView(pBackBuffer, NULL, &m_rendertargetview);
     pBackBuffer->Release();
     if (FAILED(hr))
-        return hr;
+        return false;
 
     D3D11_VIEWPORT viewport;
     {

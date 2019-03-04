@@ -35,7 +35,7 @@ enum eResourceType : uint8_t
 };
 
 
-enum eVertexFormat
+enum eVertexFormat : uint8_t
 {
     eVertexFormat_Invalid = 0,    // MTLVertexFormatInvalid = 0,
     eVertexFormat_float1,         // float
@@ -57,7 +57,7 @@ enum eVertexFormat
 };
 
 
-enum eVertexAttrib
+enum eVertexAttrib : int8_t
 {
     eVertexAttrib_Invalid = -1,
     eVertexAttrib_Position = 0,   //! vertex position (3 float)
@@ -78,7 +78,7 @@ enum eVertexAttrib
 };
 
 
-enum eCullMode
+enum eCullMode : uint8_t
 {
     eCull_None,
     eCull_Backface,
@@ -86,7 +86,7 @@ enum eCullMode
 };
 
 
-enum eCompareMode
+enum eCompareMode : uint8_t
 {
     eCompareMode_Never,
     eCompareMode_Less,
@@ -99,7 +99,7 @@ enum eCompareMode
 };
 
 
-enum eStencilOp
+enum eStencilOp : uint8_t
 {
     eStencilOp_Zero,        // D3D10_STENCIL_OP_ZERO            D3DSTENCILOP_ZERO        GL_ZERO
     eStencilOp_Keep,        // D3D10_STENCIL_OP_KEEP            D3DSTENCILOP_KEEP        GL_KEEP
@@ -112,7 +112,7 @@ enum eStencilOp
 };
 
 
-enum eBlendMode
+enum eBlendMode : uint8_t
 {
     eBlendMode_Zero,
     eBlendMode_One,
@@ -127,7 +127,7 @@ enum eBlendMode
 };
 
 
-enum eBlendOp
+enum eBlendOp : uint8_t
 {
     kBlendOp_Add,
     kBlendOp_Min,

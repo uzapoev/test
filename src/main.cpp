@@ -6,6 +6,7 @@
 #include <sys/stat.h> // stat
 
 #include <d3dcompiler.h>
+
 #include <memory>
 
 
@@ -15,7 +16,7 @@
 #include "renderer_dx11.h"
 
 
-#pragma comment(lib, "D3dcompiler.lib")
+#pragma comment(lib, "d3dcompiler.lib")
 
 long create_window(const char * caption)
 {
@@ -46,7 +47,7 @@ long create_window(const char * caption)
     RECT win_rect = { 0, 0, width, height };
     AdjustWindowRect(&win_rect, wndStyle, false);
 
-    HWND hWnd = CreateWindowEx(WS_EX_APPWINDOW, _T("vkwnd"), _T(caption), wndStyle, 0, 0,
+    HWND hWnd = CreateWindowEx(WS_EX_APPWINDOW, wndClassName, _T(caption), wndStyle, 0, 0,
         win_rect.right - win_rect.left,
         win_rect.bottom - win_rect.top,
         0, 0, GetModuleHandle(NULL), 0);
@@ -124,7 +125,7 @@ int main(int argc, char ** argv)
 
     long hwnd = create_window("vk sample");
 
-    srand(time(0));
+    srand((unsigned int)time(0));
     auto apitype = eRenderApi_vk;
 
     std::unique_ptr<iRenderer> renderer;
@@ -187,7 +188,6 @@ int main(int argc, char ** argv)
         0, 1, 2, 1, 2, 3
     };
 
-
     RenderStates states;
 
     uint64_t vdecl = renderer->create_vdecl(attributes, _countof(attributes));
@@ -205,8 +205,9 @@ int main(int argc, char ** argv)
 
         renderer->bind_pipeline(pipeline);
 
+        auto mat = mat4::lookAtRH(vec3(0.0f, 0.0f, -10.0f), vec3::Zero, vec3::Up);
      //   uint32_t mvp = renderer->uniform(shader, "mvp");
-     //   renderer->update_uniform(mvp, nullptr);
+     //   renderer->update_uniform(mvp, eUniform_mat4, &mat);
 
         renderer->bind_vb(vb);
         renderer->draw_array(0, _countof(vertexes) / 4);

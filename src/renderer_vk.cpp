@@ -212,11 +212,14 @@ namespace vkPipelineBuildHelper
 
 bool RendererVk::initialize(long handle)
 {
-    bool debug = true;
+    bool debug = false;
+
+    uint32_t graphicfamily, presentfamily;
+
     m_instance       = vk_create_instance(debug);
     m_physicaldevice = vk_create_physdevice(m_instance);
     m_surface        = vk_create_surface(m_instance, handle);
-    m_device         = vk_create_device(m_physicaldevice, m_surface);
+    m_device         = vk_create_device(m_physicaldevice, m_surface, &grapicsfamily, &presentfamily);
     m_swapchain      = vk_create_swapchain(m_physicaldevice, m_device, m_surface);
     m_renderPass     = vk_create_renderpass(m_device, m_swapchain.format, VK_FORMAT_D24_UNORM_S8_UINT); 
 
@@ -232,8 +235,8 @@ bool RendererVk::initialize(long handle)
     // create_renderpasses
     // create_framebuffer( union with renderpass??)
     // create_cmdbuffers
-    vkGetDeviceQueue(m_device, 0/*graphicsQueueFamily*/, 0, &m_graphicsQueue);
-    vkGetDeviceQueue(m_device, 0/*presentQueueFamily*/, 0, &m_presentQueue);
+    vkGetDeviceQueue(m_device, graphicfamily, 0, &m_graphicsQueue);
+    vkGetDeviceQueue(m_device, presentfamily, 0, &m_presentQueue);
 
     VkSemaphoreCreateInfo semCreateInfo = {};
     semCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -251,7 +254,7 @@ bool RendererVk::initialize(long handle)
     {
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = 0;////!!!graphicsFamily;
+        poolInfo.queueFamilyIndex = grapicsfamily;
     }
 
     if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
@@ -870,7 +873,7 @@ VkSurfaceKHR RendererVk::vk_create_surface(VkInstance instance, long handle)
 }
 
 
-VkDevice RendererVk::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface)
+VkDevice RendererVk::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface, uint32_t * graphics, uint32_t * present)
 {
     uint32_t queueFamilyPropertyCount = 0;
     VkBool32 supportsPresent[8] = { 0 };
@@ -883,7 +886,7 @@ VkDevice RendererVk::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR 
     VkExtensionProperties pProperties[64] = {};
     vkEnumerateDeviceExtensionProperties(physdevice, NULL, &extnsionCount, NULL);
     vkEnumerateDeviceExtensionProperties(physdevice, NULL, &extnsionCount, pProperties);
-
+    
     uint32_t graphicsQueueFamilyIndex = UINT32_MAX;
     uint32_t presentQueueFamilyIndex = UINT32_MAX;
     for (uint32_t i = 0; i < queueFamilyPropertyCount; i++)
@@ -919,6 +922,11 @@ VkDevice RendererVk::vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR 
         printf("Could not find both graphics and present queues\n", "Swapchain Initialization Failure");
         return 0;
     }
+
+    if (graphics) 
+        *graphics = graphicsQueueFamilyIndex;
+    if (present) 
+        *present = presentQueueFamilyIndex;
 
     bool separate_present_queue = (graphicsQueueFamilyIndex != presentQueueFamilyIndex);
 
