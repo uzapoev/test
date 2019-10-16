@@ -1,5 +1,7 @@
 #include <math.h>
 #include <memory.h>
+//#include <string.h>
+//#include <memory.h>
 
 #include "mathlib.h"
 
@@ -10,6 +12,37 @@ const vec3 vec3::Right      = vec3(-1.0f, 0.0f, 0.0f);
 const vec3 vec3::Forward    = vec3( 0.0f, 0.0f, 1.0f);
 const vec3 vec3::Zero       = vec3( 0.0f, 0.0f, 0.0f);
 
+
+
+/*****************************************************************************/
+/*                                                                           */
+/* mat4                                                                      */
+/*                                                                           */
+/*****************************************************************************/
+mat4::mat4()
+{
+    identity();
+}
+
+
+mat4::mat4(const mat4 &mat)
+{
+    for (int i = 0; i < 16; ++i)
+        m[i] = mat.m[i];
+    //memcpy(m, mat.m, sizeof(m));
+}
+
+
+mat4::mat4(float _m00, float _m01, float _m02, float _m03,
+    float _m10, float _m11, float _m12, float _m13,
+    float _m20, float _m21, float _m22, float _m23,
+    float _m30, float _m31, float _m32, float _m33)
+{
+    m00 = _m00; m01 = _m01; m02 = _m02; m03 = _m03;
+    m10 = _m10; m11 = _m11; m12 = _m12; m13 = _m13;
+    m20 = _m20; m21 = _m21; m22 = _m22; m23 = _m23;
+    m30 = _m30; m31 = _m31; m32 = _m32; m33 = _m33;
+}
 
 quat quat::FromEulers(float x, float y, float z)
 {
