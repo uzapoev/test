@@ -9,6 +9,7 @@
 #endif
 
 
+
 enum eRenderApi
 {
     eRenderApi_gl,
@@ -32,6 +33,46 @@ enum eResourceType : uint8_t
     eResourceType_pipeline,
     eResourceType_renerpass,
     eResourceType_fbo, //todo: is it part of renerpass ???
+};
+
+
+//uint64_t make_res(eResourceType, uint32_t id)
+
+enum ePixelFormat : uint8_t
+{
+    ePixelFormat_Unknown,
+    ePixelFormat_A8,           //! 8-bit textures used as masks
+    ePixelFormat_RGBA4444,     //! 16-bit textures: RGBA4444
+    ePixelFormat_RGB5A1,       //! 16-bit textures: RGB5A1
+    ePixelFormat_RGB565,       //! 16-bit texture without Alpha channel
+    ePixelFormat_RGB8,         //! 24-bit texture: RGBA888
+    ePixelFormat_RGBA8,        //! 32-bit texture: RGBA8888
+
+    ePixelFormat_ETC1,         //! Compresses RGB888 data without Alpha channel
+    ePixelFormat_ETC2,         //! Compresses RGB888 data without Alpha channel
+    ePixelFormat_ETC2_EAC,     //! Compresses RGBA8888 data with full alpha support
+
+    ePixelFormat_PVRTC2,       //! 2-bit PVRTC-compressed texture: PVRTC2
+    ePixelFormat_PVRTC4,       //! 4-bit PVRTC-compressed texture: PVRTC4
+
+    ePixelFormat_DXT1,         //! 8
+    ePixelFormat_DXT3,         //! 16
+    ePixelFormat_DXT5,         //! 16
+
+    ePixelFormat_R16F,         //!
+    ePixelFormat_RG16F,        //!
+    ePixelFormat_RGB16F,       //!
+    ePixelFormat_RGBA16F,      //!
+
+    ePixelFormat_R32F,         //!
+    ePixelFormat_RG32F,        //!
+    ePixelFormat_RGB32F,       //!
+    ePixelFormat_RGBA32F,      //!
+
+    ePixelFormat_R11F_G11F_B10F,    //! exotic :)
+
+    ePixelFormat_D24X8,        //! depth buffer
+    ePixelFormat_D24S8,        //! depth buffer
 };
 
 
@@ -136,6 +177,13 @@ enum eBlendOp : uint8_t
     kBlendOp_RevSubstract,
 };
 
+struct UniformInfo
+{
+    int8_t  buffId; // if shader has few cb
+    int8_t  unused; // for future/alignment
+    int16_t offset; // 
+};
+
 
 struct RenderStates
 {
@@ -202,14 +250,18 @@ public:
     virtual void        present() = 0;
 
     //virtual void      clear(uint32_t flags, uint32_t color, float depth, uint8_t stencil);
-    //virtual uint32_t  create_swapchain(long handle);
-    //virtual void      bind_swapchain(uint32_t swapchain);
+    virtual uint32_t    create_swapchain(long handle) = 0;
+    virtual void        bind_swapchain(uint32_t swapchain) = 0;
 
     virtual uint64_t    create_vdecl(VertexAttribute * atribs, size_t count) = 0;
     virtual uint64_t    create_vb(void * data, size_t size, bool dynamic) = 0;
     virtual uint64_t    create_ib(void * data, size_t size, bool dynamic) = 0;
 //    virtual uint64_t    create_fbo(uint16_t width, uint16_t height, ePixelFormat format) = 0;
     virtual uint64_t    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size) = 0;
+  
+    //virtual uint64_t    create_texture2d(uint16_t width, uint16_t height, int format, int mips, void * data) = 0;
+    //virtual uint64_t    create_texture3d(uint16_t width, uint16_t height, uint16_t depth, int format, int mips, void * data) = 0;
+
     virtual uint64_t    create_shader(void * vdata, size_t vsize, void * pdata, size_t psize) = 0;
     virtual uint64_t    create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates /*uint64_t renderpass*/) = 0;
     virtual uint64_t    create_renderpass(/*uint64_t * colorFbo, size_t count, uint64_t depthFbo*/) = 0;

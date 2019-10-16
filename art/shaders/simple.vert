@@ -5,6 +5,8 @@ layout(location = 0) in vec4 position;
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 mvp;
+	mat3 nmat;
+	vec4 bones[128];
 } ubo;
 
 void main()

@@ -104,42 +104,6 @@ quat quat::LookAt(const vec3& dir, const vec3 & up)
                     0.0f, 0.0f, 0.0f, 1.0f);
 
     return quat::FromMat(m).inverted();
-    /*
-    float s = 0.0f;
-    float q[4] = { 0.0f };
-    float trace = m.m_Mat[0][0] + m.m_Mat[1][1] + m.m_Mat[2][2];
-
-    if (trace > 0.0f)
-    {
-        s = sqrtf(trace + 1.0f);
-        q[3] = s * 0.5f;
-        s = 0.5f / s;
-        q[0] = (m.m_Mat[1][2] - m.m_Mat[2][1]) * s;
-        q[1] = (m.m_Mat[2][0] - m.m_Mat[0][2]) * s;
-        q[2] = (m.m_Mat[0][1] - m.m_Mat[1][0]) * s;
-    }
-    else
-    {
-        int nxt[3] = { 1, 2, 0 };
-        int i = 0, j = 0, k = 0;
-
-        if (m.m_Mat[1][1] > m.m_Mat[0][0])
-            i = 1;
-
-        if (m.m_Mat[2][2] > m.m_Mat[i][i])
-            i = 2;
-
-        j = nxt[i];
-        k = nxt[j];
-        s = sqrtf((m.m_Mat[i][i] - (m.m_Mat[j][j] + m.m_Mat[k][k])) + 1.0f);
-
-        q[i] = s * 0.5f;
-        s = 0.5f / s;
-        q[3] = (m.m_Mat[j][k] - m.m_Mat[k][j]) * s;
-        q[j] = (m.m_Mat[i][j] + m.m_Mat[j][i]) * s;
-        q[k] = (m.m_Mat[i][k] + m.m_Mat[k][i]) * s;
-    }
-    return quat(q[0], q[1], q[2], q[3]).inverted();*/
 }
 
 
@@ -321,6 +285,11 @@ mat4 mat4::Zero()
 mat4 mat4::Identity()
 {
     return mat4();
+}
+
+mat4 mat4::FromQuat(const quat &q)
+{
+    return q.to_mat4();
 }
 
 

@@ -21,6 +21,9 @@ public:
     void                        end();
     void                        present();
 
+    uint32_t                    create_swapchain(long handle);
+    void                        bind_swapchain(uint32_t swapchain);
+
     uint64_t                    create_vdecl(VertexAttribute * atribs, size_t count);
     uint64_t                    create_vb(void * data, size_t size, bool dynamic);
     uint64_t                    create_ib(void * data, size_t size, bool dynamic);

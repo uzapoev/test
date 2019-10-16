@@ -214,12 +214,12 @@ bool RendererVk::initialize(long handle)
 {
     bool debug = false;
 
-    uint32_t graphicfamily, presentfamily;
+    uint32_t graphicsfamily, presentfamily;
 
     m_instance       = vk_create_instance(debug);
     m_physicaldevice = vk_create_physdevice(m_instance);
     m_surface        = vk_create_surface(m_instance, handle);
-    m_device         = vk_create_device(m_physicaldevice, m_surface, &graphicfamily, &presentfamily);
+    m_device         = vk_create_device(m_physicaldevice, m_surface, &graphicsfamily, &presentfamily);
     m_swapchain      = vk_create_swapchain(m_physicaldevice, m_device, m_surface);
     m_renderPass     = vk_create_renderpass(m_device, m_swapchain.format, VK_FORMAT_D24_UNORM_S8_UINT); 
 
@@ -235,7 +235,7 @@ bool RendererVk::initialize(long handle)
     // create_renderpasses
     // create_framebuffer( union with renderpass??)
     // create_cmdbuffers
-    vkGetDeviceQueue(m_device, graphicfamily, 0, &m_graphicsQueue);
+    vkGetDeviceQueue(m_device, graphicsfamily, 0, &m_graphicsQueue);
     vkGetDeviceQueue(m_device, presentfamily, 0, &m_presentQueue);
 
     VkSemaphoreCreateInfo semCreateInfo = {};
@@ -254,7 +254,7 @@ bool RendererVk::initialize(long handle)
     {
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = graphicfamily;
+        poolInfo.queueFamilyIndex = graphicsfamily;
     }
 
     if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
@@ -388,6 +388,16 @@ void RendererVk::present()
 }
 
 
+uint32_t RendererVk::create_swapchain(long handle)
+{
+    return 0;
+}
+
+void RendererVk::bind_swapchain(uint32_t swapchain)
+{
+
+}
+
 uint64_t RendererVk::create_vdecl(VertexAttribute * atribs, size_t count)
 {
     assert(atribs && count && (count < eVertexAttrib_Count));
@@ -497,6 +507,8 @@ uint64_t RendererVk::create_texture(uint16_t width, uint16_t height, uint16_t de
 //
 uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, size_t fsize)
 {
+    if (!vdata || !fdata)
+        return 0;
     auto create_shadermodule = [=](const char * code, size_t size)->VkShaderModule{
         auto createInfo = VkShaderModuleCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, NULL, 0, size, (uint32_t*)(code) };
         auto shaderModule = (VkShaderModule)0;
@@ -588,6 +600,8 @@ uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, siz
 uint64_t RendererVk::create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates)
 {
     if ( (restype(vdecl) != eResourceType_vdecl) || (restype(shader) != eResourceType_shader)){
+        //logfunc("")
+        return 0;
         assert(false);
     }
 

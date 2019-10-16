@@ -400,5 +400,25 @@ void mat4::from_quat(const quat & q) // convert quaternion rotation to matrix, z
     m[0*4+3] = m[1*4+3] = m[2*4+3] = 0.0f;
     m[3*4+3] = 1.0f;
 }
+
+
+void mat4::decompose(vec3 & p, quat &r, vec3 &s)
+{
+    p.x = m[12];
+    p.y = m[13];
+    p.z = m[14];
+
+    float det =
+        m[0] * (m[5] * m[10] - m[6] * m[9]) -
+        m[1] * (m[4] * m[10] - m[6] * m[8]) +
+        m[2] * (m[4] * m[9]  - m[5] * m[8]);
+
+    s.x = (det < 0 ? -1 : +1) * sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    s.y = sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    s.z = sqrtf(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+
+    r = quat::FromMat(*this);
+}
+
 #endif
 

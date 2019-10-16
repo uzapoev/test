@@ -125,6 +125,18 @@ void RendererGl::present()
 #endif
 }
 
+
+uint32_t RendererGl::create_swapchain(long handle)
+{
+    return 0;
+}
+
+
+void RendererGl::bind_swapchain(uint32_t swapchain)
+{
+}
+
+
 uint64_t RendererGl::create_vdecl(VertexAttribute * atribs, size_t count)
 {
     VDeclaration vdecl = {};
