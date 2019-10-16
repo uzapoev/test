@@ -219,7 +219,7 @@ bool RendererVk::initialize(long handle)
     m_instance       = vk_create_instance(debug);
     m_physicaldevice = vk_create_physdevice(m_instance);
     m_surface        = vk_create_surface(m_instance, handle);
-    m_device         = vk_create_device(m_physicaldevice, m_surface, &grapicsfamily, &presentfamily);
+    m_device         = vk_create_device(m_physicaldevice, m_surface, &graphicfamily, &presentfamily);
     m_swapchain      = vk_create_swapchain(m_physicaldevice, m_device, m_surface);
     m_renderPass     = vk_create_renderpass(m_device, m_swapchain.format, VK_FORMAT_D24_UNORM_S8_UINT); 
 
@@ -254,7 +254,7 @@ bool RendererVk::initialize(long handle)
     {
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = grapicsfamily;
+        poolInfo.queueFamilyIndex = graphicfamily;
     }
 
     if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {

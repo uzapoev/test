@@ -105,14 +105,14 @@ class SpirvAnalyzer
     {
         stream_view(const char * d, size_t size) :m_data(d), m_currptr(d), m_size(size){};
 
-        template <class T> const T *    shift() const                       { const T * ret = (const T*)(m_data); m_data += sizeof(T); return ret; }
+        template <class T> const T *    shift() const                       { const T * ret = (const T*)(m_currptr); m_currptr += sizeof(T); return ret; }
         template <class T> T            read()                              { T ret; read(&ret, sizeof(T)); return ret;  }
 
-        void                            read(void * data, uint32_t size)    { memcpy(data, m_data, size); m_data += size; }
-        const char *                    data() const                        { return m_currptr; }
+        void                            read(void * data, uint32_t size)    { memcpy(data, m_currptr, size); m_currptr += size; }
+        const char *                    data() const                        { return m_data; }
 
-        void                            seek(size_t pos)                    { m_data = m_currptr + pos; }
-        size_t                          tell() const                        { return m_data - m_currptr; }
+        void                            seek(size_t pos)                    { m_currptr = m_data + pos; }
+        size_t                          tell() const                        { return m_currptr - m_data; }
         bool                            eof() const                         { return tell() >= m_size; }
 
     private:
