@@ -30,15 +30,27 @@ long create_window(const char * caption)
         wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);     // An arrow for the cursor
         wndclass.hbrBackground = (HBRUSH)(COLOR_WINDOW);    // A white window
         wndclass.lpszClassName = wndClassName;              // Assign the class name
-        wndclass.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)->LRESULT{
-            if (msg == WM_DESTROY) ::PostQuitMessage(0);
-            return DefWindowProc(hwnd, msg, wParam, lParam);
-        };//WinProc;       // Pass our function pointer as the window procedure
+        wndclass.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)->LRESULT {
+                if (msg == WM_DESTROY) 
+                    ::PostQuitMessage(0);
+                return DefWindowProc(hwnd, msg, wParam, lParam);
+            }; 
     }
     if (!RegisterClass(&wndclass))
     {
         return 0;
     }
+
+    mat4 ms, mp, mr, m;
+  //  ms.scale(vec3(1, 1, 3));
+    mp.translate(vec3(10, 20, 30));
+
+    vec3 p, s;
+    quat q;
+    mr = mat4::FromQuat(quat::FromEulers(30, 45, 90));
+
+    m = ms * mp * mr;
+    m.decompose(p, q, s);
 
     int width = GetSystemMetrics(SM_CXSCREEN) >> 1;
     int height = GetSystemMetrics(SM_CYSCREEN) >> 1;
@@ -47,7 +59,7 @@ long create_window(const char * caption)
     RECT win_rect = { 0, 0, width, height };
     AdjustWindowRect(&win_rect, wndStyle, false);
 
-    HWND hWnd = CreateWindowEx(WS_EX_APPWINDOW, wndClassName, _T(caption), wndStyle, 0, 0,
+    HWND hWnd = CreateWindowEx(WS_EX_APPWINDOW, wndClassName, _T(""), wndStyle, 0, 0,
         win_rect.right - win_rect.left,
         win_rect.bottom - win_rect.top,
         0, 0, GetModuleHandle(NULL), 0);
@@ -118,14 +130,13 @@ size_t dxcompiledshader(const char * data, size_t size, const char* entry, const
 }
 
 
-
 int main(int argc, char ** argv)
 {
     SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE), { 200, 600 });
 
     long hwnd = create_window("vk sample");
 
-    srand((unsigned int)time(0));
+  //  srand((unsigned int)time(0));
     auto apitype = eRenderApi_vk;
 
     std::unique_ptr<iRenderer> renderer;
@@ -144,29 +155,33 @@ int main(int argc, char ** argv)
     size_t fsize = 0;
     size_t vsize = 0;
 
-    if (apitype == eRenderApi_vk)
+    switch (apitype)
     {
-        fsize = filedata("../data/shaders/simple.frag.spv", &frag);
-        vsize = filedata("../data/shaders/simple.vert.spv", &vert);
-    }
+        case eRenderApi_gl: {
+            size_t fsize = filedata("../data/shaders/simple.frag", &frag);
+            size_t vsize = filedata("../data/shaders/simple.vert", &vert);
+        }break;
 
-    if (apitype == eRenderApi_dx11)
-    {
-        char * dxfx = NULL;
-        size_t dxsize = filedata("../data/shaders/simple.fx", &dxfx);
-        vsize = dxcompiledshader(dxfx, dxsize, "VS", "vs_4_0", &vert);
-        fsize = dxcompiledshader(dxfx, dxsize, "PS", "ps_4_0", &frag);
-    }
+        case eRenderApi_vk: {
+            fsize = filedata("../data/shaders/simple.frag.spv", &frag);
+            vsize = filedata("../data/shaders/simple.vert.spv", &vert);
+        }break;
 
-    if (apitype == eRenderApi_gl)
-    {
-        size_t fsize = filedata("../data/shaders/simple.frag", &frag);
-        size_t vsize = filedata("../data/shaders/simple.vert", &vert);
+        case eRenderApi_dx11: {
+            char * dxfx = NULL;
+            size_t dxsize = filedata("../data/shaders/simple.fx", &dxfx);
+            vsize = dxcompiledshader(dxfx, dxsize, "VS", "vs_4_0", &vert);
+            fsize = dxcompiledshader(dxfx, dxsize, "PS", "ps_4_0", &frag);
+        }break;
+
+        default: 
+            assert(false);
+        break;
     }
     
     VertexAttribute attributes[] = {
         { eVertexAttrib_Position,   eVertexFormat_float4},
-     //   { eVertexAttrib_Color,      eVertexFormat_byte4 }
+        { eVertexAttrib_Color,      eVertexFormat_byte4 }
     };
     float vertexes[] = {
    /*      0.0f, -0.5f, 0.0, 1.0,
@@ -175,7 +190,6 @@ int main(int argc, char ** argv)
         0.0f, 0.0f, 0.0, 1.0,
         0.0f, 1.0f, 0.0, 1.0,
         1.0f, 1.0f, 0.0, 1.0,
-
     };
 
     float vertexes2[] = {
@@ -203,17 +217,20 @@ int main(int argc, char ** argv)
     {
         renderer->begin();
 
-        renderer->bind_pipeline(pipeline);
+        if (pipeline)
+        {
+            renderer->bind_pipeline(pipeline);
 
-        auto mat = mat4::lookAtRH(vec3(0.0f, 0.0f, -10.0f), vec3::Zero, vec3::Up);
-     //   uint32_t mvp = renderer->uniform(shader, "mvp");
-     //   renderer->update_uniform(mvp, eUniform_mat4, &mat);
+            auto mat = mat4::lookAtRH(vec3(0.0f, 0.0f, -10.0f), vec3::Zero, vec3::Up);
+            //   uint32_t mvp = renderer->uniform(shader, "mvp");
+            //   renderer->update_uniform(mvp, eUniform_mat4, &mat);
 
-        renderer->bind_vb(vb);
-        renderer->draw_array(0, _countof(vertexes) / 4);
+            renderer->bind_vb(vb);
+            renderer->draw_array(0, _countof(vertexes) / 4);
 
-        renderer->bind_vb(vb1);
-        renderer->draw_array(0, _countof(vertexes2) / 4);
+            renderer->bind_vb(vb1);
+            renderer->draw_array(0, _countof(vertexes2) / 4);
+        }
 
         renderer->end();
         renderer->present();

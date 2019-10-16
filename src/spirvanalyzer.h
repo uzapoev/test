@@ -157,11 +157,26 @@ class SpirvAnalyzer
     };
 
 public:
-    class Uniform
+    /*
+        Uniform {
+            name,
+            buffer_id,
+            offset,
+        }
+    
+    */
+    struct Uniform
     {
         char name[256];
         int location;
+        SpvOp type;
+        int count;
     };
+    class UniformBufferObject
+    {
+        Uniform uniforms[512];
+    };
+
     class Attribute
     {
     };
@@ -205,8 +220,8 @@ public:
             }
             else if (istype(op))
             {
-                parse_type(instruction, stream);
                 printf("\ntype %s", type2str(op));
+                parse_type(instruction, stream);
                 continue;
             }
 
@@ -283,7 +298,13 @@ public:
                     if (storage == StorageClass::StorageClassUniform || storage == StorageClass::StorageClassUniformConstant)
                     {
                         if (uniforms)
+                        {
                             uniforms->push_back(Uniform());
+                            auto decor = decorates.find(id);
+                            if (decor != decorates.end())
+                                strcpy(uniforms->back().name, decor->second.name.c_str());
+                            
+                        }
                     }
 
                     // attributes
@@ -297,6 +318,19 @@ public:
                         printf("\nvariable: %d(%s) %d %s", type, it->second.name.c_str(), id, storage2str(storage));
                     else
                         printf("\nvariable: %d %d %s", type, id, storage2str(storage));
+                }break;
+
+                case SpvOpConstant:
+                {
+                    uint32_t type = stream.read<uint32_t>();
+                    uint32_t id = stream.read<uint32_t>();
+                    uint32_t value = stream.read<uint32_t>();
+                    assert(instruction.size == 3);
+                    printf("\n(%d) constant: id(%d)  value(%d)", type, id, value);
+                   /* for (size_t j = 0; j < instruction.size - 1; ++j){
+                        uint32_t value = stream.read<uint32_t>();
+                        printf(" %d", value);
+                    }*/
                 }break;
             }
         }
@@ -330,9 +364,12 @@ public:
             SpvOpTypePipe = 38,
             SpvOpTypeForwardPointer = 39,
  */
-        for (size_t i = 0; i < instruction.size - 1; i++)
+        uint32_t type;
+
+        for (size_t i = 0; i < instruction.size; i++)
         {
-            uint32_t type = stream.read<uint32_t>();
+             type = stream.read<uint32_t>();
+             printf(" %d", type);
      //       if (instruction.header->op == SpvOpTypeArray)
         //    types.emplace(op, type);
         }

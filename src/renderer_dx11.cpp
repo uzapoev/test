@@ -138,6 +138,18 @@ void RendererDx11::present()
     m_swapchain->Present(0, 0);
 }
 
+
+uint32_t RendererDx11::create_swapchain(long handle)
+{
+    return 0;
+}
+
+void RendererDx11::bind_swapchain(uint32_t swapchain)
+{
+
+}
+
+
 uint64_t RendererDx11::create_vdecl(VertexAttribute * atribs, size_t count)
 {
     dxVertexLayout layout;

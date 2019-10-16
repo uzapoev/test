@@ -366,6 +366,7 @@ public:
     MATH_INLINE void rotate(float angle, const vec3 &axis);   // angle - in degrees
 
     MATH_INLINE void from_quat(const quat & q);  // convert quaternion rotation to matrix, zeros out the translation component.
+    MATH_INLINE void decompose(vec3 & p, quat & r, vec3 & s);
 
     union
     {
