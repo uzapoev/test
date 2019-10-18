@@ -23,7 +23,8 @@ static const VkFormat _vformat2vkformat[eVertexFormat_Count] =
     VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT,  //half floats
     VK_FORMAT_R16G16_SINT, VK_FORMAT_R16G16B16A16_SINT,    // short
     VK_FORMAT_R16G16_UINT, VK_FORMAT_R16G16B16A16_UINT,    // ushort
-    VK_FORMAT_R8G8B8A8_UINT    // byte
+    //VK_FORMAT_R8G8B8A8_UINT    // byte
+    VK_FORMAT_B8G8R8A8_UNORM
 };
 
 static const uint16_t _vformatstrides[eVertexFormat_Count] =
@@ -338,6 +339,16 @@ void RendererVk::begin()
         renderPassInfo.pClearValues = &clearColor;
     }
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    /*
+    // todo: set flipped y coord in pipeline viewportstate 
+    VkViewport viewport = {0};
+    viewport.width = m_swapchain.width;
+    viewport.height = -m_swapchain.height;
+    viewport.y = m_swapchain.height;
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    */
 }
 
 
@@ -537,7 +548,7 @@ uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, siz
         shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         shaderStages[1].module = fragmentShader;
         shaderStages[1].pName = "main";
-    }
+    } 
     std::vector<SpirvAnalyzer::Uniform> vuniforms, funiforms;
     bool vertOk = SpirvAnalyzer::analyze(vdata, vsize, &vuniforms);
     bool fragOk = SpirvAnalyzer::analyze(fdata, fsize, &funiforms);

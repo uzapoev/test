@@ -392,6 +392,10 @@ struct color32
     static inline const color32 Blue()      { return color32(0, 0, 255, 255); }
     static inline const color32 Magenta()   { return color32(255, 255, 0, 255); }
     
+    color32(uint32_t _rgba)
+        :rgba(_rgba)
+    {}
+
     color32(uint8_t _r, uint8_t _g, uint8_t _b, uint8_t _a)
         :r(_r), g(_g), b(_b), a(_a)
     { }

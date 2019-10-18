@@ -34,6 +34,7 @@ class SpirvAnalyzer
         StorageClassMax = 0x7fffffff,
     };
 
+
 #define RETURNCASE( value ) case value: return #value;
     static const char * storage2str(StorageClass s)
     {
@@ -149,7 +150,7 @@ class SpirvAnalyzer
     }
 
     struct constant{
-        int type;
+        SpvOp type;
         union{
             int i;
             float f;
@@ -191,7 +192,7 @@ public:
 
         std::map<uint32_t, Decorate>    decorates;
         std::vector<Instruction>        instructions;
-        std::map<SpvOp, int>            types;      // type / parent
+        std::map<int, SpvOp>            types;      // type / parent
         std::map<int, constant>         constants;  // { id, {type, value} }
          
         std::vector<SpvOp>ops;
@@ -215,13 +216,14 @@ public:
             stream.seek(instruction.offset);
 
             SpvOp op = (SpvOp)instruction.header->op;
-            if (op == SpvOpConstant){
 
-            }
-            else if (istype(op))
+            if (istype(op))
             {
-                printf("\ntype %s", type2str(op));
-                parse_type(instruction, stream);
+                uint32_t id = stream.read<uint32_t>();
+                printf("\ntype %s id(%d)", type2str(op), id);
+                types.emplace(id, op);
+                
+                //parse_type(instruction, stream);
                 continue;
             }
 
@@ -325,9 +327,12 @@ public:
                     uint32_t type = stream.read<uint32_t>();
                     uint32_t id = stream.read<uint32_t>();
                     uint32_t value = stream.read<uint32_t>();
+                    constant c = { types[type], value };
+                    //constants.insert(std::make_pair(id, c));
+                    constants.emplace(id, c);
                     assert(instruction.size == 3);
-                    printf("\n(%d) constant: id(%d)  value(%d)", type, id, value);
-                   /* for (size_t j = 0; j < instruction.size - 1; ++j){
+                    //printf("\n constant: type(%d), id(%d)  value(%d)", type, id, value);
+                    /*for (size_t j = 0; j < instruction.size - 1; ++j){
                         uint32_t value = stream.read<uint32_t>();
                         printf(" %d", value);
                     }*/

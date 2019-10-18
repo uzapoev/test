@@ -15,6 +15,9 @@
 #include "renderer_vk.h"
 #include "renderer_dx11.h"
 
+//#ifndef _countof
+//#endif
+
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -129,6 +132,10 @@ size_t dxcompiledshader(const char * data, size_t size, const char* entry, const
     return shaderBlob->GetBufferSize();
 }
 
+struct vertex {
+    vec4    position;
+    color32 color;
+};
 
 int main(int argc, char ** argv)
 {
@@ -137,6 +144,8 @@ int main(int argc, char ** argv)
     long hwnd = create_window("vk sample");
 
   //  srand((unsigned int)time(0));
+    srand(time(0));
+
     auto apitype = eRenderApi_vk;
 
     std::unique_ptr<iRenderer> renderer;
@@ -183,19 +192,16 @@ int main(int argc, char ** argv)
         { eVertexAttrib_Position,   eVertexFormat_float4},
         { eVertexAttrib_Color,      eVertexFormat_byte4 }
     };
-    float vertexes[] = {
-   /*      0.0f, -0.5f, 0.0, 1.0,
-         0.5f,  0.5f, 0.0, 1.0,
-        -0.5f,  0.5f, 0.0, 1.0,*/
-        0.0f, 0.0f, 0.0, 1.0,
-        0.0f, 1.0f, 0.0, 1.0,
-        1.0f, 1.0f, 0.0, 1.0,
+    vertex vertexes[] = {
+        { { 0.0f, 0.0f, 0.0, 1.0 }, { 0xFFFFFFFF } },
+        { { 0.0f, 1.0f, 0.0, 1.0 }, { 0xFFFFFFFF } },
+        { { 1.0f, 1.0f, 0.0, 1.0 }, { 0xFFFFFFFF } },
     };
 
-    float vertexes2[] = {
-        0.0f, 0.0f, 0.0, 1.0,
-        0.0f, -1.0f, 0.0, 1.0,
-        -1.0f, -1.0f, 0.0, 1.0,
+    vertex vertexes2[] = {
+        { { 0.0f, 0.0f, 0.0, 1.0, }, { 0xFFFFFFFF } },
+        { { 0.0f, -1.0f, 0.0, 1.0, }, { 0xFFFFFFFF } },
+        { { -1.0f, -1.0f, 0.0, 1.0, }, { 0xFFFFFFFF } },
     };
 
     uint16_t indexes[] = {
@@ -208,8 +214,8 @@ int main(int argc, char ** argv)
     uint64_t shader = renderer->create_shader(vert, vsize, frag, fsize);
     uint64_t pipeline = renderer->create_pipeline(vdecl, shader, &states);
 
-    uint64_t vb = renderer->create_vb(vertexes, _countof(vertexes) * sizeof(float), false);
-    uint64_t vb1 = renderer->create_vb(vertexes2, _countof(vertexes2) * sizeof(float), false);
+    uint64_t vb = renderer->create_vb(vertexes, _countof(vertexes) * sizeof(vertexes[0]), false);
+    uint64_t vb1 = renderer->create_vb(vertexes2, _countof(vertexes2) * sizeof(vertexes[0]), false);
 
     uint64_t ib = renderer->create_ib(indexes,  _countof(indexes)  * sizeof(uint16_t), false);
 
@@ -226,10 +232,10 @@ int main(int argc, char ** argv)
             //   renderer->update_uniform(mvp, eUniform_mat4, &mat);
 
             renderer->bind_vb(vb);
-            renderer->draw_array(0, _countof(vertexes) / 4);
+            renderer->draw_array(0, _countof(vertexes));
 
             renderer->bind_vb(vb1);
-            renderer->draw_array(0, _countof(vertexes2) / 4);
+            renderer->draw_array(0, _countof(vertexes2));
         }
 
         renderer->end();
