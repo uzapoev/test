@@ -519,7 +519,10 @@ uint64_t RendererVk::create_texture(uint16_t width, uint16_t height, uint16_t de
 uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, size_t fsize)
 {
     if (!vdata || !fdata)
+    {
         return 0;
+    }
+
     auto create_shadermodule = [=](const char * code, size_t size)->VkShaderModule{
         auto createInfo = VkShaderModuleCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, NULL, 0, size, (uint32_t*)(code) };
         auto shaderModule = (VkShaderModule)0;
@@ -586,7 +589,6 @@ uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, siz
         printf("failed to create descriptor set layout!");
         return 0;
     }
-
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
     {
