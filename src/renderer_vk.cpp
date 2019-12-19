@@ -1,6 +1,6 @@
 #include "renderer_vk.h"
+#include "spirvflect.h"
 
-#include "spirvanalyzer.h"
 #pragma comment(lib, "Lib32/vulkan-1.lib")
 
 #include <vulkan/spirv.h>
@@ -552,9 +552,10 @@ uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, siz
         shaderStages[1].module = fragmentShader;
         shaderStages[1].pName = "main";
     } 
-    std::vector<SpirvAnalyzer::Uniform> vuniforms, funiforms;
-    bool vertOk = SpirvAnalyzer::analyze(vdata, vsize, &vuniforms);
-    bool fragOk = SpirvAnalyzer::analyze(fdata, fsize, &funiforms);
+    std::vector<Spirvflect::UniformBufferObject*> vuniforms, funiforms;
+    std::vector<Spirvflect::Uniform> vsamplers, fsamplers;
+    bool vertOk = Spirvflect::analyze(vdata, vsize, &vuniforms, &vsamplers);
+    bool fragOk = Spirvflect::analyze(fdata, fsize, &funiforms, &fsamplers);
 
     std::vector<VkDescriptorSetLayoutBinding> bindings;
     //vertex

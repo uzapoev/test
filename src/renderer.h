@@ -177,13 +177,6 @@ enum eBlendOp : uint8_t
     kBlendOp_RevSubstract,
 };
 
-struct UniformInfo
-{
-    int8_t  buffId; // if shader has few cb
-    int8_t  unused; // for future/alignment
-    int16_t offset; // 
-};
-
 
 struct RenderStates
 {
@@ -234,6 +227,20 @@ struct VertexAttribute
 {
     eVertexAttrib   type;
     eVertexFormat   format;
+};
+
+
+struct UniformInfo
+{
+    int8_t  buffId; // if shader has few cb
+    int8_t  unused; // for future/alignment
+    int16_t offset; // 
+};
+
+struct ShaderInfo
+{
+    VertexAttribute attributes;
+    UniformInfo     uniforms;
 };
 
 

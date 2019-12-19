@@ -19,7 +19,7 @@ endif(WIN32)
 
 #add_definitions("-std=c++11")
 
-#set(CMAKE_C_COMPILER "emcc")
+#set(CMAKE_C_COMPILER "emcc") 
 
 include_directories(./external)
 aux_source_directory(./src SOURCES)
