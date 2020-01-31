@@ -287,8 +287,16 @@ uint32_t RendererGl::uniform(uint64_t shader, const char * name)
 
 void RendererGl::update_uniform(uint32_t id, const void *data)
 {
-
 }
+
+void RendererGl::update_bufferdata(uint64_t id, void * data, size_t size, size_t offset)
+{
+    auto & buf = m_resources[id - 1];
+
+    glBindBuffer(buf.target, buf.id);
+    glBufferSubData(buf.target, offset, size, data);
+}
+
 
 void RendererGl::destroy_resource(uint64_t id)
 {

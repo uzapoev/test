@@ -40,6 +40,8 @@ public:
 
     uint32_t                    uniform(uint64_t shader, const char * name);
     void                        update_uniform(uint32_t id, const void *data);
+    void                        update_bufferdata(uint64_t id, void * data, size_t size, size_t offset);
+//
 
     void                        bind_pipeline(uint64_t pip);
     void                        bind_vb(uint64_t vb);

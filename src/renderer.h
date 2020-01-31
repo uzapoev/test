@@ -276,7 +276,7 @@ public:
     virtual uint32_t    uniform(uint64_t shader, const char * name) = 0;
     virtual void        update_uniform(uint32_t id, const void *data) = 0;
 //  virtual void        update_uniform(uint32_t id, int type, const void *data, size_t size) = 0;
-//  virtual uint64_t    update_bufferdata(uint64_t id, void * data, size_t size, size_t offset) = 0;
+    virtual void        update_bufferdata(uint64_t id, void * data, size_t size, size_t offset) = 0;
 
     virtual void        destroy_resource(uint64_t id) = 0;
 

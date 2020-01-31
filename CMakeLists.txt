@@ -23,5 +23,6 @@ endif(WIN32)
 
 include_directories(./external)
 aux_source_directory(./src SOURCES)
+aux_source_directory(./src/assets SOURCES)
 
 add_executable(${PROJECT_NAME} ${SOURCES} )

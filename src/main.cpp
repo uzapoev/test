@@ -15,6 +15,8 @@
 #include "renderer_vk.h"
 #include "renderer_dx11.h"
 
+#include "assets/asset_fbx.h"
+
 //#ifndef _countof
 //#endif
 
@@ -137,11 +139,21 @@ struct vertex {
     color32 color;
 };
 
+
+
 int main(int argc, char ** argv)
 {
     SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE), { 200, 600 });
 
     long hwnd = create_window("vk sample");
+
+
+    AssetFbx fbx;
+
+    fbx.load("../art/fbx/blendshapes/Recording_RawData.fbx");
+
+
+
 
   //  srand((unsigned int)time(0));
     srand(time(0));
@@ -228,7 +240,7 @@ int main(int argc, char ** argv)
             renderer->bind_pipeline(pipeline);
 
             auto mat = mat4::lookAtRH(vec3(0.0f, 0.0f, -10.0f), vec3::Zero, vec3::Up);
-            //   uint32_t mvp = renderer->uniform(shader, "mvp");
+            uint32_t mvp = renderer->uniform(shader, "mvp");
             //   renderer->update_uniform(mvp, eUniform_mat4, &mat);
 
             renderer->bind_vb(vb);

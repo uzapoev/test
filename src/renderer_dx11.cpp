@@ -308,6 +308,13 @@ void RendererDx11::update_uniform(uint32_t id, const void *data)
 
 }
 
+
+void RendererDx11::update_bufferdata(uint64_t id, void * data, size_t size, size_t offset)
+{
+
+}
+
+
 void RendererDx11::destroy_resource(uint64_t id)
 {
 

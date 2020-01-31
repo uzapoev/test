@@ -4,7 +4,6 @@
 #include <stdlib.h>  // rand
 #include <stdint.h>  // int8_t
 
-
 #define MATH_INLINE inline
 
 

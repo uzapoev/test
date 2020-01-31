@@ -703,11 +703,19 @@ void RendererVk::destroy_resource(uint64_t id)
 
 uint32_t RendererVk::uniform(uint64_t shader, const char * name)
 {
+    resourserunion shaderunion = { shader };
+    Shader * shaderinfo = &m_shaders[shaderunion.internalid - 1];
     return 0;
 }
 
 
 void RendererVk::update_uniform(uint32_t id, const void *data)
+{
+
+}
+
+
+void RendererVk::update_bufferdata(uint64_t id, void * data, size_t size, size_t offset)
 {
 
 }
