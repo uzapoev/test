@@ -115,10 +115,12 @@ bool RendererDx11::initialize(long handle)
     return true;
 }
 
+
 void RendererDx11::release()
 {
 
 }
+
 
 void RendererDx11::begin()
 {
@@ -128,10 +130,12 @@ void RendererDx11::begin()
     m_context->ClearRenderTargetView(m_rendertargetview, ClearColor);
 }
 
+
 void RendererDx11::end()
 {
 
 }
+
 
 void RendererDx11::present()
 {
@@ -143,6 +147,7 @@ uint32_t RendererDx11::create_swapchain(long handle)
 {
     return 0;
 }
+
 
 void RendererDx11::bind_swapchain(uint32_t swapchain)
 {
@@ -171,6 +176,7 @@ uint64_t RendererDx11::create_vdecl(VertexAttribute * atribs, size_t count)
     return m_layouts.size();
 }
 
+
 uint64_t RendererDx11::create_vb(void * data, size_t size, bool dynamic)
 {
     D3D11_BUFFER_DESC desc = {};
@@ -192,6 +198,7 @@ uint64_t RendererDx11::create_vb(void * data, size_t size, bool dynamic)
 
     return m_resources.size();
 }
+
 
 uint64_t RendererDx11::create_ib(void * data, size_t size, bool dynamic)
 {
@@ -219,10 +226,12 @@ uint64_t RendererDx11::create_ib(void * data, size_t size, bool dynamic)
     return m_resources.size();
 }
 
+
 uint64_t RendererDx11::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
 {
     return 0;
 }
+
 
 uint64_t RendererDx11::create_shader(void * vdata, size_t vsize, void * pdata, size_t psize)
 {
@@ -255,6 +264,7 @@ uint64_t RendererDx11::create_shader(void * vdata, size_t vsize, void * pdata, s
 
     return m_resources.size();
 }
+
 
 uint64_t RendererDx11::create_pipeline(uint64_t vdeclid, uint64_t shaderid, RenderStates * rstates /*uint64_t renderpass*/)
 {
@@ -293,17 +303,20 @@ uint64_t RendererDx11::create_pipeline(uint64_t vdeclid, uint64_t shaderid, Rend
     return m_resources.size();
 }
 
+
 uint64_t RendererDx11::create_renderpass(/*colorformats * formats, siz_t count, VkFormat depthFormat*/)
 {
     return 0;
 }
+
 
 uint32_t RendererDx11::uniform(uint64_t shader, const char * name)
 {
     return 0;
 }
 
-void RendererDx11::update_uniform(uint32_t id, const void *data)
+
+void RendererDx11::update_uniform(uint32_t id, eUniformFormat type, const void *data, size_t size)
 {
 
 }
@@ -320,6 +333,7 @@ void RendererDx11::destroy_resource(uint64_t id)
 
 }
 
+
 void RendererDx11::bind_pipeline(uint64_t pipid)
 {
     m_pipeline = pipid;
@@ -331,6 +345,7 @@ void RendererDx11::bind_pipeline(uint64_t pipid)
 
     m_context->RSSetState(pipeline.rasterstate);
 }
+
 
 void RendererDx11::bind_vb(uint64_t vb)
 {
@@ -344,15 +359,18 @@ void RendererDx11::bind_vb(uint64_t vb)
     //m_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
 }
 
+
 void RendererDx11::bind_ib(uint64_t ib)
 {
 
 }
 
+
 void RendererDx11::bind_texture(uint64_t texture, uint16_t slot)
 {
 
 }
+
 
 void RendererDx11::draw_array(uint32_t start_vert, uint32_t vert_count)
 {
@@ -362,6 +380,7 @@ void RendererDx11::draw_array(uint32_t start_vert, uint32_t vert_count)
    // m_context->Draw(vert_count, start_vert);
     m_context->Draw(vert_count, start_vert);
 }
+
 
 void RendererDx11::draw_indexed(uint32_t idxcount)
 {

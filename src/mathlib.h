@@ -418,6 +418,32 @@ struct color32
     };
 };
 
+
+
+namespace FloatConvert
+{
+    static uint32_t NormalizedToUint(float value, int bitCount)
+    {
+        return (uint32_t)((double)value * (double)((1 << bitCount) - 1));
+    }
+
+    static float NormalizedFromUint(uint32_t value, int bitCount)
+    {
+        return (float)value / (float)((1 << bitCount) - 1);
+    }
+
+    static uint32_t ToUint(float value, float min, float invRange, int bitCount)
+    {
+        return NormalizedToUint((value - min) * invRange, bitCount);
+    }
+
+    static float FromUint(uint32_t value, float min, float range, int bitCount)
+    {
+        return NormalizedFromUint(value, bitCount) * range + min;
+    }
+}
+
+
 #include "mathlib.inl"
 
 #endif  // __MATHLIB_H__

@@ -39,7 +39,7 @@ public:
     void                        destroy_resource(uint64_t id);
 
     uint32_t                    uniform(uint64_t shader, const char * name);
-    void                        update_uniform(uint32_t id, const void *data);
+    void                        update_uniform(uint32_t id, eUniformFormat type, const void *data, size_t size);
     void                        update_bufferdata(uint64_t id, void * data, size_t size, size_t offset);
 //
 

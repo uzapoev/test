@@ -97,6 +97,22 @@ enum eVertexFormat : uint8_t
     eVertexFormat_Count
 };
 
+enum eUniformFormat : uint8_t
+{
+    eUniformFormat_float,    // float
+    eUniformFormat_fvec2,     // vec2f
+    eUniformFormat_fvec4,     // vec4f
+
+    eUniformFormat_int,
+    eUniformFormat_ivec2,     // vec2f
+    eUniformFormat_ivec4,     // vec4f
+
+    eUniformFormat_mat3,     // vec3f
+    eUniformFormat_mat4,     // vec4f
+
+    eUniformFormat_sampler,
+};
+
 
 enum eVertexAttrib : int8_t
 {
@@ -274,8 +290,8 @@ public:
     virtual uint64_t    create_renderpass(/*uint64_t * colorFbo, size_t count, uint64_t depthFbo*/) = 0;
 
     virtual uint32_t    uniform(uint64_t shader, const char * name) = 0;
-    virtual void        update_uniform(uint32_t id, const void *data) = 0;
-//  virtual void        update_uniform(uint32_t id, int type, const void *data, size_t size) = 0;
+ //   virtual void        update_uniform(uint32_t id, const void *data) = 0;
+    virtual void        update_uniform(uint32_t id, eUniformFormat type, const void *data, size_t size) = 0;
     virtual void        update_bufferdata(uint64_t id, void * data, size_t size, size_t offset) = 0;
 
     virtual void        destroy_resource(uint64_t id) = 0;

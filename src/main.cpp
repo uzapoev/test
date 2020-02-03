@@ -150,7 +150,7 @@ int main(int argc, char ** argv)
 
     AssetFbx fbx;
 
-    fbx.load("../art/fbx/blendshapes/Recording_RawData.fbx");
+   // fbx.load("../art/fbx/blendshapes/Recording_RawData.fbx");
 
 
 
@@ -158,7 +158,7 @@ int main(int argc, char ** argv)
   //  srand((unsigned int)time(0));
     srand(time(0));
 
-    auto apitype = eRenderApi_vk;
+    auto apitype = eRenderApi_gl;
 
     std::unique_ptr<iRenderer> renderer;
     switch (apitype)
@@ -231,6 +231,16 @@ int main(int argc, char ** argv)
 
     uint64_t ib = renderer->create_ib(indexes,  _countof(indexes)  * sizeof(uint16_t), false);
 
+
+    uint32_t umvp = renderer->uniform(shader, "mvp");
+    auto view = mat4::lookAtRH(vec3(0.0f, 0.0f, -10.0f), vec3::Zero, vec3::Up);
+    auto proj = mat4::perspectiveFovRH(45.0f, 1.3f, 0.1f, 1000.0f);
+    auto viewproj = proj*view;
+    renderer->update_uniform(umvp, eUniformFormat_mat4, &viewproj, sizeof(mat4));
+
+    auto f2uc = FloatConvert::ToUint(1.2345, -5.0, 1.0/5.0, 8);
+    auto uc2f = FloatConvert::FromUint(f2uc, -5.0, 5.0, 8);
+
     while (process_msg())
     {
         renderer->begin();
@@ -238,9 +248,6 @@ int main(int argc, char ** argv)
         if (pipeline)
         {
             renderer->bind_pipeline(pipeline);
-
-            auto mat = mat4::lookAtRH(vec3(0.0f, 0.0f, -10.0f), vec3::Zero, vec3::Up);
-            uint32_t mvp = renderer->uniform(shader, "mvp");
             //   renderer->update_uniform(mvp, eUniform_mat4, &mat);
 
             renderer->bind_vb(vb);

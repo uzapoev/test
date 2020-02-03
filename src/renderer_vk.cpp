@@ -709,7 +709,7 @@ uint32_t RendererVk::uniform(uint64_t shader, const char * name)
 }
 
 
-void RendererVk::update_uniform(uint32_t id, const void *data)
+void RendererVk::update_uniform(uint32_t id, eUniformFormat type, const void *data, size_t size)
 {
 
 }
@@ -723,7 +723,8 @@ void RendererVk::update_bufferdata(uint64_t id, void * data, size_t size, size_t
 
 void RendererVk::bind_pipeline(uint64_t pipeline)
 {
-    if (restype(pipeline) != eResourceType_pipeline){
+    if (restype(pipeline) != eResourceType_pipeline)
+    {
         printf("");
         return;
     }

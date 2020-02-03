@@ -256,6 +256,24 @@ uint64_t RendererGl::create_shader(void * _vdata, size_t _size, void * _pdata, s
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
+    //get uniforms info
+    GLint unicount = 0;
+    #define GL_ACTIVE_UNIFORM_BLOCKS          0x8A36
+
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &unicount);
+    for (GLint i = 0; i < unicount; ++i)
+    {
+        GLsizei uni_len = 0;
+        GLint uni_size = 0;
+        GLenum uni_type = 0;
+        char uniformbuff[256] = "";
+        glGetActiveUniform(program, i, sizeof(uniformbuff), &uni_len, &uni_size, &uni_type, uniformbuff);
+
+        auto location = glGetUniformLocation(program, "positions[0]");
+
+        uniformbuff[0] = uniformbuff[0];
+    }
+
     glResource res = {};
     res.id = program;
     m_resources.push_back(res);
@@ -282,11 +300,34 @@ uint64_t RendererGl::create_renderpass(/*colorformats * formats, siz_t count, Vk
 
 uint32_t RendererGl::uniform(uint64_t shader, const char * name)
 {
+    auto & prog = m_resources[shader - 1];
+    // get uniforms
+    // return uniform id
+    GLint location = glGetUniformLocation(prog.id, name);
     return 0;
 }
 
-void RendererGl::update_uniform(uint32_t id, const void *data)
+void RendererGl::update_uniform(uint32_t id, eUniformFormat type, const void *data, size_t size)
 {
+    GLint location = id;
+    GLsizei count = 1;
+    switch(type)
+    {
+        case eUniformFormat_float: glUniform1fv(location, count, static_cast<const float*>(data)); break;
+        case eUniformFormat_fvec2: glUniform2fv(location, count, static_cast<const float*>(data)); break;
+        case eUniformFormat_fvec4: glUniform4fv(location, count, static_cast<const float*>(data)); break;
+         
+        case eUniformFormat_int:   glUniform1iv(location, count, static_cast<const GLint*>(data)); break;
+        case eUniformFormat_ivec2: glUniform2iv(location, count, static_cast<const GLint*>(data)); break;
+        case eUniformFormat_ivec4: glUniform4iv(location, count, static_cast<const GLint*>(data)); break;
+         
+        case eUniformFormat_mat3: glUniformMatrix3fv(location, count, false, static_cast<const GLfloat*>(data)); break;
+        case eUniformFormat_mat4: glUniformMatrix4fv(location, count, false, static_cast<const GLfloat*>(data)); break;
+        
+        case eUniformFormat_sampler:
+        break;
+    }
+
 }
 
 void RendererGl::update_bufferdata(uint64_t id, void * data, size_t size, size_t offset)
