@@ -112,9 +112,9 @@ namespace simd
     typedef vec4 quat __attribute__((aligned(16)));
     typedef vec4 mat4 __attribute__((aligned(16)));
 #endif
-    // void lerp(const avec4 * a, const avec4 * b, float t);
-    // void slerp(const aquat * a, const aquat * b, float t);
-    // void transform(const amat4 & m, const avec4 * v, size_t count, avec4 * o);
+    // void lerp(const avec4 * a, const avec4 * b, avec4 *dst, float t);
+    // void slerp(const aquat * a, const aquat * b, avec4 *dst, float t);
+    // void transform(const amat4 & m, const avec4 * src, avec4 *dst, size_t count);
 }  // namespace simd
 
 
@@ -125,20 +125,20 @@ namespace simd
     MATH_INLINE const float operator[](int i)   const       { return _V[i]; }
 
 
-template<class T, size_t C > struct tuple_ops
+template<class T, size_t Capacity > struct tuple_ops
 {
     MATH_INLINE T & as_T()  const                   { return (*(T*)(this)); }
-    MATH_INLINE bool operator==(const T &v) const   { T & a = as_T(); for (size_t i = 0; i < C; ++i) if (!math::fcmp(a[i], v[i])) return false; return true; }
+    MATH_INLINE bool operator == (const T &v) const { T & a = as_T(); for (size_t i = 0; i < Capacity; ++i) if (!math::fcmp(a[i], v[i])) return false; return true; }
 
-    MATH_INLINE T operator*(float f) const          { T res;  T & s = as_T(); for (int i = 0; i < C; ++i) res[i] = s[i] * f; return res; }
-    MATH_INLINE T operator/(float f) const          { T res;  T & s = as_T(); for (int i = 0; i < C; ++i) res[i] = s[i] / f; return res; }
-    MATH_INLINE T operator+(const T &v) const       { T res;  T & s = as_T(); for (int i = 0; i < C; ++i) res[i] = s[i] + v[i]; return res; }
-    MATH_INLINE T operator-(const T &v) const       { T res;  T & s = as_T(); for (int i = 0; i < C; ++i) res[i] = s[i] - v[i]; return res; }
+    MATH_INLINE T operator * (float f) const        { T res;  T & s = as_T(); for (size_t i = 0; i < Capacity; ++i) res[i] = s[i] * f; return res; }
+    MATH_INLINE T operator / (float f) const        { T res;  T & s = as_T(); for (size_t i = 0; i < Capacity; ++i) res[i] = s[i] / f; return res; }
+    MATH_INLINE T operator + (const T &v) const     { T res;  T & s = as_T(); for (size_t i = 0; i < Capacity; ++i) res[i] = s[i] + v[i]; return res; }
+    MATH_INLINE T operator - (const T &v) const     { T res;  T & s = as_T(); for (size_t i = 0; i < Capacity; ++i) res[i] = s[i] - v[i]; return res; }
 
-    MATH_INLINE void operator *= (float f)          { T & res = as_T();  for (int i = 0; i < C; ++i) res[i] *= f; }
-    MATH_INLINE void operator /= (float f)          { T & res = as_T();  for (int i = 0; i < C; ++i) res[i] /= f; }
-    MATH_INLINE void operator += (const T &v)       { T & res = as_T();  for (int i = 0; i < C; ++i) res[i] += v[i]; }
-    MATH_INLINE void operator -= (const T &v)       { T & res = as_T();  for (int i = 0; i < C; ++i) res[i] -= v[i]; }
+    MATH_INLINE void operator *= (float f)          { T & res = as_T();  for (size_t i = 0; i < Capacity; ++i) res[i] *= f; }
+    MATH_INLINE void operator /= (float f)          { T & res = as_T();  for (size_t i = 0; i < Capacity; ++i) res[i] /= f; }
+    MATH_INLINE void operator += (const T &v)       { T & res = as_T();  for (size_t i = 0; i < Capacity; ++i) res[i] += v[i]; }
+    MATH_INLINE void operator -= (const T &v)       { T & res = as_T();  for (size_t i = 0; i < Capacity; ++i) res[i] -= v[i]; }
 };
 
 
@@ -175,6 +175,8 @@ public:
 struct vec3 : public tuple_ops<vec3, 3u>
 {
     DEFAULT_OPERATORS_IMPL(vec3, v);
+
+public:
     vec3() : x(0.0f), y(0.0f), z(0.0f)                      { }
     vec3(float x):x(x), y(x), z(x)                          { }
     vec3(float x, float y, float z) : x(x), y(y), z(z)      { }
@@ -207,7 +209,7 @@ public:
     MATH_INLINE float length()      const                   { return sqrtf(x * x + y * y + z * z); }
     MATH_INLINE void  normalize()                           { float invMag = 1.0f / length();  *this *= invMag; }
     MATH_INLINE vec3  normalized() const                    { float m = length(); return vec3(x / m, y / m, z / m); }
-    MATH_INLINE vec3  reflect(const vec3 &n) const           { return reflect(*this, n); }
+    MATH_INLINE vec3  reflect(const vec3 &n) const          { return reflect(*this, n); }
 
 public:
     friend vec3 operator*(float lhs, const vec3 &rhs)       { return vec3(lhs * rhs.x, lhs * rhs.y, lhs * rhs.z); }
@@ -322,6 +324,8 @@ public:
 struct mat4
 {
     DEFAULT_OPERATORS_IMPL(mat4, m)
+
+public:
     mat4();
     mat4(const mat4 &mat);
     mat4(float _m00, float _m01, float _m02, float _m03,
@@ -354,7 +358,7 @@ public:
     MATH_INLINE void transpose();
 
     MATH_INLINE vec4 row(int i) const    { return vec4(m[i * 4 + 0], m[i * 4 + 1], m[i * 4 + 2], m[i * 4 + 3]); }
-    MATH_INLINE vec4 column(int i)const  { return vec4(m[i], m[i+4], m[i+8], m[i+12]); }
+    MATH_INLINE vec4 column(int i)const  { return vec4(m[i],         m[i + 4],     m[i + 8],     m[i + 12]); }
 
     MATH_INLINE vec3 transform_point(const vec3 &v) const;
     MATH_INLINE vec4 transform_point(const vec4 &v) const;
@@ -390,9 +394,12 @@ struct color32
     static inline const color32 Green()     { return color32(0, 255, 0, 255); }
     static inline const color32 Blue()      { return color32(0, 0, 255, 255); }
     static inline const color32 Magenta()   { return color32(255, 255, 0, 255); }
+
+    color32() : rgba(0u)
+    {}
     
     color32(uint32_t _rgba)
-        :rgba(_rgba)
+        : rgba(_rgba)
     {}
 
     color32(uint8_t _r, uint8_t _g, uint8_t _b, uint8_t _a)

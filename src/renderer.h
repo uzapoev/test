@@ -194,6 +194,8 @@ enum eBlendOp : uint8_t
 };
 
 
+
+
 struct RenderStates
 {
     struct BlendState
@@ -255,8 +257,33 @@ struct UniformInfo
 
 struct ShaderInfo
 {
-    VertexAttribute attributes;
-    UniformInfo     uniforms;
+    VertexAttribute * attributes;
+    UniformInfo     * uniforms;
+    //SamplerInfo   * samplers;
+};
+
+
+
+struct RenderResource
+{
+    RenderResource(uint64_t _handle):handle(_handle){}
+    RenderResource(uint32_t _id, eResourceType _type) :id(_id), type(_type){}
+
+    static uint64_t makehandle(uint32_t _id, eResourceType _type)   { RenderResource rr(_id, _type); return rr.handle; }
+    static uint32_t getid(uint64_t _handle)                         { RenderResource rr(_handle); return rr.id; }
+    static bool     match(uint64_t _handle, eResourceType _type)    { RenderResource rr(_handle); return rr.type == _type; };
+
+    union
+    {
+        uint64_t            handle;
+        struct
+        {
+            uint32_t        id;         //
+            eResourceType   type;       //
+            uint8_t         reserved;   //
+            uint16_t        generation; //
+        };
+    };
 };
 
 
@@ -280,10 +307,12 @@ public:
     virtual uint64_t    create_vb(void * data, size_t size, bool dynamic) = 0;
     virtual uint64_t    create_ib(void * data, size_t size, bool dynamic) = 0;
 //    virtual uint64_t    create_fbo(uint16_t width, uint16_t height, ePixelFormat format) = 0;
-    virtual uint64_t    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size) = 0;
+//    virtual uint64_t    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size) = 0;
+//  virtual uint64_t    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size) = 0;
   
-    //virtual uint64_t    create_texture2d(uint16_t width, uint16_t height, int format, int mips, void * data) = 0;
-    //virtual uint64_t    create_texture3d(uint16_t width, uint16_t height, uint16_t depth, int format, int mips, void * data) = 0;
+    virtual uint64_t    create_texture2d(uint16_t width, uint16_t height, int format, int mips, void * data) = 0;
+    virtual uint64_t    create_texture3d(uint16_t width, uint16_t height, uint16_t depth, int format, int mips, void * data) = 0;
+    virtual uint64_t    create_textureCube(uint16_t width, uint16_t height, int format, int mips, void * data) = 0;
 
     virtual uint64_t    create_shader(void * vdata, size_t vsize, void * pdata, size_t psize) = 0;
     virtual uint64_t    create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates /*uint64_t renderpass*/) = 0;

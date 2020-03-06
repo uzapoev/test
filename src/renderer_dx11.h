@@ -28,7 +28,10 @@ public:
     uint64_t                    create_vb(void * data, size_t size, bool dynamic);
     uint64_t                    create_ib(void * data, size_t size, bool dynamic);
 
-    uint64_t                    create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size);
+    uint64_t                    create_texture2d(uint16_t width, uint16_t height, int format, int mips, void * data);
+    uint64_t                    create_texture3d(uint16_t width, uint16_t height, uint16_t depth, int format, int mips, void * data);
+    uint64_t                    create_textureCube(uint16_t width, uint16_t height, int format, int mips, void * data);
+
     uint64_t                    create_shader(void * vdata, size_t vsize, void * pdata, size_t psize );
     uint64_t                    create_pipeline(uint64_t vdecl, uint64_t shader, RenderStates * rstates /*uint64_t renderpass*/);
     uint64_t                    create_renderpass(/*colorformats * formats, siz_t count, VkFormat depthFormat*/);

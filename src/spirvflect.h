@@ -13,7 +13,6 @@
 class Spirvflect
 {
 public:
-
     enum UniformType : uint16_t
     {
         unusable,
@@ -45,6 +44,18 @@ public:
     {
         char * name;
         int location;
+    };
+
+    struct SpvInfo
+    {
+        size_t              attrib_count;
+        size_t              ubo_count;
+        size_t              sampler_count;
+
+
+        Attribute           attributes[32];
+        UniformBufferObject ubos[16];
+        Uniform             samplers[16];
     };
 
 private:
@@ -107,7 +118,7 @@ private:
     class SpvDecorate
     {
     public:
-        SpvDecorate(uint32_t _id, const char * _name) :id(_id), m_name(_name)        {}//, description(0), binding(0){}
+        SpvDecorate(uint32_t _id, const char * _name) :id(_id), m_name(_name)               {}//, description(0), binding(0){}
 
         void                            add_child(SpvDecorate & decorate)                   { m_childs.push_back(decorate); }
 
@@ -149,7 +160,7 @@ private:
         UniformBufferObject   * get_ubo(uint32_t id)                        { auto it = m_ubos.find(id); return (it == m_ubos.end()) ? nullptr : it->second; }
 
     private:
-        std::map<uint32_t, SpvDecorate>                     m_decorates;
+        std::map<uint32_t, SpvDecorate>              m_decorates;
         std::map<uint32_t, SpvTypeInfo>              m_types;      // type / parent
         std::map<uint32_t, SpvConstant>              m_constants;  // { id, {type, value} }
         std::map<uint32_t, UniformBufferObject*>     m_ubos;  // { id, {type, value} }
@@ -157,7 +168,7 @@ private:
 
 public:
     // SpirvAnalyzer.analyze(data, size, &ubo, &pushcostants, &samplers);
-    static bool analyze(const void * data, size_t size, std::vector<UniformBufferObject*> * uniforms, std::vector<Uniform> * smaplers)
+    static bool analyze(const void * data, size_t size, std::vector<UniformBufferObject*> * uniforms, std::vector<Uniform> * samplers)
     {
         stream_view stream((const char *)data, size);
 
@@ -260,6 +271,7 @@ public:
 
                     switch (storageClass)
                     {
+                        //uniforms
                         case SpvStorageClass::SpvStorageClassUniform:
                         {
                             if (uniforms && type.type == UniformType::structure)
@@ -271,6 +283,14 @@ public:
                             }
                         }break;
 
+                        //samplers
+                        case SpvStorageClass::SpvStorageClassUniformConstant:
+                        {
+                            auto dec = storage.get_decor(type.basetypeid);
+
+                            uniforms->push_back(NULL);
+                        }break;
+
                         // attributes
                         case SpvStorageClass::SpvStorageClassInput:
                         {
@@ -279,7 +299,7 @@ public:
                                 uint32_t location = decor->get_decor(SpvDecoration::SpvDecorationLocation);
                             }
                         }break;
-                    }       
+                    }
                 }break;
             }
             stream.seek(next);
@@ -377,12 +397,32 @@ private:
             }break;
 
             case SpvOpTypeImage:
-            case SpvOpTypeSampler:
-            case SpvOpTypeSampledImage:
             {
-               printf("\n");
+                printf("\nSpvOpTypeImage ");
                 for (size_t j = 0; j < filedcount; ++j)
                     printf("%-3d", stream.read<uint32_t>());
+            }break;
+
+            case SpvOpTypeSampler:
+            {
+                printf("\nSpvOpTypeSampler ");
+                for (size_t j = 0; j < filedcount; ++j)
+                    printf("%-3d", stream.read<uint32_t>());
+            }break;
+
+            case SpvOpTypeSampledImage:
+            {
+                typeInfo.type = UniformType::sampler2d;
+                printf("\nSpvOpTypeSampler ");
+                for (size_t j = 0; j < filedcount; ++j)
+                    printf("%-3d", stream.read<uint32_t>());
+            }break;
+
+            case SpvOpTypeRuntimeArray:
+            {
+                printf("\nSpvOpTypeRuntimeArray ");
+                for (size_t j = 0; j < filedcount; ++j)
+                 printf("%-3d", stream.read<uint32_t>());
             }break;
 
             default:

@@ -153,7 +153,8 @@ uint64_t RendererGl::create_vdecl(VertexAttribute * atribs, size_t count)
     }
     vdecl.count = count;
     m_declarations.push_back(vdecl);
-    return m_declarations.size();
+  //  return m_declarations.size();
+    return RenderResource::makehandle(m_declarations.size(), eResourceType_vdecl);
 }
 
 uint64_t RendererGl::create_vb(void * data, size_t size, bool dynamic)
@@ -172,7 +173,7 @@ uint64_t RendererGl::create_vb(void * data, size_t size, bool dynamic)
     CHECK_GL(__FUNCTION__, __FILE__, __LINE__);
 
     m_resources.push_back(res);
-    return m_resources.size();
+    return RenderResource::makehandle(m_resources.size(), eResourceType_vb);
 }
 
 uint64_t RendererGl::create_ib(void * data, size_t size, bool dynamic)
@@ -180,10 +181,21 @@ uint64_t RendererGl::create_ib(void * data, size_t size, bool dynamic)
     return 0;
 }
 
-uint64_t RendererGl::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
+uint64_t RendererGl::create_texture2d(uint16_t width, uint16_t height, int format, int mips, void * data)
 {
     return 0;
 }
+
+uint64_t RendererGl::create_texture3d(uint16_t width, uint16_t height, uint16_t depth, int format, int mips, void * data)
+{
+    return 0;
+}
+
+uint64_t RendererGl::create_textureCube(uint16_t width, uint16_t height, int format, int mips, void * data)
+{
+    return 0;
+}
+
 
 uint64_t RendererGl::create_shader(void * _vdata, size_t _size, void * _pdata, size_t _psize)
 {
@@ -274,23 +286,30 @@ uint64_t RendererGl::create_shader(void * _vdata, size_t _size, void * _pdata, s
         uniformbuff[0] = uniformbuff[0];
     }
 
+   
     glResource res = {};
     res.id = program;
     m_resources.push_back(res);
 
     CHECK_GL(__FUNCTION__, __FILE__, __LINE__);
-    return m_resources.size();
+    return RenderResource::makehandle(m_resources.size(), eResourceType_shader);
 }
 
 uint64_t RendererGl::create_pipeline(uint64_t vdeclid, uint64_t shaderid, RenderStates * rstates /*uint64_t renderpass*/)
 {
+    if (!RenderResource::match(vdeclid, eResourceType_vdecl) || !RenderResource::match(shaderid, eResourceType_shader))
+    {
+        printf("vertex declaration or shader declaration invalid");
+        return 0;
+    }
 
     Pipeline pipeline;
     pipeline.shader = shaderid;
     pipeline.vdecl = vdeclid;
     m_pipelines.push_back(pipeline);
 
-    return m_pipelines.size();
+    //return m_pipelines.size();
+    return RenderResource::makehandle(m_pipelines.size(), eResourceType_pipeline);
 }
 
 uint64_t RendererGl::create_renderpass(/*colorformats * formats, siz_t count, VkFormat depthFormat*/)
@@ -300,7 +319,14 @@ uint64_t RendererGl::create_renderpass(/*colorformats * formats, siz_t count, Vk
 
 uint32_t RendererGl::uniform(uint64_t shader, const char * name)
 {
-    auto & prog = m_resources[shader - 1];
+    if (!RenderResource::match(shader, eResourceType_shader))
+    {
+        printf("vertex declaration or shader declaration invalid");
+        return 0;
+    }
+
+    uint32_t id = RenderResource::getid(shader);
+    auto & prog = m_resources[id - 1];
     // get uniforms
     // return uniform id
     GLint location = glGetUniformLocation(prog.id, name);
@@ -330,8 +356,14 @@ void RendererGl::update_uniform(uint32_t id, eUniformFormat type, const void *da
 
 }
 
-void RendererGl::update_bufferdata(uint64_t id, void * data, size_t size, size_t offset)
+void RendererGl::update_bufferdata(uint64_t vb, void * data, size_t size, size_t offset)
 {
+    if (!RenderResource::match(vb, eResourceType_vb))
+    {
+        printf("mismatch vertex buffer type");
+        return;
+    }
+    uint32_t id = RenderResource::getid(vb);
     auto & buf = m_resources[id - 1];
 
     glBindBuffer(buf.target, buf.id);
@@ -346,14 +378,20 @@ void RendererGl::destroy_resource(uint64_t id)
 
 void RendererGl::bind_pipeline(uint64_t pipid)
 {
-    if (pipid == 0)
+    if (pipid == 0 || !RenderResource::match(pipid, eResourceType_pipeline))
     {
+        printf("\n invalid pipline");
         m_curr_vdecl = 0;
         return;
     }
 
-    auto & pipeline = m_pipelines[pipid - 1];
-    auto & shader = m_resources[pipeline.shader - 1];
+    uint32_t id = RenderResource::getid(pipid);
+
+    auto & pipeline = m_pipelines[id - 1];
+
+    auto shaderid = RenderResource::getid(pipeline.shader);
+
+    auto & shader = m_resources[shaderid - 1];
     m_curr_vdecl = pipeline.vdecl;
 
     glUseProgram(shader.id);
@@ -362,7 +400,15 @@ void RendererGl::bind_pipeline(uint64_t pipid)
 
 void RendererGl::bind_vb(uint64_t vb)
 {
-    auto & buf = m_resources[vb-1];
+    if (vb == 0 || !RenderResource::match(vb, eResourceType_vb))
+    {
+        printf("\n invalid vertex buffer");
+        return;
+    }
+
+    uint32_t id = RenderResource::getid(vb);
+
+    auto & buf = m_resources[id - 1];
     glBindBuffer(buf.target, buf.id);
 
     if (m_curr_vdecl){
@@ -394,7 +440,14 @@ void RendererGl::draw_indexed(uint32_t idxcount)
 
 void RendererGl::apply_vdecl(uint64_t vdeclid)
 {
-    auto & vdecl = m_declarations[vdeclid - 1];
+    if (vdeclid == 0 || !RenderResource::match(vdeclid, eResourceType_vdecl))
+    {
+        printf("\n invalid vertex declaration");
+        return;
+    }
+
+    uint32_t id = RenderResource::getid(vdeclid);
+    auto & vdecl = m_declarations[id - 1];
 
     size_t stride = vdecl.stride;
     size_t count = vdecl.count;

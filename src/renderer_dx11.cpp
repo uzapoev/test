@@ -227,9 +227,20 @@ uint64_t RendererDx11::create_ib(void * data, size_t size, bool dynamic)
 }
 
 
-uint64_t RendererDx11::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
+
+uint64_t RendererDx11::create_texture2d(uint16_t width, uint16_t height, int format, int mips, void * data)
 {
     return 0;
+}
+
+uint64_t RendererDx11::create_texture3d(uint16_t width, uint16_t height, uint16_t depth, int format, int mips, void * data)
+{
+    return 0;
+}
+
+uint64_t RendererDx11::create_textureCube(uint16_t width, uint16_t height, int format, int mips, void * data) 
+{
+    return 0; 
 }
 
 

@@ -498,9 +498,7 @@ void AssetFbx::load_blendhapeinfo(FbxMesh * fbxMesh)
             FbxAnimLayer* animLayer = get_animlayer(0, &frames_count);
             FbxAnimCurve* animCurve = fbxMesh->GetShapeChannel(lBlendShapeIndex, lChannelIndex, animLayer);
 
-
-            int frame_datasie = lVertexCount * lBlendShapeChannelCount * sizeof(vec3);
-
+            int frame_datasize = lVertexCount * lBlendShapeChannelCount * sizeof(vec3);
 
             if (!animCurve) continue;
 
@@ -514,7 +512,7 @@ void AssetFbx::load_blendhapeinfo(FbxMesh * fbxMesh)
 
                 int lStartIndex = -1;
                 int lEndIndex = -1;
-                for (int lShapeIndex = 0; lShapeIndex<lShapeCount; ++lShapeIndex)
+                for (int lShapeIndex = 0; lShapeIndex < lShapeCount; ++lShapeIndex)
                 {
                     if (lWeight > 0 && lWeight <= lFullWeights[0])
                     {
@@ -536,8 +534,6 @@ void AssetFbx::load_blendhapeinfo(FbxMesh * fbxMesh)
                 {
                     double lEndWeight = lFullWeights[0];
                     lWeight = (lWeight / lEndWeight) * 100;     // Calculate the real weight.
-
-                    // Initialize the lDstVertexArray with vertex of base geometry.
                     memcpy(lDstVertexArray, lSrcVertexArray, lVertexCount * sizeof(FbxVector4));
                     for (int j = 0; j < lVertexCount; j++)
                     {
@@ -547,11 +543,23 @@ void AssetFbx::load_blendhapeinfo(FbxMesh * fbxMesh)
                     }
                 }
 
-               // printf("[%d %d]", lStartIndex, lEndIndex);
-            }
+                float bbmin = FBXSDK_FLOAT_MAX;
+                float bbmax = FBXSDK_FLOAT_MIN;
+                for (int v = 0; v < lVertexCount; v++)
+                {
+                    for (int d = 0; d < 3; d++)
+                    {
+                        bbmin = math::min(bbmin, (float)lDstVertexArray[v][d]);
+                        bbmax = math::max(bbmax, (float)lDstVertexArray[v][d]);
+                    }
+                }
+                printf("\nframe[%d]: %.3f : %.3f ", i, bbmin, bbmax);
 
-        }
-    }
+            } // 
+        } // foreach lChannelIndex
+    } //foreach lBlendShapeIndex
+
+    delete [] lDstVertexArray;
 }
 
 #if 0

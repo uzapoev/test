@@ -507,11 +507,20 @@ uint64_t RendererVk::create_ib(void * data, size_t size, bool dynamic)
 }
 
 
-uint64_t RendererVk::create_texture(uint16_t width, uint16_t height, uint16_t depth, int format, void * data, size_t size)
+uint64_t RendererVk::create_texture2d(uint16_t width, uint16_t height, int format, int mips, void * data)
 {
     return 0;
 }
 
+uint64_t RendererVk::create_texture3d(uint16_t width, uint16_t height, uint16_t depth, int format, int mips, void * data)
+{
+    return 0;
+}
+
+uint64_t RendererVk::create_textureCube(uint16_t width, uint16_t height, int format, int mips, void * data)
+{
+    return 0;
+}
 
 //
 // https://vulkan-tutorial.com/Uniform_buffers/Descriptor_layout_and_buffer
@@ -554,6 +563,7 @@ uint64_t RendererVk::create_shader(void * vdata, size_t vsize, void * fdata, siz
     } 
     std::vector<Spirvflect::UniformBufferObject*> vuniforms, funiforms;
     std::vector<Spirvflect::Uniform> vsamplers, fsamplers;
+
     bool vertOk = Spirvflect::analyze(vdata, vsize, &vuniforms, &vsamplers);
     bool fragOk = Spirvflect::analyze(fdata, fsize, &funiforms, &fsamplers);
 
