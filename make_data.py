@@ -64,10 +64,7 @@ def export_textures(filepathes):
     makedirs_silent(dst_compressed_path)
     resize_textures(filepathes, tmp_image_path);
     compress_textures("BC3", tmp_image_path, dst_compressed_path)
-    ##result = subprocess.run([compressonator, "-fd", "BC3", "-fx", "DDS", "-ff", "PNG", "-miplevels", "10", tmp_image_path, dst_compressed_path])
-    #print(result)
-#  if e is '.exr'
-#      subprocess.run([compressonator, "-fd", "BC7", "-fx", "DDS", "-ff", "PNG", "-miplevels", "10", tmp_image_path, dst_compressed_path])
+
 
 def filelist(path):
     flist = list()
