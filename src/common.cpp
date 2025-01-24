@@ -169,13 +169,7 @@ void Time::tick()
 
     _dt = elapsed;
 #elif defined(__NINTENDO__)
-    static double lasttime = 0.0;
-    static nn::os::Tick prevTick = nn::os::GetSystemTick();
 
-    auto startTime = nn::os::GetSystemTick();
-    auto diff = startTime - prevTick;
-    prevTick = startTime;
-    _dt = (float)(diff.ToTimeSpan().GetMilliSeconds()) / 1000.0f;
 #endif
 
     s_dt = _dt;

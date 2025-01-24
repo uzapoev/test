@@ -87,9 +87,11 @@ JsonSerializeExternal(components::renderer,
     SerializeFieldWithKey("lightmapScaleOffset", lightmap_scale_offset)
 );
 
-JsonSerializeExternal(components::lodgroup,
-    SerializeFieldWithKey("mesh", renderers)
-);
+JsonSerializeExternal(components::lodgroup, SerializeFieldWithKey("mesh", renderers));
+JsonSerializeExternal(vec2, SerializeFieldWithKey("x", x), SerializeFieldWithKey("y", y));
+JsonSerializeExternal(vec3, SerializeFieldWithKey("x", x), SerializeFieldWithKey("y", y), SerializeFieldWithKey("z", z));
+JsonSerializeExternal(vec4, SerializeFieldWithKey("x", x), SerializeFieldWithKey("y", y), SerializeFieldWithKey("z", z), SerializeFieldWithKey("w", w));
+JsonSerializeExternal(quat, SerializeFieldWithKey("x", x), SerializeFieldWithKey("y", y), SerializeFieldWithKey("z", z), SerializeFieldWithKey("w", w));
 
 JsonSerializeExternal(components::transform,
     SerializeFieldWithKey("position", position),

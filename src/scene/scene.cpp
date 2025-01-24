@@ -18,11 +18,6 @@ void camera::update()
 }
 
 
-JsonSerializeExternal(vec3, SerializeField(x), SerializeField(y), SerializeField(z));
-JsonSerializeExternal(vec4, SerializeField(x), SerializeField(y), SerializeField(z), SerializeField(w));
-JsonSerializeExternal(quat, SerializeField(x), SerializeField(y), SerializeField(z), SerializeField(w));
-
-
 scene scene::load(const std::string& path)
 {
     measure ms("\nscene loading");
