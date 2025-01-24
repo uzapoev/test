@@ -1,56 +1,60 @@
 #ifndef __FBX_NEW_LOADER__
 #define __FBX_NEW_LOADER__
 
+#ifdef _MSC_VER 
+    #pragma warning(push)
+    #pragma warning(disable: 26495)
+#endif
+
 #include <assert.h>
 #include <string>
 #include <vector>
 #include <map>
-#include <unordered_map>
-
-#define FBXSDK_SHARED
-#include <fbxsdk.h>
 
 
-#ifdef _WIN32
-    #ifdef _DEBUG
-//        #pragma comment(lib, "D:/sdk/fbxsdk/lib/vs2012/x86/debug/libfbxsdk.lib")
-        #pragma comment(lib, "vs2012/x86/debug/libfbxsdk.lib")// libfbxsdk-md libfbxsdk-mt
-    #else
-        #pragma comment(lib, "vs2012/x86/release/libfbxsdk.lib")
-    #endif
+#if __has_include(<fbxsdk.h>)
+    #define FBXSDK_INSTALLED
+#endif
+
+#ifdef FBXSDK_INSTALLED
+    #define FBXSDK_SHARED
+    #include <fbxsdk.h>
+#endif
+
+#ifdef _MSC_VER 
+#pragma warning(pop)
 #endif
 
 #include "../mathlib.h"
-//#include "../mathlibex.h"
 
-
-
-
-struct vertexPNBTWI  
+struct vertexPNBTWI
 {
-    vec3 position; 
-    vec3 normal; 
-    vec3 tangent; 
-    vec2 texcoord; 
-    vec4 weights; 
-    vec4 indices; 
+    vec3 position;
+    vec3 normal;
+    vec3 tangent;
+    vec4 texcoord;
+    vec4 weights;
+    vec4 indices;
 };
 
 
 struct vertexPNBTWIidx
 {
-    vec3 position;
-    vec3 normal;
-    vec3 tangent;
-    vec2 texcoord0;
-    vec2 texcoord1;
-    vec4 weights;
-    vec4 indices;
+    vec3        position;
+    vec3        normal;
+    vec3        tangent;
+    vec2        texcoord0;
+    vec2        texcoord1;
+    vec2        texcoord2;
+    vec2        texcoord3;
+    vec4        weights;
+    vec4        indices;
+    uint32_t    color = 0;
 
-    unsigned int idx; // control point idx
-    mutable unsigned int _hash;
+    unsigned int idx = 0; // control point idx
+    mutable unsigned int _hash = 0;
 
-    vertexPNBTWIidx() :_hash(0){}
+    vertexPNBTWIidx() {}
 
     inline bool operator == (const vertexPNBTWIidx & v) throw()
     {
@@ -69,6 +73,10 @@ struct vertexPNBTWIidx
         _hash = (_hash * 397) ^ (int)floor(position.x * 10000.0f);
         _hash = (_hash * 397) ^ (int)floor(position.y * 10000.0f);
         _hash = (_hash * 397) ^ (int)floor(position.z * 10000.0f);
+
+        _hash = (_hash * 397) ^ (int)floor(normal.x * 10000.0f);
+        _hash = (_hash * 397) ^ (int)floor(normal.y * 10000.0f);
+        _hash = (_hash * 397) ^ (int)floor(normal.z * 10000.0f);
 
         _hash = (_hash * 397) ^ (int)floor(texcoord0.x * 10000.0f);
         _hash = (_hash * 397) ^ (int)floor(texcoord0.y * 10000.0f);
@@ -132,7 +140,7 @@ public:
 
     template<> void dump(const FbxDouble4 & value)
     {
-        dump(vec4((float)value[0], (float)value[1], (float)value[2], (float)value[4]));
+        dump(math::make_vec4((float)value[0], (float)value[1], (float)value[2], (float)value[4]));
     }
 
     template<> void dump(const vec4& value)
@@ -161,12 +169,14 @@ class AssetFbx
 public:
     AssetFbx();
 
-    void load(const char * path);
+    bool load(const char * path);
     void unload();
 
     void scan(FbxNode * node);
    // void draw(iEngine * engine);
-
+private:
+    static void load_static_mesh(const std::string & path, std::vector<vec3> * verts, std::vector<uint16_t> *indx);
+    void save(const char * path);
 //    const aabbox &  aabb()const  { return  m_aabb; }
 public:
 
@@ -186,8 +196,8 @@ public:
         void evaluate_global()
         {
             // matGloal = matAnim * matInv
-            globalrot = animated_rot * bind_rot.inverted();
-            globalpos = (globalrot.rotate_point(-bind_pos) + animated_pos);
+            globalrot = quat::mul(animated_rot, bind_rot.inverted());
+            globalpos = quat::mul(globalrot, -bind_pos) + animated_pos;
         }
 
         vec3 globalpos;
@@ -197,46 +207,51 @@ public:
     struct s_mesh
     {
         std::string                     name;
-        std::vector<joint>              m_skeleton;
-        std::vector<vertexPNBTWIidx>    m_vertines;
-        std::vector<unsigned short>     m_indexes;
-
-       // s_mesh() :_vb(NULL), _ib(NULL){}
-        //VertexBufferHandle  _vb;
-        //IndexBufferHandle   _ib;
+        std::vector<joint>              skeleton;
+        std::vector<vertexPNBTWIidx>    vertices;
+        std::vector<uint32_t>           indexes;
+        bool                            skinned;
     };
-    //aabbox  m_aabb;
+
+    struct s_node
+    {
+        struct {
+            vec3                        position;
+            vec3                        rotation;
+            vec3                        scale;
+        } global, local;
+        s_mesh *                        mesh = nullptr;
+    };
 
     struct s_animation
     {
-        std::vector<joint>      m_joints;
-        unsigned int            trackCount;
-        struct AnimationTrack*  tracks;
+        std::vector<joint>              joints;
+        unsigned int                    trackCount;
+        struct AnimationTrack*          tracks;
     };
 
 private:
-    s_mesh *                        loadmesh(FbxMesh * node);
-    s_animation *                   loadanim();
-    void                            buildhierarchy();
-    void                            loadbinds();
+    s_mesh *                            loadmesh(FbxMesh * node);
+    s_animation *                       loadanim();
+    void                                buildhierarchy();
+    void                                load_bind_poses();
 
 private:
-    FbxAnimLayer *                  get_animlayer(int id, int * frames_count);
+    FbxAnimLayer *                      get_animlayer(int id, int * frames_count);
 
 private:
-    void                            load_skininfo(FbxMesh * fbxMesh);
-    void                            load_blendhapeinfo(FbxMesh * fbxMesh);
+    void                                load_skin(FbxMesh * fbxMesh, s_mesh * mesh);
+    void                                load_blendshape(FbxMesh * fbxMesh, s_mesh* mesh);
 
 public:
     int                                 m_frames;
     float                               m_time;
     std::vector<joint>                  m_joints;
     std::vector<s_mesh*>                m_meshes_new;
-    
-    
+    std::vector<s_node*>                m_nodes;
 
-    std::vector<FbxMesh*>               m_meshes;
-    std::vector<FbxNode*>               m_bones;
+    std::vector<FbxMesh*>               m_fbx_node_meshes;
+    std::vector<FbxNode*>               m_fbx_node_bones;
 
 private:
     FbxManager *                        m_pFbxSdkManager;

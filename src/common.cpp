@@ -2,6 +2,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <immintrin.h>
 #endif
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
@@ -20,7 +21,8 @@
 #define snprintf _snprintf
 #endif
 
-
+std::unordered_set <std::string>atomic_string::interned;
+int measure::intend = 0;
 /*
 void bin2cstr(const char * filepath, const char * varname, const void * _data, size_t size)
 {
@@ -181,6 +183,57 @@ void Time::tick()
 }
 
 
+std::string bin2hex::dump(const char* data, size_t size, const char * name)
+{
+    const uint8_t* u8data = (uint8_t*)data;
+    const int hex_symbol_count = 16;
+    const int hex_symbol_width = hex_symbol_count * 6; // 6 is len of "0x%02x, "; 
+    const int text_symbol_pos = hex_symbol_width + 3; // comment with space
+
+    std::string result;
+    result.reserve(size);
+
+    char buffer[text_symbol_pos + hex_symbol_count + 2] = "";
+    char tmp[256] = "";
+    sprintf(buffer, "static const unsigned char %s[%llu] =\n{\n", name, size);
+
+    result.append(buffer);
+
+    uint32_t hexPos = 0;
+    uint32_t asciiPos = 0;
+    for (uint32_t ii = 0; ii < size; ++ii)
+    {
+        snprintf(&buffer[hexPos], hex_symbol_width - hexPos, "0x%02x, ", u8data[asciiPos]);
+        snprintf(&buffer[hex_symbol_width], 3, "// " );
+
+        sprintf(tmp, "%*0x%02x,", asciiPos*6, u8data[asciiPos]);
+        buffer[text_symbol_pos + asciiPos] = isprint(u8data[asciiPos]) && u8data[asciiPos] != '\\' ? u8data[asciiPos] : '.';
+    
+        asciiPos++;  
+        hexPos += 6;
+    
+        if (hex_symbol_count == asciiPos)
+        {
+            result.append("    ").append(buffer).append("\n");
+            u8data += asciiPos;
+            hexPos = 0;
+            asciiPos = 0;
+    
+            memset(buffer, 0, sizeof(buffer));
+        }
+    }
+    
+    if (0 != asciiPos)
+    {
+        result.append("    ").append(buffer).append("\n");
+    }
+    
+    result += "};\n";
+
+    return std::move(result);
+}
+
+
 size_t Hash::murmur32(const void* key, size_t size, unsigned int seed)
 {
     // 'm' and 'r' are mixing constants generated offline.
@@ -189,7 +242,7 @@ size_t Hash::murmur32(const void* key, size_t size, unsigned int seed)
     const int r = 24;
 
     // Initialize the hash to a 'random' value
-    unsigned int h = seed ^ size;
+    size_t h = seed ^ size;
 
     // Mix 4 bytes at a time into the hash
     const unsigned char * data = (const unsigned char *)key;
@@ -212,10 +265,10 @@ size_t Hash::murmur32(const void* key, size_t size, unsigned int seed)
     // Handle the last few bytes of the input array
     switch (size)
     {
-    case 3: h ^= data[2] << 16;
-    case 2: h ^= data[1] << 8;
-    case 1: h ^= data[0];
-        h *= m;
+        case 3: h ^= data[2] << 16;
+        case 2: h ^= data[1] << 8;
+        case 1: h ^= data[0];
+            h *= m;
     };
 
     // Do a few final mixes of the hash to ensure the last few bytes are well-incorporated.
@@ -253,14 +306,14 @@ int64_t Hash::murmur64(const void* key, size_t len, int64_t seed)
 
     switch (len & 7)
     {
-    case 7: h ^= int64_t(data2[6]) << 48;
-    case 6: h ^= int64_t(data2[5]) << 40;
-    case 5: h ^= int64_t(data2[4]) << 32;
-    case 4: h ^= int64_t(data2[3]) << 24;
-    case 3: h ^= int64_t(data2[2]) << 16;
-    case 2: h ^= int64_t(data2[1]) << 8;
-    case 1: h ^= int64_t(data2[0]);
-        h *= m;
+        case 7: h ^= int64_t(data2[6]) << 48;
+        case 6: h ^= int64_t(data2[5]) << 40;
+        case 5: h ^= int64_t(data2[4]) << 32;
+        case 4: h ^= int64_t(data2[3]) << 24;
+        case 3: h ^= int64_t(data2[2]) << 16;
+        case 2: h ^= int64_t(data2[1]) << 8;
+        case 1: h ^= int64_t(data2[0]);
+            h *= m;
     };
 
     h ^= h >> r;
@@ -282,49 +335,91 @@ size_t Hash::bernstein_ci(const void* data_in, size_t size, unsigned int seed)
 }
 
 
+size_t Utf8::wchar_to_utf8(const wchar_t* w, size_t size, uint8_t* s)
+{
+    uint32_t  c;
+    short* p = (short*)w;
+    byte* q = (byte*)s; byte* q0 = q;
+    while (1) {
+        c = *p++;
+        if (c == 0) break;
+        if (c < 0x080) *q++ = c; else
+            if (c < 0x800) *q++ = 0xC0 + (c >> 6), *q++ = 0x80 + (c & 63); else
+                *q++ = 0xE0 + (c >> 12), *q++ = 0x80 + ((c >> 6) & 63), *q++ = 0x80 + (c & 63);
+    }
+    *q = 0;
+    return q - q0;
+}
+
+size_t Utf8::utf8_to_wchar(const uint8_t* s, size_t size, wchar_t* w)
+{
+    uint32_t  cache, wait, c;
+    byte* p = (byte*)s;
+    short* q = (short*)w; short* q0 = q;
+    while (1) {
+        c = *p++;
+        if (c == 0) break;
+        if (c < 0x80) cache = c, wait = 0; else
+            if ((c >= 0xC0) && (c <= 0xE0)) cache = c & 31, wait = 1; else
+                if ((c >= 0xE0)) cache = c & 15, wait = 2; else
+                    if (wait) (cache <<= 6) += c & 63, wait--;
+        if (wait == 0) *q++ = cache;
+    }
+    *q = 0;
+    return q - q0;
+}
 
 
+
+static const char _guid_digits[] = "0123456789abcdef";
+
+Guid Guid::generate_from_seed(size_t seed)
+{
+    Guid result;
+    srand((unsigned int)seed);
+    char* ptr = result.m_uuid;
+    for (size_t i = 0; i < (sizeof(result.m_uuid) >> 1); i++)
+    {
+        *ptr++ = _guid_digits[(rand() % 255 >> 4) & 0xf];
+        *ptr++ = _guid_digits[(rand() % 255 >> 0) & 0xf];
+    }
+    return result;
+}
 
 void Guid::generate(char *buff, size_t size)
 {
     char tmp[38] = "";
 
-    // int seed =  time(NULL);// ^ (clock() << 16);
-    // printf("\n%d", seed);
-    // srand(seed);// ^ tv.tv_sec ^ tv.tv_usec);
+    time_t seed = time(NULL);// ^ (clock() << 16);
+    srand((unsigned int)seed);// ^ tv.tv_sec ^ tv.tv_usec);
     for (size_t i = 0; i < sizeof(tmp); i++)
     {
         tmp[i] = rand() % 255;
     }
-    const char digits[] = "0123456789abcdef";
 
     char * ptr = buff;
     for (size_t i = 0; i < (size >> 1); i++)
     {
-        *ptr++ = digits[(tmp[i] >> 4) & 0xf];
-        *ptr++ = digits[(tmp[i] >> 0) & 0xf];
+        *ptr++ = _guid_digits[(tmp[i] >> 4) & 0xf];
+        *ptr++ = _guid_digits[(tmp[i] >> 0) & 0xf];
     }
     *ptr = '\0';
 }
 
-bool Guid::isguid(const char *buff)
+bool Guid::validate(const char *buff)
 {
-    if (!buff) return false;
-    const char keys[] = "0123456789abcdef";
-    size_t len = strlen(buff);
-    // pch = strpbrk(str, key);
-    for (size_t i = 0; i < len; ++i){
-        const char * ptr = strchr(keys, buff[i]);
-        if (!ptr)
+    size_t len = buff ? strlen(buff) : 0;
+    for (size_t i = 0; i < len; ++i) {
+        if (!strchr(_guid_digits, buff[i]))
             return false;
     }
-    return true;
+    return len ? true : false;
 }
 
 
 Guid::Guid(void)
 {
-    generate(m_uuid, sizeof(m_uuid));
+    memset(m_uuid, 0, sizeof(m_uuid));
 }
 
 Guid::Guid(const char * uuid)
@@ -404,11 +499,14 @@ namespace quantinizer
 
     uint16_t encode16f(float value)
     {
+    #ifdef SSE
+        _mm_cvtph_ps();
+    #endif
         Bits v, s;
         v.f = value;
         uint32_t sign = v.si & signN;
         v.si ^= sign;
-        sign >>= shiftSign; // logical shift
+        sign >>= shiftSign;
         s.si = mulN;
         s.si = (int32_t)(s.f * v.f); // correct subnormals
         v.si ^= (s.si ^ v.si) & -(minN > v.si);
@@ -437,6 +535,22 @@ namespace quantinizer
         v.si ^= (s.si ^ v.si) & mask;
         v.si |= sign;
         return v.f;
+    }
+
+    void encode101010_quat(uint32_t& out, float x, float y, float z, float w)
+    {
+    }
+
+    void decode101010_quat(float& x, float& y, float& z, float& w, uint32_t in)
+    {
+    }
+
+    void encode555_vec(uint16_t& out, float x, float y, float z)
+    {
+    }
+
+    void decode555_vec(float& x, float& y, float& z, uint16_t in)
+    {
     }
 }
 

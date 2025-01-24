@@ -1,265 +1,236 @@
-#include <windows.h>
-#include <tchar.h>
-
 #include <stdio.h>
 #include <time.h> 
 #include <sys/stat.h> // stat
+#include <stdarg.h> // stat
 
-#include <d3dcompiler.h>
+#include <array>
+#include <filesystem>
+#include <unordered_set>
 
-#include <memory>
-
-
+#include "platform/platform.h"
 #include "mathlib.h"
-#include "renderer_gl.h"
-#include "renderer_vk.h"
-#include "renderer_dx11.h"
+#include "common.h"
 
-#include "assets/asset_fbx.h"
+#include "scene/scene.h"
 
-//#ifndef _countof
-//#endif
+#include "render_manager.h"
+#include "resource_manager.h"
+
+#include "assets/asset_unity.h"
+
+//#include "json.h"
+//#include "ecs.h"
+//#include "gui/gui.h"
+//#include "memmgr.h"
 
 
-#pragma comment(lib, "d3dcompiler.lib")
+extern void memory_enable_tracking();
+extern void memory_enable_allocation_traking(bool);
 
-long create_window(const char * caption)
+
+struct instance_data
 {
-    auto wndClassName = _T("vkwnd");
-    HINSTANCE instance = GetModuleHandle(NULL);
-    WNDCLASS wndclass = { 0 };
-    {
-        wndclass.style = CS_HREDRAW | CS_VREDRAW;
-        wndclass.hInstance = instance;                      // Assign our hInstance
-        wndclass.hIcon = LoadIcon(NULL, IDI_APPLICATION);   // General icon
-        wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);     // An arrow for the cursor
-        wndclass.hbrBackground = (HBRUSH)(COLOR_WINDOW);    // A white window
-        wndclass.lpszClassName = wndClassName;              // Assign the class name
-        wndclass.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)->LRESULT {
-                if (msg == WM_DESTROY) 
-                    ::PostQuitMessage(0);
-                return DefWindowProc(hwnd, msg, wParam, lParam);
-            }; 
-    }
-    if (!RegisterClass(&wndclass))
-    {
-        return 0;
-    }
+    mat4    model;
+};
 
-    mat4 ms, mp, mr, m;
-  //  ms.scale(vec3(1, 1, 3));
-    mp.translate(vec3(10, 20, 30));
-
-    vec3 p, s;
-    quat q;
-    mr = mat4::FromQuat(quat::FromEulers(30, 45, 90));
-
-    m = ms * mp * mr;
-    m.decompose(p, q, s);
-
-    int width = GetSystemMetrics(SM_CXSCREEN) >> 1;
-    int height = GetSystemMetrics(SM_CYSCREEN) >> 1;
-
-    DWORD wndStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-    RECT win_rect = { 0, 0, width, height };
-    AdjustWindowRect(&win_rect, wndStyle, false);
-
-    HWND hWnd = CreateWindowEx(WS_EX_APPWINDOW, wndClassName, _T(""), wndStyle, 0, 0,
-        win_rect.right - win_rect.left,
-        win_rect.bottom - win_rect.top,
-        0, 0, GetModuleHandle(NULL), 0);
-
-    ShowWindow(hWnd, SW_SHOWNORMAL);
-    SetForegroundWindow(hWnd);
-    UnregisterClass(wndClassName, instance);
-
-    return long(hWnd);
-}
-
-bool process_msg()
+struct logger
 {
-    MSG msg;
-    // Application::shared()->kbrdBtnDown(msg.wParam);
-    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-    {
-        if (msg.message == WM_QUIT)
-            return false;
-
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-    return true;
-}
-
-
-size_t filedata(const char * path, char **buff)
-{
-#ifdef _WIN32
-    struct _stat32 st = { 0 };
-    _stat32(path, &st);
-#else
-    struct stat st = { 0 };
-    stat(path, &st);
-#endif
-    if (st.st_size == 0)
-        return st.st_size;
-
-    *buff = (char*)malloc(st.st_size+1);
-    memset(*buff, 0, st.st_size + 1);
-
-    FILE * file = fopen(path, "rb");
-    fread(*buff, 1, st.st_size, file);
-    fclose(file);
-    return st.st_size;
-}
-
-size_t dxcompiledshader(const char * data, size_t size, const char* entry, const char * target, char **blob)
-{
-    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
-#if defined( DEBUG ) || defined( _DEBUG )
-    flags |= D3DCOMPILE_DEBUG;
-#endif
-    const D3D_SHADER_MACRO defines[] = { /*"EXAMPLE_DEFINE", "1",*/ NULL, NULL };
-    ID3DBlob* shaderBlob = nullptr;
-    ID3DBlob* errorBlob = nullptr;
-    D3DCompile(data, size, NULL, defines, D3D_COMPILE_STANDARD_FILE_INCLUDE, entry, target, flags, 0, &shaderBlob, &errorBlob);
-
-    if (errorBlob)
-    {
-        const char *msg = (const char*)errorBlob->GetBufferPointer();
-        printf("\n%s", msg);
-    }
-
-    *blob = (char*)shaderBlob->GetBufferPointer();
-    return shaderBlob->GetBufferSize();
-}
-
-struct vertex {
-    vec4    position;
-    color32 color;
+    static void log(const char * msg)         { printf("\x1b[37m %s \033[0m", msg? msg : ""); }
+    static void log_error(const char * msg)   { printf("\x1B[31m %s \033[0m", msg? msg : ""); }
+    static void log_warning(const char * msg) { printf("\x1b[33m %s \033[0m", msg? msg : ""); }
 };
 
 
+static scene                g_scene;
 
-int main(int argc, char ** argv)
+
+void scene_test(gfx_context_t* ctx, const char * data_path, const char* scene_name)
 {
-    SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE), { 200, 600 });
-
-    long hwnd = create_window("vk sample");
-
-
-    AssetFbx fbx;
-
-   // fbx.load("../art/fbx/blendshapes/Recording_RawData.fbx");
+    g_scene = scene::load(scene_name);
+}
 
 
+void log_func(gfx_msg type, const char* msg, ...)
+{
+    va_list arglist;
+    va_start(arglist, msg);
+
+    // 30 - black, 31 - red, 32 - green, 33 - yellow, 34 - blue, 
+    switch(type) {
+        case gfx_msg_info:      printf("\x1b[32m"); break;
+        case gfx_msg_warning:   printf("\x1B[33m"); break;
+        case gfx_msg_error:     printf("\x1b[31m"); break; // 
+    }
+    vprintf(msg, arglist);
+    va_end(arglist);
+    printf("\033[0m\n");
+}
 
 
-  //  srand((unsigned int)time(0));
-    srand(time(0));
+camera g_camera;
+static gfx_context_t* ctx = nullptr;
+static gfx_swapchain_t* swapchain = nullptr;
+static gfx_pipeline_t* pipeline = nullptr;
+static gfx_command_buffer_t* cmds[2] = {};
 
-    auto apitype = eRenderApi_gl;
+static uint64_t mvp_location = 0;
+uintptr_t g_handle;
 
-    std::unique_ptr<iRenderer> renderer;
-    switch (apitype)
+
+void platform_main(uintptr_t handle, int argc, char** argv)
+{
+    g_handle = handle;
+    gfx_settings_t settings = { "test.app" };
+        settings.handle = handle;
+        settings.backend = gfx_backend_vulkan;
+     //   settings.options = gfx_options_debug | gfx_options_verbose | gfx_options_callstack;
+        settings.dbglog = log_func;
+        settings.allocator.allocate_pfn = [](size_t size) -> void* { return calloc(1, size); };
+        settings.allocator.realloc_pfn = [](void* ptr, size_t size) -> void* { return realloc(ptr, size); };
+        settings.allocator.free_pfn = [](void* ptr) -> void { return free(ptr); };
+    gfx_init(&settings, &ctx);
+    gfx_create_swapchain(ctx, handle, &swapchain);
+
+    gfx_shader_t* compute = nullptr;
+    create_shader_from_file_path(ctx, "../data/shaders/compute.hlsl", &compute);
+
+    resource_manager::create_and_make_shader(ctx);
+    resource_manager::shared()->mount("../data/");
+
+    cmds[0] = gfx_create_cmd2(ctx);
+    cmds[1] = gfx_create_cmd2(ctx);
+
+    gfx_shader_t* shader = nullptr;
+    create_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
+
+    //gfx_descriptor_set_t* sets = gfx_create_descriptor_set2(ctx, shader);
+
+    gfx_vertex_attribute attributes[] = {
+        { 0, 0, gfx_vertex_format_float4,   offsetof(vertex, position)  },
+        { 1, 0, gfx_vertex_format_float4,   offsetof(vertex, uv)        },
+        { 2, 0, gfx_vertex_format_float4,   offsetof(vertex, normal)    },
+    };
+
+    gfx_vertex_slot_t slots[] = {
+        {0, sizeof(vertex), gfx_vertex_rate_vertex},
+   //     {1, sizeof(instance_data), gfx_vertex_rate_instance}
+    };
+
+    gfx_pipeline_desc_t piplene_desc = {};
+        piplene_desc.shader = shader;
+        piplene_desc.assembly.topology = gfx_topology_triangles;
+        piplene_desc.assembly.attributes = attributes;
+        piplene_desc.assembly.attributes_count = _countof(attributes);
+        piplene_desc.assembly.slots = slots;
+        piplene_desc.assembly.slot_count = _countof(slots);
+    pipeline = gfx_create_pipeline2(ctx, &piplene_desc);
+
+    mvp_location            = gfx_uniform_location(shader, "mvp");
+    auto color_location     = gfx_uniform_location(shader, "_color");
+    auto texture_location   = gfx_uniform_location(shader, "_texture0");
+    auto sampler_location   = gfx_uniform_location(shader, "_textureSampler");
+    auto lightmap_location  = gfx_uniform_location(shader, "_lightmap");
+    auto lightmap_scale_offset_location = gfx_uniform_location(shader, "lightmap_scale_offset");
+
+    gfx_sampler_desc_t linear_filtering = {};
+        linear_filtering.minmag = gfx_filter_linear;
+        linear_filtering.mipmap = gfx_filter_linear;
+   //     linear_filtering.anisotropy = 8;
+    gfx_sampler_t* sampler = gfx_create_sampler2(ctx, &linear_filtering);
+
+    rect_t rc = platform_get_window_size(handle);
+    uint16_t width = rc.w - rc.x;
+    uint16_t height = rc.h - rc.y;
+    float aspect = (float)(width) / (float)(height);
+
+    g_camera.set_fov(60);
+    g_camera.set_near_far(0.1f, 1500.0f);
+    g_camera.set_apect(aspect);
+    g_camera.set_pos(math::make_vec3(0, 0, -10));
+    g_camera.set_target(math::make_vec3(0, 0, 0));
+
+ //   scene_test(ctx, "../data/unity", "Southside.big.json");
+    scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
+}
+
+
+void update_camera(camera & cam)
+{
+    vec3 dir;
+    dir += input_kb_state(Input::Keyboard::Up)    ?  math::Up      : math::Zero;
+    dir += input_kb_state(Input::Keyboard::Down)  ?  math::Down    : math::Zero;
+    dir += input_kb_state(Input::Keyboard::W)     ? -cam.forward() : math::Zero;
+    dir += input_kb_state(Input::Keyboard::S)     ?  cam.forward() : math::Zero;
+    dir += input_kb_state(Input::Keyboard::A)     ?  cam.left()    : math::Zero;
+    dir += input_kb_state(Input::Keyboard::D)     ? -cam.left()    : math::Zero;
+    dir *= input_kb_state(Input::Keyboard::Shift) ?  8.0f : 1.0f;
+    auto p = input_point_pos();
+
+    vec2 mp = { (float)-p.dx, (float)p.dy };
+    cam.set_mouse_dt(mp);
+    cam.move(dir * Time::dt() * 20.0f);
+    cam.update();
+}
+
+
+void platform_tick(void* userdata)
+{
+    Time::tick();
+
+    update_camera(g_camera);
+
+    if(input_kb_state(Input::Keyboard::NumPad_Add) )
+        g_camera.set_fov(g_camera.m_fov + 0.1f);
+
+    if (input_kb_state(Input::Keyboard::NumPad_Subtract))
+        g_camera.set_fov(g_camera.m_fov - 0.1f);
+
+    rect_t rect = platform_get_window_size(g_handle);
+
+    float width = (float)(rect.w - rect.x);
+    float height = (float)(rect.h - rect.y);
+
+    g_camera.setup(g_camera.m_fov, width / height, 0.001f, 1550.0f);
+
+    mat4 vp = g_camera.vp();
+
+    auto & render_queue = g_scene.visible();
+
+    for (int i = 0; i < render_queue.size(); ++i)
     {
-        case eRenderApi_gl: renderer = std::make_unique<RendererGl>(); break;
-        case eRenderApi_vk: renderer = std::make_unique<RendererVk>(); break;
-        case eRenderApi_dx11: renderer = std::make_unique<RendererDx11>(); break;
+        mat4 mvp = math::mul(vp, render_queue[i].transform);
+        gfx_uniform_set_buffer_data(render_queue[i].material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
     }
 
-    if (!renderer->initialize(hwnd))
-        return 0;
 
-    char * frag = NULL;
-    char * vert = NULL;
-    size_t fsize = 0;
-    size_t vsize = 0;
+    gfx_render_target_t* target = nullptr;
+    int32_t idx = gfx_acquire_img(ctx, swapchain, &target);
+    if (idx < 0) 
+        return;
 
-    switch (apitype)
-    {
-        case eRenderApi_gl: {
-            size_t fsize = filedata("../data/shaders/simple.frag", &frag);
-            size_t vsize = filedata("../data/shaders/simple.vert", &vert);
-        }break;
+    auto cmd = cmds[idx];
 
-        case eRenderApi_vk: {
-            fsize = filedata("../data/shaders/simple.frag.spv", &frag);
-            vsize = filedata("../data/shaders/simple.vert.spv", &vert);
-        }break;
-
-        case eRenderApi_dx11: {
-            char * dxfx = NULL;
-            size_t dxsize = filedata("../data/shaders/simple.fx", &dxfx);
-            vsize = dxcompiledshader(dxfx, dxsize, "VS", "vs_4_0", &vert);
-            fsize = dxcompiledshader(dxfx, dxsize, "PS", "ps_4_0", &frag);
-        }break;
-
-        default: 
-            assert(false);
-        break;
-    }
+    gfx_cmd_begin(cmd);
+    gfx_cmd_begin_pass(cmd, target);
+    gfx_cmd_bind_pipeline(cmd, pipeline);
     
-    VertexAttribute attributes[] = {
-        { eVertexAttrib_Position,   eVertexFormat_float4},
-        { eVertexAttrib_Color,      eVertexFormat_byte4 }
-    };
-    vertex vertexes[] = {
-        { { 0.0f, 0.0f, 0.0, 1.0 }, { 0xFFFFFFFF } },
-        { { 0.0f, 1.0f, 0.0, 1.0 }, { 0xFFFFFFFF } },
-        { { 1.0f, 1.0f, 0.0, 1.0 }, { 0xFFFFFFFF } },
-    };
+    gfx_pipeline_t * curr_pipeline = nullptr;
 
-    vertex vertexes2[] = {
-        { { 0.0f, 0.0f, 0.0, 1.0, }, { 0xFFFFFFFF } },
-        { { 0.0f, -1.0f, 0.0, 1.0, }, { 0xFFFFFFFF } },
-        { { -1.0f, -1.0f, 0.0, 1.0, }, { 0xFFFFFFFF } },
-    };
-
-    uint16_t indexes[] = {
-        0, 1, 2, 1, 2, 3
-    };
-
-    RenderStates states;
-
-    uint64_t vdecl = renderer->create_vdecl(attributes, _countof(attributes));
-    uint64_t shader = renderer->create_shader(vert, vsize, frag, fsize);
-    uint64_t pipeline = renderer->create_pipeline(vdecl, shader, &states);
-
-    uint64_t vb = renderer->create_vb(vertexes, _countof(vertexes) * sizeof(vertexes[0]), false);
-    uint64_t vb1 = renderer->create_vb(vertexes2, _countof(vertexes2) * sizeof(vertexes[0]), false);
-
-    uint64_t ib = renderer->create_ib(indexes,  _countof(indexes)  * sizeof(uint16_t), false);
-
-
-    uint32_t umvp = renderer->uniform(shader, "mvp");
-    auto view = mat4::lookAtRH(vec3(0.0f, 0.0f, -10.0f), vec3::Zero, vec3::Up);
-    auto proj = mat4::perspectiveFovRH(45.0f, 1.3f, 0.1f, 1000.0f);
-    auto viewproj = proj*view;
-    renderer->update_uniform(umvp, eUniformFormat_mat4, &viewproj, sizeof(mat4));
-
-    auto f2uc = FloatConvert::ToUint(1.2345, -5.0, 1.0/5.0, 8);
-    auto uc2f = FloatConvert::FromUint(f2uc, -5.0, 5.0, 8);
-
-    while (process_msg())
+    for (int i = 0; i < render_queue.size(); ++i)
     {
-        renderer->begin();
-
-        if (pipeline)
+        const renderer_t& renderer = render_queue[i];
+        if(curr_pipeline != renderer.material->instance->pipeline)
         {
-            renderer->bind_pipeline(pipeline);
-            //   renderer->update_uniform(mvp, eUniform_mat4, &mat);
-
-            renderer->bind_vb(vb);
-            renderer->draw_array(0, _countof(vertexes));
-
-            renderer->bind_vb(vb1);
-            renderer->draw_array(0, _countof(vertexes2));
+            curr_pipeline = renderer.material->instance->pipeline;
+            gfx_cmd_bind_pipeline(cmd, curr_pipeline);
         }
+        draw_renderer(cmd, &renderer);
+    }
+/**/
+    gfx_cmd_end_pass(cmd);
+    gfx_cmd_end(cmd);
 
-        renderer->end();
-        renderer->present();
-    };
+    gfx_submit_cmd(ctx, cmd, gfx_submit_wait_for_image_ready);
 
-    return 0;
+    gfx_present_img(ctx, swapchain, idx);
 }

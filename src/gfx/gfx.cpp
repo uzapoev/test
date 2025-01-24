@@ -1,0 +1,919 @@
+#include "gfx.h"
+
+#ifdef GFX_PLATFORM_WIN
+    #include <windows.h>
+    #include <dbghelp.h>
+    #pragma comment(lib, "dbghelp.lib")
+#endif
+
+#include <math.h>
+#include <memory.h> // memset
+#include <thread>
+
+#ifndef __cplusplus
+    #define nullptr     NULL
+#endif
+
+#if __has_include(<vulkan/vulkan.h>)
+#define VULKAN_AVAILABLE
+#endif
+
+#if __has_include(<webgpu/webgpu.h>)
+#define WEBGPU_AVAILABLE
+#endif
+
+#pragma region handle pool
+
+#define HANDLEMASK 0xFFFF
+
+#define HANDLE_INDEX(_handle_)      ( ((uint64_t)_handle_)       & HANDLEMASK )
+#define HANDLE_GENERATION(_handle_) ( ((uint64_t)_handle_ >> 16) & HANDLEMASK )
+#define HANDLE_MASK(_handle_)       ( ((uint64_t)_handle_ >> 32) & HANDLEMASK )
+#define HANDLE_HASH(_handle_)       ( ((uint64_t)_handle_ >> 48) & HANDLEMASK )
+
+
+typedef struct gfx_handle_index_t {
+    uint16_t            index;
+    uint16_t            hash;
+    uint16_t            gen;
+    uint16_t            flag;
+} gfx_handle_index_t;
+
+typedef struct gfx_handle_pool_t {
+    size_t              size;
+    size_t              memsize;
+    void*               data;
+    gfx_handle_index_t* indexes;
+
+    size_t              capacity;
+    size_t              stride;
+    uint16_t            hash;
+} gfx_handle_pool_t;
+
+
+union _handle_union {
+    gfx_handle_index_t  index;
+    uint64_t            handle;
+};
+
+static uint16_t hash16(const char* str, size_t len)
+{
+    int hash = 0;
+    for (int i = 0; i < len; i++)
+    {
+        hash = hash + ((hash) << 5) + (str[i] + i) + (((str[i] + i)) << 7);
+    }
+
+    return ((hash) ^ (hash >> 16)) & 0xffff;
+}
+
+
+void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool)
+{
+    gfx_handle_pool_t*pool = (gfx_handle_pool_t*)calloc(1, sizeof(gfx_handle_pool_t));
+    if(pool == nullptr)
+        return;
+
+    pool->size = 0;
+    pool->capacity = 0;
+    pool->stride = stride;
+    pool->hash = hash16((char*)pool, sizeof(intptr_t));
+
+   // gfx_pool_resize(pool, capacity/16);
+    gfx_pool_resize(pool, capacity);
+
+    *out_pool = pool;
+}
+
+void gfx_pool_destroy(gfx_handle_pool_t* pool)
+{
+    free(pool->data);
+    free(pool->indexes);
+    free(pool);
+}
+
+void gfx_pool_resize(gfx_handle_pool_t* pool, size_t capacity)
+{
+    intptr_t* new_data_ptr = (intptr_t*)realloc(pool->data, pool->stride * capacity);
+    gfx_handle_index_t* new_indexes_ptr = (gfx_handle_index_t*)realloc(pool->indexes, sizeof(gfx_handle_index_t)* capacity);
+
+    if (new_data_ptr != nullptr && new_indexes_ptr != nullptr) {
+        for (size_t i = pool->capacity; i < capacity; i++)
+        {
+            new_indexes_ptr[i].index = (uint16_t)i;
+            new_indexes_ptr[i].hash = pool->hash;
+            new_indexes_ptr[i].flag = 0;
+            new_indexes_ptr[i].gen = 0;
+        }
+        pool->capacity = capacity;
+        pool->data = new_data_ptr;
+        pool->indexes = new_indexes_ptr;
+        pool->memsize = pool->capacity * pool->stride;
+    }
+}
+
+uint64_t gfx_pool_acquire(gfx_handle_pool_t* pool)
+{
+    // reuse deallocated handle.
+    // todo: replace to linkedlist
+    for(int i = 0; i < pool->size; ++i) {
+        if(!pool->indexes[i].flag) {
+            pool->indexes[i].flag = 1;
+            pool->indexes[i].gen += 1;
+
+            pool->size++;
+            _handle_union u = { pool->indexes[i] };
+            return u.handle;
+        }
+    }
+    pool->indexes[pool->size].gen++;
+    pool->indexes[pool->size].flag = 1;
+    pool->size++;
+    _handle_union u = { pool->indexes[pool->size - 1] };
+
+    void * ptr = gfx_pool_map(pool, u.handle);
+    memset(ptr, 0, pool->stride);
+    return u.handle;
+}
+
+void gfx_pool_release(gfx_handle_pool_t* pool, uint64_t handle)
+{
+    _handle_union u ={};
+    u.handle = handle;
+
+    gfx_handle_index_t idx = pool->indexes[u.index.index];
+    if (idx.gen == u.index.gen && idx.hash == u.index.hash) {
+        auto ptr = gfx_pool_map(pool, handle);
+        memset(ptr, 0, pool->stride);
+        pool->indexes[u.index.index].flag = 0;
+        pool->indexes[u.index.index].gen++;
+        pool->size--;
+    }
+}
+
+void * gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle)
+{
+    gfx_handle_index_t idx = pool->indexes[HANDLE_INDEX(handle)];
+    uint64_t a = *(uint64_t*)&handle;
+    uint64_t b = *(uint64_t*)&idx;
+    if(a == b) {
+        return (char*)pool->data + (pool->stride * idx.index);
+    } 
+    return nullptr;
+};
+
+void* gfx_pool_get_data(gfx_handle_pool_t* pool) {
+    return (pool != nullptr) ? pool->data : 0;
+}
+
+size_t gfx_pool_get_stride(gfx_handle_pool_t* pool) {
+    return (pool != nullptr) ? pool->stride : 0;
+}
+
+size_t gfx_pool_get_size(gfx_handle_pool_t* pool) {
+    return (pool != nullptr) ? pool->size : 0;
+}
+
+size_t gfx_pool_has_free(gfx_handle_pool_t* pool) {
+    return (pool != nullptr) ? (pool->size < pool->capacity) : 0;
+}
+
+
+typedef struct teststruct {
+    size_t data;
+} teststruct;
+
+void test_pool()
+{
+    gfx_handle_pool_t * pool = nullptr;
+    gfx_pool_create(sizeof(teststruct), 256, &pool);
+
+    uint64_t handles[16] = {0};
+    for(size_t i = 0; i < 16; ++i) {
+        handles[i] = gfx_pool_acquire(pool);
+        teststruct* ptr = (teststruct*)gfx_pool_map(pool, handles[i]);
+        ptr->data = i;
+    }
+
+    teststruct *ptr1 = (teststruct*)gfx_pool_map(pool, handles[2]);
+    gfx_pool_release(pool, handles[2]);
+    teststruct *ptr2 = (teststruct*)gfx_pool_map(pool, handles[2]);
+    uint64_t replaced = gfx_pool_acquire(pool);
+    teststruct *ptr3 = (teststruct*)gfx_pool_map(pool, replaced);
+
+    gfx_pool_destroy(pool);
+}
+
+#pragma endregion
+
+#pragma region gfx
+
+typedef struct gfx_api_pfn 
+{
+    void     (*pfn_init) (gfx_settings_t* settings, gfx_context_t** ctx);
+    void     (*pfn_create_swapchain) (gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain);
+    
+    void     (*pfn_get_caps)(gfx_context_t* ctx, gfx_caps_t * caps);
+
+    int32_t  (*pfn_acquire_img)(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target);
+    void     (*pfn_present_img)(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx);
+
+    void     (*pfn_create_buffer) (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+    void     (*pfn_create_shader) (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+    void     (*pfn_create_sampler) (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+    void     (*pfn_create_texture) (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+    void     (*pfn_create_pipeline) (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** texture);
+    void     (*pfn_create_render_target) (gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
+    void     (*pfn_create_descriptor_set) (gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
+    void     (*pfn_create_cmd) (gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);
+
+    void     (*pfn_destroy_buffer) (gfx_context_t* ctx, gfx_buffer_t* buffer);
+    void     (*pfn_destroy_shader) (gfx_context_t* ctx, gfx_shader_t* buffer);
+    void     (*pfn_destroy_sampler) (gfx_context_t* ctx, gfx_sampler_t* sampler);
+    void     (*pfn_destroy_texture) (gfx_context_t* ctx, gfx_texture_t* texture);
+    void     (*pfn_destroy_pipeline) (gfx_context_t* ctx, gfx_pipeline_t* texture);
+    void     (*pfn_destroy_render_target) (gfx_context_t* ctx, gfx_render_target_t* texture);
+    void     (*pfn_destroy_descriptor_set) (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+    void     (*pfn_destroy_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+
+    uint64_t (*pfn_uniform_location)        (gfx_shader_t* shader, const char* name);
+    void     (*pfn_uniform_set_buffer)      (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
+    void     (*pfn_uniform_set_buffer_data) (gfx_descriptor_set_t* set, uint64_t handle, void* buffer, uint32_t size);
+    void     (*pfn_uniform_set_texture)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
+    void     (*pfn_uniform_set_sampler)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
+
+    void     (*pfn_update_buffer_data)      (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+
+    void     (*pfn_cmd_begin) (gfx_command_buffer_t* cmd);
+    void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+    void     (*pfn_cmd_end_pass) (gfx_command_buffer_t* cmd);
+
+    void     (*pfn_cmd_scissor) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    void     (*pfn_cmd_bind_pipeline) (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+    void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
+    void     (*pfn_cmd_bind_buffer_ib) (gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer);
+    void     (*pfn_cmd_bind_buffer_vb) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_buffer_t* buffer);
+    void     (*pfn_cmd_draw) (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+    void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
+    void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+
+    void     (*pfn_cmd_end) (gfx_command_buffer_t* cmd);
+    void     (*pfn_submit_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+} gfx_api_pfn;
+
+static gfx_api_pfn * g_tbl = nullptr;
+
+void gfx_init_webgpu(gfx_api_pfn* func_table);
+void gfx_init_vulkan(gfx_api_pfn* func_table);
+void gfx_init_metal(gfx_api_pfn* func_table);
+void gfx_init_dx12(gfx_api_pfn* func_table);
+
+
+gfx_api gfx_backend  gfx_detect_bakend(gfx_backend* backends, uint32_t size)
+{
+#ifdef GFX_PLATFORM_APPLE
+    return gfx_backend_metal;
+#endif
+
+#ifdef GFX_PLATFORM_ANDROID
+    return gfx_backend_vulkan;
+#endif
+
+#ifdef GFX_PLATFORM_WEB
+    return gfx_backend_webgpu;
+#endif
+
+    return gfx_backend_vulkan;
+}
+
+void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
+{
+    g_tbl = (gfx_api_pfn*)calloc(1, sizeof(gfx_api_pfn));
+    if(!g_tbl)
+        return;
+
+    #ifndef _WIN32
+    settings->backend = gfx_backend_auto;
+    #endif
+
+    gfx_backend backend = settings->backend;
+    if( backend == gfx_backend_auto )
+        backend = gfx_detect_bakend(nullptr, 0);
+
+    switch(settings->backend)
+    {
+        case gfx_backend_vulkan:    gfx_init_vulkan(g_tbl); break;
+        case gfx_backend_webgpu:    gfx_init_webgpu(g_tbl); break;
+      //  case gfx_backend_metal:     gfx_init_metal(g_tbl);  break;
+      //  case gfx_backend_d3d12:     gfx_init_dx12(g_tbl);   break;
+    }
+
+    g_tbl->pfn_init(settings, ctx);
+}
+
+
+void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t * caps)
+{
+    g_tbl->pfn_get_caps(ctx, caps);
+}
+
+
+void gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain)
+{
+    g_tbl->pfn_create_swapchain(ctx, handle, swapchain);
+}
+
+
+int32_t gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target)
+{
+    return g_tbl->pfn_acquire_img(ctx, swapchain, target);
+}
+
+
+void gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx)
+{ 
+    g_tbl->pfn_present_img(ctx, swapchain, idx);
+}
+
+
+// 
+#pragma region create
+void gfx_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer)                  { g_tbl->pfn_create_buffer(ctx, desc, buffer);}
+
+void gfx_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc,  gfx_shader_t** shader)                 { g_tbl->pfn_create_shader(ctx, desc, shader);}
+
+void gfx_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler)              { g_tbl->pfn_create_sampler(ctx, desc, sampler);}
+
+void gfx_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture)              { g_tbl->pfn_create_texture(ctx, desc, texture);}
+
+void gfx_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline)          { g_tbl->pfn_create_pipeline(ctx, desc, pipeline);}
+
+void gfx_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** t)  { g_tbl->pfn_create_render_target(ctx, desc, t);}
+
+void gfx_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor) 
+{
+    g_tbl->pfn_create_descriptor_set(ctx, shader, descriptor);
+}
+
+
+void gfx_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd)                         
+{ 
+    g_tbl->pfn_create_cmd(ctx, count, cmd);
+}
+
+
+gfx_api gfx_buffer_t* gfx_create_buffer2(gfx_context_t* ctx, gfx_buffer_desc_t* desc)
+{
+    gfx_buffer_t * result = nullptr;
+    g_tbl->pfn_create_buffer(ctx, desc, &result);
+    return result;
+}
+
+gfx_api gfx_shader_t* gfx_create_shader2(gfx_context_t* ctx, gfx_shader_desc_t* desc)
+{
+    gfx_shader_t* result = nullptr;
+    g_tbl->pfn_create_shader(ctx, desc, &result);
+    return result;
+}
+
+gfx_api gfx_sampler_t* gfx_create_sampler2(gfx_context_t* ctx, gfx_sampler_desc_t* desc)
+{
+    gfx_sampler_t* result = nullptr;
+    g_tbl->pfn_create_sampler(ctx, desc, &result);
+    return result;
+}
+
+gfx_api gfx_texture_t* gfx_create_texture2(gfx_context_t* ctx, gfx_texture_desc_t* desc)
+{
+    gfx_texture_t* result = nullptr;
+    g_tbl->pfn_create_texture(ctx, desc, &result);
+    return result;
+}
+
+gfx_api gfx_pipeline_t* gfx_create_pipeline2(gfx_context_t* ctx, gfx_pipeline_desc_t* desc)
+{
+    gfx_pipeline_t* result = nullptr;
+    g_tbl->pfn_create_pipeline(ctx, desc, &result);
+    return result;
+}
+
+gfx_api gfx_render_target_t* gfx_create_render_target2(gfx_context_t* ctx, gfx_render_target_desc_t* desc)
+{
+    gfx_render_target_t* result = nullptr;
+    g_tbl->pfn_create_render_target(ctx, desc, &result);
+    return result;
+}
+
+gfx_api gfx_descriptor_set_t* gfx_create_descriptor_set2(gfx_context_t* ctx, gfx_shader_t* shader)
+{
+    gfx_descriptor_set_t* result = nullptr;
+    g_tbl->pfn_create_descriptor_set(ctx, shader, &result);
+    return result;
+}
+
+gfx_api gfx_command_buffer_t* gfx_create_cmd2(gfx_context_t* ctx)
+{
+    gfx_command_buffer_t* result = nullptr;
+    g_tbl->pfn_create_cmd(ctx, 1, &result);
+    return result;
+}
+
+
+
+void gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
+{
+    g_tbl->pfn_update_buffer_data(ctx, buffer, data, size, offset);
+}
+
+#pragma endregion
+
+//
+#pragma region destroy
+void gfx_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)                                           { g_tbl->pfn_destroy_buffer(ctx, buffer); }
+void gfx_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer)                                           { g_tbl->pfn_destroy_shader(ctx, buffer); }
+void gfx_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler)                                        { g_tbl->pfn_destroy_sampler(ctx, sampler); }
+void gfx_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture)                                        { g_tbl->pfn_destroy_texture(ctx, texture); }
+void gfx_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)                                     { g_tbl->pfn_destroy_pipeline(ctx, pipeline); }
+void gfx_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* target)                             { g_tbl->pfn_destroy_render_target(ctx, target); }
+void gfx_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)                       { g_tbl->pfn_destroy_descriptor_set(ctx, descriptor); }
+void gfx_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)                                         { g_tbl->pfn_destroy_cmd(ctx, cmd); }
+#pragma endregion
+
+//
+#pragma region shader data
+uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, gfx_uniform_t* uniforms)                     { assert(false); return 0; }
+uint64_t gfx_uniform_location(gfx_shader_t* shader, const char* name)                               { return g_tbl->pfn_uniform_location(shader, name);}
+void gfx_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t size){ g_tbl->pfn_uniform_set_buffer(set, handle, buffer, size); }
+void gfx_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) { g_tbl->pfn_uniform_set_buffer_data(set, handle, data, size); }
+void gfx_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)    { g_tbl->pfn_uniform_set_texture(set, handle, texture); }
+void gfx_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)    { g_tbl->pfn_uniform_set_sampler(set, handle, sampler); }
+#pragma endregion
+
+
+#pragma region commands
+
+void gfx_cmd_begin(gfx_command_buffer_t* cmd)
+{
+    g_tbl->pfn_cmd_begin(cmd);
+}
+
+
+void gfx_cmd_begin_pass(gfx_command_buffer_t * cmd, gfx_render_target_t* target)
+{
+    g_tbl->pfn_cmd_begin_pass(cmd, target);
+}
+
+
+void gfx_cmd_end_pass(gfx_command_buffer_t* cmd)
+{
+    g_tbl->pfn_cmd_end_pass(cmd);
+}
+
+
+void gfx_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    g_tbl->pfn_cmd_scissor(cmd, x, y, w, h);
+}
+
+
+void gfx_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    g_tbl->pfn_cmd_viewport(cmd, x, y, w, h);
+}
+
+
+void gfx_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline)
+{ 
+    g_tbl->pfn_cmd_bind_pipeline(cmd, pipeline);
+}
+
+
+void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor)
+{
+    g_tbl->pfn_cmd_bind_descriptor_set(cmd, descriptor);
+}
+
+
+void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer)
+{ 
+    g_tbl->pfn_cmd_bind_buffer_ib(cmd, format,  buffer);
+}
+
+
+void gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, gfx_buffer_t* buffer)
+{ 
+    g_tbl->pfn_cmd_bind_buffer_vb(cmd, slot, buffer);
+}
+
+
+void gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count)
+{
+    g_tbl->pfn_cmd_draw(cmd, vertex_count, instance_count);
+}
+
+
+void gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count)
+{ 
+    g_tbl->pfn_cmd_draw_indexed(cmd, idx_count, first_idx, instance_count);
+}
+
+
+void gfx_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z)
+{
+    g_tbl->pfn_cmd_dispatch_compute(cmd, x, y, z);
+}
+
+
+void gfx_cmd_end(gfx_command_buffer_t* cmd)
+{
+    g_tbl->pfn_cmd_end(cmd);
+}
+
+
+void gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options)
+{
+    g_tbl->pfn_submit_cmd(ctx, cmd, options);
+}
+
+#pragma endregion
+
+
+#pragma region to sting
+const char* gfx_to_string(gfx_buffer_usage usage)
+{
+    switch (usage)
+    {
+        case gfx_buffer_usage_index:        return  "index";
+        case gfx_buffer_usage_vertex:       return  "vertex";
+        case gfx_buffer_usage_uniform:      return  "uniform";
+        case gfx_buffer_usage_storage:      return  "storage";
+        case gfx_buffer_usage_indirect:     return  "indirect";
+    }
+    return "invalid arg in gfx_to_string(gfx_buffer_usage usage)";
+}
+
+const char* gfx_to_string(gfx_shader_stage stage)
+{
+    switch (stage) 
+    {
+        case gfx_shader_vertex:           return "vertex";
+        case gfx_shader_hull:             return "hull";
+        case gfx_shader_domain:           return "domain";
+        case gfx_shader_geometry:         return "geometry";
+        case gfx_shader_fragment:         return "fragment";
+                                          
+        case gfx_shader_amplify:          return "amplify";
+        case gfx_shader_mesh:             return "mesh";
+                                          
+        case gfx_shader_compute:          return "compute";
+                                          
+        case gfx_shader_rt_raygen:        return "raygen";
+        case gfx_shader_rt_any_hit:       return "any_hit";
+        case gfx_shader_rt_closest_hit:   return "closest_hit";
+        case gfx_shader_rt_miss:          return "miss";
+        case gfx_shader_rt_intersect:     return "intersect";
+        case gfx_shader_rt_callable:      return "callable";
+
+        default: return "invalid arg in gfx_to_string(gfx_shader_stage stage)";
+    }
+    return "invalid arg in gfx_to_string(gfx_shader_stage stage)";
+}
+
+const char* gfx_to_string(gfx_texture_type type)
+{
+    switch (type)
+    {
+        case gfx_texture2d:         return "texture2d";
+        case gfx_texture2d_cube:    return "texture2d_cube";
+        case gfx_texture2d_array:   return "texture2d_array";
+        case gfx_texture3d:         return "texture3d";
+    }
+    return "invalid arg in gfx_to_string(gfx_texture_type type)";
+}
+
+const char* gfx_to_string(gfx_pixel_format format)
+{
+    switch (format)
+    {
+        case gfx_pixel_format_unknown:        return "unknown";
+        case gfx_pixel_format_a8:             return "a8";
+        case gfx_pixel_format_rgba4444:       return "rgba4444";
+        case gfx_pixel_format_rgb5a1:         return "rgb5a1";
+        case gfx_pixel_format_rgb565:         return "rgb565";
+        case gfx_pixel_format_rgba8:          return "rgba8";
+
+        case gfx_pixel_format_etc1:           return "etc1";
+        case gfx_pixel_format_etc2_rgb8a1:    return "etc2_rgb8a1";
+        case gfx_pixel_format_etc2_rgba8:     return "etc2_rgba8";
+
+        case gfx_pixel_format_pvrtc_rgb_2bpp:  return "pvrtc2_rgb";
+        case gfx_pixel_format_pvrtc_rgba_2bpp: return "pvrtc2_rgba";
+        case gfx_pixel_format_pvrtc_rgb_4bpp:  return "pvrtc4_rgb";
+        case gfx_pixel_format_pvrtc_rgba_4bpp: return "pvrtc4_rgba";
+
+        case gfx_pixel_format_bc1:              return "bc1";
+        case gfx_pixel_format_bc2:              return "bc2";
+        case gfx_pixel_format_bc3:              return "bc3";
+
+        case gfx_pixel_format_astc4x4:          return "astc4x4";
+        case gfx_pixel_format_astc5x5:          return "astc5x5";
+        case gfx_pixel_format_astc6x6:          return "astc6x6";
+        case gfx_pixel_format_astc8x8:          return "astc8x8";
+        case gfx_pixel_format_astc10x10:        return "astc10x10_srgb";
+        case gfx_pixel_format_astc12x12:        return "astc12x12_srgb";
+
+        case gfx_pixel_format_r16f:           return "r16";
+        case gfx_pixel_format_rg16f:          return "rg16";
+        case gfx_pixel_format_rgba16f:        return "rgba16";
+
+        case gfx_pixel_format_r32f:           return "r32";
+        case gfx_pixel_format_rg32f:          return "rg32";
+        case gfx_pixel_format_rgba32f:        return "rgba32";
+
+        case gfx_pixel_format_d24x8:          return "d24x8";
+        case gfx_pixel_format_d24s8:          return "d24s8";
+    }
+
+    return "invalid arg in gfx_to_string(gfx_pixel_format format)";
+}
+
+#pragma endregion
+
+
+#pragma region gfx utils
+uint32_t gfx_utils_thread_id()
+{
+    static thread_local auto id = std::hash<std::thread::id> ();
+    return (uint32_t)id(std::this_thread::get_id());
+}
+
+uint32_t gfx_utils_stack_trace(uint32_t skip, uintptr_t* frames, uint64_t count)
+{
+#ifdef GFX_PLATFORM_WIN
+    static bool lazyinit = false;
+    if (!lazyinit) {
+        SymInitialize(GetCurrentProcess(), NULL, TRUE);
+        SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+        lazyinit = true;
+    }
+    return RtlCaptureStackBackTrace(skip, (DWORD)count, (PVOID*)frames, NULL);
+#endif
+    return 0;
+}
+
+void gfx_utils_stack_trace_names(uintptr_t* frames, uint64_t count, const char** names)
+{
+#ifdef GFX_PLATFORM_WIN
+    HANDLE hprocess = GetCurrentProcess();
+    char tmpbuffer[sizeof(SYMBOL_INFO) + 64] = "";
+    for (uint64_t i = 0; i < count; ++i)
+    {
+        DWORD ldsp = 0;
+        IMAGEHLP_LINE64 line = { sizeof(IMAGEHLP_LINE64) };
+        PSYMBOL_INFO symbol = (PSYMBOL_INFO)tmpbuffer;
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = 64;
+
+        // SymGetLineFromAddr64(hprocess, adress, &ldsp, &line);
+        SymFromAddr(hprocess, frames[i], 0, symbol);
+        printf("\n\t%s", symbol->Name);
+    }
+#endif
+}
+
+uint16_t gfx_utils_hash_16(const char* data, uint32_t size)
+{
+    return hash16(data, size);
+}
+
+uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format)
+{
+    #define GFX_MAX(a, b)       ( a > b ? a : b )
+    #define BLOCK_COUNT(S, B)   ((S + B-1) / B)
+
+    uint32_t w = width;
+    uint32_t h = height;
+    uint32_t d = (depth>0)?depth:1; // clamp [1..depth]
+    switch (format)
+    {
+        case gfx_pixel_format_rgb5a1:
+        case gfx_pixel_format_rgb565:
+        case gfx_pixel_format_rgba4444:         return w * h * d * sizeof(uint16_t);
+
+        case gfx_pixel_format_rgba8:            return w * h * d * 4;
+
+        //( idth * height * bpp ) >> 3;
+        case gfx_pixel_format_pvrtc_rgb_2bpp:
+        case gfx_pixel_format_pvrtc_rgba_2bpp: return (width / 8) * (height / 4) * 8;
+            
+        case gfx_pixel_format_pvrtc_rgb_4bpp:
+        case gfx_pixel_format_pvrtc_rgba_4bpp: return (width / 4) * (height / 4) * 8;
+
+        case gfx_pixel_format_etc1:             return (w >> 2) * (h >> 2) * 8;     //! Compresses RGB888 data without Alpha channel
+        case gfx_pixel_format_etc2_rgb8a1:		return (w >> 2) * (h >> 2) * 16;    //! Compresses RGB888 data without Alpha channel
+        case gfx_pixel_format_etc2_rgba8:		return (w >> 2) * (h >> 2) * 8;     //! Compresses RGBA8888 data with full alpha support
+
+        case gfx_pixel_format_bc1:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 8;
+        case gfx_pixel_format_bc2:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 16;
+        case gfx_pixel_format_bc3:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 16;
+        case gfx_pixel_format_bc6:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 16;
+        case gfx_pixel_format_bc7:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
+
+        case gfx_pixel_format_astc4x4:          return BLOCK_COUNT(w, 4)  * BLOCK_COUNT(h, 4)  * BLOCK_COUNT(d, 4) * 16;
+        case gfx_pixel_format_astc5x5:          return BLOCK_COUNT(w, 5)  * BLOCK_COUNT(h, 5)  * BLOCK_COUNT(d, 5) * 16;
+        case gfx_pixel_format_astc6x6:          return BLOCK_COUNT(w, 6)  * BLOCK_COUNT(h, 6)  * BLOCK_COUNT(d, 6) * 16;
+        case gfx_pixel_format_astc8x8:          return BLOCK_COUNT(w, 8)  * BLOCK_COUNT(h, 8)  * BLOCK_COUNT(d, 8) * 16;
+        case gfx_pixel_format_astc10x10:        return BLOCK_COUNT(w, 10) * BLOCK_COUNT(h, 10) * BLOCK_COUNT(d, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return BLOCK_COUNT(w, 12) * BLOCK_COUNT(h, 12) * BLOCK_COUNT(d, 12) * 16;
+
+        case gfx_pixel_format_r16f:             return w * h * d * sizeof(uint16_t);
+        case gfx_pixel_format_rg16f:            return w * h * d * sizeof(uint16_t) * 2;
+        case gfx_pixel_format_rgba16f:          return w * h * d * sizeof(uint16_t) * 4;
+         
+        case gfx_pixel_format_r32f:             return w * h * d * sizeof(float);
+        case gfx_pixel_format_rg32f:            return w * h * d * sizeof(float) * 2;
+        case gfx_pixel_format_rgba32f:          return w * h * d * sizeof(float) * 4;
+
+        case gfx_pixel_format_d24x8:            return w * h * d * sizeof(uint32_t);
+        case gfx_pixel_format_d24s8:            return w * h * d * sizeof(uint32_t);
+
+        default: assert(0); break;
+    }
+
+    #undef BLOCK_COUNT
+    #undef GFX_MAX
+
+    assert(0);
+    return 0; 
+}
+
+
+uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width) 
+{
+    #define BLOCK_COUNT(S, B)   ((S + B-1) / B)
+    #define GFX_MAX(a, b)       ( a > b ? a : b )
+    switch (fmt) 
+    {
+        case gfx_pixel_format_a8:               return width * sizeof(uint8_t);
+        case gfx_pixel_format_rgb5a1:
+        case gfx_pixel_format_rgb565:
+        case gfx_pixel_format_rgba4444:         return width * sizeof(uint16_t);
+
+        case gfx_pixel_format_rgba8:            return width * sizeof(uint8_t) * 4;
+
+        case gfx_pixel_format_etc1:             return (GFX_MAX(2, (width >> 2)) * 8);
+        case gfx_pixel_format_etc2_rgba8:       return (GFX_MAX(2, (width >> 2)) * 16);
+        case gfx_pixel_format_etc2_rgb8a1:      return (GFX_MAX(2, (width >> 2)) * 8);
+
+        case gfx_pixel_format_pvrtc_rgb_2bpp:
+        case gfx_pixel_format_pvrtc_rgba_2bpp:  return (GFX_MAX(2, (width >> 2)) * ((8 * 4) * 4) / 8);//! 2-bit PVRTC-compressed texture: PVRTC2
+        case gfx_pixel_format_pvrtc_rgb_4bpp:
+        case gfx_pixel_format_pvrtc_rgba_4bpp:  return (GFX_MAX(2, (width >> 2)) * ((4 * 4) * 4) / 8);//! 4-bit PVRTC-compressed texture: PVRTC4
+
+        case gfx_pixel_format_bc1:              return GFX_MAX(1, width >> 2) * 8;
+        case gfx_pixel_format_bc2:              return GFX_MAX(1, width >> 2) * 16;
+        case gfx_pixel_format_bc3:              return GFX_MAX(1, width >> 2) * 16;
+        case gfx_pixel_format_bc6:              return GFX_MAX(1, width >> 2) * 16;
+        case gfx_pixel_format_bc7:              return GFX_MAX(1, width >> 2) * 16;
+
+        case gfx_pixel_format_astc4x4:          return BLOCK_COUNT(width, 4)  * 16;
+        case gfx_pixel_format_astc5x5:          return BLOCK_COUNT(width, 5)  * 16;
+        case gfx_pixel_format_astc6x6:          return BLOCK_COUNT(width, 6)  * 16;
+        case gfx_pixel_format_astc8x8:          return BLOCK_COUNT(width, 8)  * 16;
+        case gfx_pixel_format_astc10x10:        return BLOCK_COUNT(width, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return BLOCK_COUNT(width, 12) * 16;
+
+        case gfx_pixel_format_r16f:             return width * sizeof(uint16_t);
+        case gfx_pixel_format_rg16f:            return width * sizeof(uint16_t) * 2;
+        case gfx_pixel_format_rgba16f:          return width * sizeof(uint16_t) * 4;
+
+        case gfx_pixel_format_r32f:             return width * sizeof(float);
+        case gfx_pixel_format_rg32f:            return width * sizeof(float) * 2;
+        case gfx_pixel_format_rgba32f:          return width * sizeof(float) * 4;
+
+        case gfx_pixel_format_d24x8:            return width * sizeof(uint32_t);
+        case gfx_pixel_format_d24s8:            return width * sizeof(uint32_t);
+    }
+    return 0;
+}
+
+
+uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
+{
+    return ((n + alignment - 1) / alignment) * alignment; 
+  //  return (n + alignment - 1) & ~(alignment - 1);
+}
+
+#pragma endregion
+
+#ifdef VULKAN_AVAILABLE
+#include "gfx_vulkan.h"
+#endif
+void gfx_init_vulkan(gfx_api_pfn* func_table)
+{
+#ifdef VULKAN_AVAILABLE
+    func_table->pfn_init = vk_create_renderer;
+    func_table->pfn_create_swapchain = vk_create_swapchain;
+
+    func_table->pfn_acquire_img = vk_acquire_img;
+    func_table->pfn_present_img = vk_present_img;
+
+    func_table->pfn_create_buffer           = vk_create_buffer;
+    func_table->pfn_create_shader           = vk_create_shader;
+    func_table->pfn_create_sampler          = vk_create_sampler;
+    func_table->pfn_create_texture          = vk_create_texture;
+    func_table->pfn_create_pipeline         = vk_create_pipeline;
+    func_table->pfn_create_render_target    = vk_create_render_target;
+    func_table->pfn_create_descriptor_set   = vk_create_descriptor_set;
+    func_table->pfn_create_cmd              = vk_create_cmd;
+
+    func_table->pfn_destroy_buffer          = vk_destroy_buffer;
+    func_table->pfn_destroy_shader          = vk_destroy_shader;
+    func_table->pfn_destroy_sampler         = vk_destroy_sampler;
+    func_table->pfn_destroy_texture         = vk_destroy_texture;
+    func_table->pfn_destroy_pipeline        = vk_destroy_pipeline;
+    func_table->pfn_destroy_render_target   = vk_destroy_render_target;
+    func_table->pfn_destroy_descriptor_set  = vk_destroy_descriptor_set;
+    func_table->pfn_destroy_cmd             = vk_destroy_cmd;
+
+
+    func_table->pfn_uniform_location        = vk_uniform_location;
+    func_table->pfn_uniform_set_buffer      = vk_uniform_set_buffer;
+    func_table->pfn_uniform_set_buffer_data = vk_uniform_set_buffer_data;
+    func_table->pfn_uniform_set_texture     = vk_uniform_set_texture;
+    func_table->pfn_uniform_set_sampler     = vk_uniform_set_sampler;
+
+    func_table->pfn_cmd_begin               = vk_cmd_begin;
+    func_table->pfn_cmd_begin_pass          = vk_cmd_begin_pass;
+    func_table->pfn_cmd_end_pass            = vk_cmd_end_pass;
+
+    func_table->pfn_cmd_scissor             = vk_cmd_scissor;
+    func_table->pfn_cmd_viewport            = vk_cmd_viewport;
+    func_table->pfn_cmd_bind_pipeline       = vk_cmd_bind_pipeline;
+    func_table->pfn_cmd_bind_descriptor_set = vk_cmd_bind_descriptor_set;
+    func_table->pfn_cmd_bind_buffer_ib      = vk_cmd_bind_buffer_ib;
+    func_table->pfn_cmd_bind_buffer_vb      = vk_cmd_bind_buffer_vb;
+    func_table->pfn_cmd_draw                = vk_cmd_draw;
+    func_table->pfn_cmd_draw_indexed        = vk_cmd_draw_indexed;
+    func_table->pfn_cmd_dispatch_compute    = vk_cmd_dispatch_compute;
+
+    func_table->pfn_cmd_end                 = vk_cmd_end;
+    func_table->pfn_submit_cmd              = vk_submit_cmd;
+#endif
+}
+
+#ifdef WEBGPU_AVAILABLE
+#include "gfx_webgpu.h"
+#endif
+void gfx_init_webgpu(gfx_api_pfn* func_table)
+{
+#ifdef WEBGPU_AVAILABLE
+    func_table->pfn_init                    = wgpu_init;
+    func_table->pfn_create_swapchain        = wgpu_create_swapchain;
+
+    func_table->pfn_acquire_img             = wgpu_acquire_img;
+    func_table->pfn_present_img             = wgpu_present_img;
+
+    func_table->pfn_create_buffer           = wgpu_create_buffer;
+    func_table->pfn_create_shader           = wgpu_create_shader;
+    func_table->pfn_create_sampler          = wgpu_create_sampler;
+    func_table->pfn_create_texture          = wgpu_create_texture;
+    func_table->pfn_create_pipeline         = wgpu_create_pipeline;
+    func_table->pfn_create_render_target    = wgpu_create_render_target;
+    func_table->pfn_create_descriptor_set   = wgpu_create_descriptor_set;
+    func_table->pfn_create_cmd              = wgpu_create_cmd;
+
+    func_table->pfn_uniform_location        = wgpu_uniform_location;
+    func_table->pfn_uniform_set_buffer_data = wgpu_uniform_update_buffer_data;
+    func_table->pfn_uniform_set_buffer      = wgpu_uniform_set_buffer;
+    func_table->pfn_uniform_set_texture     = wgpu_uniform_set_texture;
+    func_table->pfn_uniform_set_sampler     = wgpu_uniform_set_sampler;
+
+    func_table->pfn_destroy_buffer          = wgpu_destroy_buffer;
+    func_table->pfn_destroy_shader          = wgpu_destroy_shader;
+    func_table->pfn_destroy_sampler         = wgpu_destroy_sampler;
+    func_table->pfn_destroy_texture         = wgpu_destroy_texture;
+    func_table->pfn_destroy_pipeline        = wgpu_destroy_pipeline;
+    func_table->pfn_destroy_render_target   = wgpu_destroy_render_target;
+    func_table->pfn_destroy_descriptor_set  = wgpu_destroy_descriptor_set;
+    func_table->pfn_destroy_cmd             = wgpu_destroy_cmd;
+
+    func_table->pfn_cmd_begin               = wgpu_cmd_begin;
+    func_table->pfn_cmd_begin_pass          = wgpu_cmd_begin_pass;
+    func_table->pfn_cmd_end_pass            = wgpu_cmd_end_pass;
+
+    func_table->pfn_cmd_scissor             = wgpu_cmd_scissor;
+    func_table->pfn_cmd_viewport            = wgpu_cmd_viewport;
+    func_table->pfn_cmd_bind_pipeline       = wgpu_cmd_bind_pipeline;
+    func_table->pfn_cmd_bind_descriptor_set = wgpu_cmd_bind_descriptor_set;
+    func_table->pfn_cmd_bind_buffer_ib      = wgpu_cmd_bind_buffer_ib;
+    func_table->pfn_cmd_bind_buffer_vb      = wgpu_cmd_bind_buffer_vb;
+    func_table->pfn_cmd_draw                = wgpu_cmd_draw;
+    func_table->pfn_cmd_draw_indexed        = wgpu_cmd_draw_indexed;
+    func_table->pfn_cmd_dispatch_compute    = wgpu_cmd_dispatch_compute;
+
+    func_table->pfn_cmd_end                 = wgpu_cmd_end;
+    func_table->pfn_submit_cmd              = wgpu_submit_cmd;
+#endif
+}

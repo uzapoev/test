@@ -1,49 +1,71 @@
-//#include <algorithm>
-
 #include "asset_fbx.h"
 
+#include <unordered_map>
+#include <unordered_set>
+#include <filesystem>
 
-#define FBX_VEC4_2_VEC3(fbxvec)   vec3((float)fbxvec[0], (float)fbxvec[1], (float)fbxvec[2]);
+#ifdef _WIN32
+  #ifdef _DEBUG
+    #ifdef _WIN64
+   //   #pragma comment(lib, "D:/sdk/fbxsdk/lib/vs2012/x86/debug/libfbxsdk.lib") 
+      #pragma comment(lib, "vs2019/x64/debug/libfbxsdk.lib")// libfbxsdk-md libfbxsdk-mt
+    #else
+      #pragma comment(lib, "vs2019/x86/debug/libfbxsdk.lib")// libfbxsdk-md libfbxsdk-mt
+    #endif
+  #else
+    #ifdef _WIN64
+      #pragma comment(lib, "vs2019/x64/release/libfbxsdk.lib")
+    #else
+      #pragma comment(lib, "vs2019/x86/release/libfbxsdk.lib")
+    #endif
+  #endif
+#endif
+
+#define FBX_VEC4_2_VEC3(fbxvec)   math::make_vec3((float)fbxvec[0], (float)fbxvec[1], (float)fbxvec[2]);
+
+
+
 
 const char * type2str(FbxNodeAttribute::EType type)
 {
     switch (type)
     {
-        case FbxNodeAttribute::eUnknown:          return "eUnknown";
-        case FbxNodeAttribute::eNull:             return "eNull";
-        case FbxNodeAttribute::eMarker:           return "eMarker";
-        case FbxNodeAttribute::eSkeleton:         return "eSkeleton";
-        case FbxNodeAttribute::eMesh:             return "eMesh";
-        case FbxNodeAttribute::eNurbs:            return "eNurbs";
-        case FbxNodeAttribute::ePatch:            return "ePatch";
-        case FbxNodeAttribute::eCamera:           return "eCamera";
-        case FbxNodeAttribute::eCameraStereo:     return "eCameraStereo";
-        case FbxNodeAttribute::eCameraSwitcher:   return "eCameraSwitcher";
-        case FbxNodeAttribute::eLight:            return "eLight";
-        case FbxNodeAttribute::eOpticalReference: return "eOpticalReference";
-        case FbxNodeAttribute::eOpticalMarker:    return "eOpticalMarker";
-        case FbxNodeAttribute::eNurbsCurve:       return "eNurbsCurve";
-        case FbxNodeAttribute::eTrimNurbsSurface: return "eTrimNurbsSurface";
-        case FbxNodeAttribute::eBoundary:         return "eBoundary";
-        case FbxNodeAttribute::eNurbsSurface:     return "eNurbsSurface";
-        case FbxNodeAttribute::eShape:            return "eShape";
-        case FbxNodeAttribute::eLODGroup:         return "eLODGroup";
-        case FbxNodeAttribute::eSubDiv:           return "eSubDiv";
-        case FbxNodeAttribute::eCachedEffect:     return "eCachedEffect";
-        case FbxNodeAttribute::eLine:             return "eLine";
+        case FbxNodeAttribute::eUnknown:          return "Unknown";
+        case FbxNodeAttribute::eNull:             return "Null";
+        case FbxNodeAttribute::eMarker:           return "Marker";
+        case FbxNodeAttribute::eSkeleton:         return "Skeleton";
+        case FbxNodeAttribute::eMesh:             return "Mesh";
+        case FbxNodeAttribute::eNurbs:            return "Nurbs";
+        case FbxNodeAttribute::ePatch:            return "Patch";
+        case FbxNodeAttribute::eCamera:           return "Camera";
+        case FbxNodeAttribute::eCameraStereo:     return "CameraStereo";
+        case FbxNodeAttribute::eCameraSwitcher:   return "CameraSwitcher";
+        case FbxNodeAttribute::eLight:            return "Light";
+        case FbxNodeAttribute::eOpticalReference: return "OpticalReference";
+        case FbxNodeAttribute::eOpticalMarker:    return "OpticalMarker";
+        case FbxNodeAttribute::eNurbsCurve:       return "NurbsCurve";
+        case FbxNodeAttribute::eTrimNurbsSurface: return "TrimNurbsSurface";
+        case FbxNodeAttribute::eBoundary:         return "Boundary";
+        case FbxNodeAttribute::eNurbsSurface:     return "NurbsSurface";
+        case FbxNodeAttribute::eShape:            return "Shape";
+        case FbxNodeAttribute::eLODGroup:         return "LODGroup";
+        case FbxNodeAttribute::eSubDiv:           return "SubDiv";
+        case FbxNodeAttribute::eCachedEffect:     return "CachedEffect";
+        case FbxNodeAttribute::eLine:             return "Line";
     }
     return "";
 }
 
 template <class vertexType>
-void checkForReplace(vertexType & vertex, int boneIndex, float weight)
+void replaceVert(vertexType & vertex, int boneIndex, float weight)
 {
+    float* ptr = &vertex.weights.x;
     for (int i = 0; i < 4; ++i)
     {
-        if (vertex.weights[i] < weight)
+        if (ptr[i] < weight)
         {
-            vertex.weights[i] = weight;
-            vertex.indices[i] = (float)boneIndex;
+            ptr[i] = weight;
+            ptr[i] = (float)boneIndex;
             return;
         }
     }
@@ -64,15 +86,66 @@ static FbxCluster* GetDeformerClasterForBone(FbxNode * boneNode, FbxMesh * fbxMe
     return NULL;
 }
 
+
+void AssetFbx::load_static_mesh(const std::string& path, std::vector<vec3>* verts, std::vector<uint16_t>* indx)
+{
+    AssetFbx asset;
+    asset.load(path.c_str());
+
+    auto first = asset.m_meshes_new.front();
+    for(uint32_t i = 0; i < first->vertices.size(); ++i)
+        verts->push_back(first->vertices[i].position);
+
+    for (uint32_t i = 0; i < first->indexes.size(); ++i)
+        indx->push_back(first->indexes[i]);
+}
+
+void AssetFbx::save(const char* path)
+{
+    auto float2uint32 = [](float v){ 
+        union conv { float f; uint32_t ui; };
+        conv result = {v};
+        return  result.ui;
+    };
+  /*  union conv {
+        float       f;
+        uint32_t    ui;
+    };*/
+    /*fwrite(&(m_meshes_new.size()), sizeof(size_t), m_meshes_new.size(), fp);
+    for(size_t i = 0; i < m_meshes_new.size(); ++i)
+    {
+        m_meshes_new[i]->name.size();
+    }*/
+    std::vector<uint32_t> data;
+    for (size_t i = 0; i < m_meshes_new.size(); ++i)
+    {
+        auto submesh = m_meshes_new[i];
+        auto count = submesh->vertices.size();
+
+        for (size_t j = 0; j < submesh->vertices.size(); ++j)
+        {        
+            auto vert = submesh->vertices[j];
+        }
+    }
+
+    FILE* fp = fopen(path, "wb");
+    if(fp != nullptr)
+    {
+        fwrite(data.data(), sizeof(uint32_t), data.size(), fp);
+        fclose(fp);
+    }
+}
+
+
 AssetFbx::AssetFbx()
     :m_pScene(NULL)
-    ,m_pFbxSdkManager(NULL)
+    ,m_pFbxSdkManager(NULL) 
 {
-    m_frames = 0;
+    m_frames = 0; 
     m_time = 0.0f;
 }
 
-void AssetFbx::load(const char * filePath)
+bool AssetFbx::load(const char * filePath)
 {
 //    Measure  ms("\nnewfbx::load");
     assert(filePath);
@@ -84,7 +157,7 @@ void AssetFbx::load(const char * filePath)
     {
         FbxStatus status = importer->GetStatus();
         FBXSDK_printf("\nFailed importer: %s, - %s\n", filePath, status.GetErrorString());
-        return; // failed
+        return false; // failed
     }
 
     m_pScene = FbxScene::Create(m_pFbxSdkManager, "temp_scene");
@@ -92,44 +165,65 @@ void AssetFbx::load(const char * filePath)
     importer->Import(m_pScene);
     importer->Destroy();
 
+    auto sceneAxisSystem = m_pScene->GetGlobalSettings().GetAxisSystem();
+    auto customAxisSystem = FbxAxisSystem(FbxAxisSystem::eMayaYUp);
+    if (sceneAxisSystem != customAxisSystem)
+    {
+        customAxisSystem.ConvertScene(m_pScene);
+    }
+
+    FbxSystemUnit SceneSystemUnit = m_pScene->GetGlobalSettings().GetSystemUnit();
+    if (abs(SceneSystemUnit.GetScaleFactor() - 1.0) < 0.0001)
+    {
+        //The unit in this example is centimeter.
+        FbxSystemUnit::cm.ConvertScene(m_pScene);
+    }
+
     FbxGeometryConverter lGeomConverter(m_pFbxSdkManager);
     lGeomConverter.Triangulate(m_pScene, true);
     lGeomConverter.SplitMeshesPerMaterial(m_pScene, true);
 
     m_pScene->FillAnimStackNameArray(m_AnimStackNameArray);
 
-
     FbxNode* pRootNode = m_pScene->GetRootNode();
     scan(pRootNode);
     printf("\n");
 
-
     buildhierarchy();
 
-    for (size_t i = 0; i < m_meshes.size(); ++i)
+    std::unordered_set<FbxMesh*> unique(m_fbx_node_meshes.begin(), m_fbx_node_meshes.end());
+
+    for(auto & m: m_fbx_node_meshes) // unique or m_fbx_node_meshes
     {
-        s_mesh * mesh = loadmesh(m_meshes[i]);
-        if (mesh != NULL)
-        {
+        s_mesh* mesh = loadmesh(m);
+        if(mesh)
             m_meshes_new.push_back(mesh);
-        }
     }
 
-    loadbinds();
     loadanim();
+
+    return true;
 }
 
 void AssetFbx::unload()
 {
     m_frames = 0;
     m_time = 0.0f;
+
+    for(size_t i = 0; i < m_meshes_new.size(); ++i)
+    {
+        delete m_meshes_new[i];
+    }
+
     m_meshes_new.clear();
     m_joints.clear();
 
-    m_meshes.clear();
-    m_bones.clear();
+    m_fbx_node_meshes.clear();
+    m_fbx_node_bones.clear();
+
     if (m_pScene)
         m_pScene->Destroy();
+
     if (m_pFbxSdkManager)
         m_pFbxSdkManager->Destroy();
 }
@@ -152,11 +246,21 @@ void AssetFbx::scan(FbxNode * node)
         attributes.append("(").append(type2str(type)).append(")");
 
         if (type == FbxNodeAttribute::eMesh)
-            m_meshes.push_back(static_cast<FbxMesh*>(attribute));
+            m_fbx_node_meshes.push_back(static_cast<FbxMesh*>(attribute));
         if (type == FbxNodeAttribute::eSkeleton)
-            m_bones.push_back(node);
+            m_fbx_node_bones.push_back(node);
     }
-    printf("%s  %s \n", node->GetName(), attributes.c_str());
+
+    FbxAMatrix global = node->EvaluateGlobalTransform();
+    FbxAMatrix local = node->EvaluateLocalTransform();
+    auto qu = global.GetQ();
+
+    printf("%s  %s(%.3f,  %.3f,  %.3f) (%.3f,  %.3f,  %.3f) \n", node->GetName(), attributes.c_str(),
+        global.GetT()[0],global.GetT()[1], global.GetT()[2],
+        local.GetT()[0], local.GetT()[1], local.GetT()[2]);
+     //   qu.DecomposeSphericalXYZ()[0], 
+     //   qu.DecomposeSphericalXYZ()[1], 
+     //   qu.DecomposeSphericalXYZ()[2]);
     deep++;
     for (int i = 0; i < node->GetChildCount(); ++i)
     {
@@ -171,23 +275,23 @@ AssetFbx::s_mesh * AssetFbx::loadmesh(FbxMesh * fbxMesh)
     if (!fbxMesh)
         return NULL;
 
-    s_mesh * mesh = new s_mesh;
+    s_mesh * mesh = new s_mesh();
     mesh->name = fbxMesh->GetName();
+    mesh->skinned = false;
 
-    std::vector<vertexPNBTWIidx> & vertines = mesh->m_vertines;
-    std::vector<unsigned short>  & indexes = mesh->m_indexes;
+    std::vector<vertexPNBTWIidx> & vertices = mesh->vertices;
+    std::vector<uint32_t>  & indexes  = mesh->indexes;
     
-    int polygonCount = fbxMesh->GetPolygonCount();
-    int conrolPointsCount = fbxMesh->GetControlPointsCount();
-    FbxVector4* pControlPoints = fbxMesh->GetControlPoints();
+    int polygonCount            = fbxMesh->GetPolygonCount();
+    int conrolPointsCount       = fbxMesh->GetControlPointsCount();
+    FbxVector4* pControlPoints  = fbxMesh->GetControlPoints();
 
-    int skinDeformer = fbxMesh->GetDeformerCount(FbxDeformer::eSkin);
-    int blendDeformer = fbxMesh->GetDeformerCount(FbxDeformer::eBlendShape);
-    int vertcashDeformer = fbxMesh->GetDeformerCount(FbxDeformer::eVertexCache);
+    int skinDeformer            = fbxMesh->GetDeformerCount(FbxDeformer::eSkin);
+    int blendDeformer           = fbxMesh->GetDeformerCount(FbxDeformer::eBlendShape);
+    int vertcashDeformer        = fbxMesh->GetDeformerCount(FbxDeformer::eVertexCache);
 
     std::multimap<size_t, size_t> vertexIdxMap; // key - control point idx
     std::map<size_t, vertexPNBTWIidx> vertexHashMap;
-    //std::signbit
 
     FbxStringList UVSetNameList;
     fbxMesh->GetUVSetNames(UVSetNameList);// Get the name of each set of UV coords
@@ -215,16 +319,23 @@ AssetFbx::s_mesh * AssetFbx::loadmesh(FbxMesh * fbxMesh)
             vertex.idx = controlPointIdx;
             vertex.position = FBX_VEC4_2_VEC3(vPos);
             vertex.normal = FBX_VEC4_2_VEC3(fbxNormal);
-            vertex.texcoord0 = vec2((float)fbxTexCoords[0][0], (float)fbxTexCoords[0][1]);
-            vertex.texcoord1 = vec2((float)fbxTexCoords[1][0], (float)fbxTexCoords[1][1]);
+            vertex.texcoord0 = {((float)fbxTexCoords[0][0], (float)fbxTexCoords[0][1])};
+            vertex.texcoord1 = {((float)fbxTexCoords[1][0], (float)fbxTexCoords[1][1])};
 
+            #if !REMOVE_DUPLICATES
+            vertexHashMap.insert(std::make_pair(vertex.hash(), vertex));
+            vertexIdxMap.insert(std::make_pair(vertex.idx, vertices.size()));
+            indexes.push_back((uint32_t)vertices.size());
+            vertices.push_back(vertex);
+            #else
             auto itidx = vertexHashMap.find(vertex.hash());
             if (itidx == vertexHashMap.end())
             {
+                uint16_t index = vertines.size();
                 vertexHashMap.insert(std::make_pair(vertex.hash(), vertex));
-                vertexIdxMap.insert(std::make_pair(vertex.idx, vertines.size()));
+                vertexIdxMap.insert(std::make_pair(vertex.idx, index));
 
-                indexes.push_back(vertines.size());
+                indexes.push_back(index);
                 vertines.push_back(vertex);
             }
             else
@@ -235,119 +346,33 @@ AssetFbx::s_mesh * AssetFbx::loadmesh(FbxMesh * fbxMesh)
                     indexes.push_back(indexIt->second);
                 }
             }
+            #endif
         }
     }
 
-    // load materials
-    int fbxMaterialCount = fbxMesh->GetNode()->GetMaterialCount();
-    for (int i = 0; i < fbxMaterialCount; ++i)
-    {
-        FbxSurfaceMaterial * material = fbxMesh->GetNode()->GetMaterial(i);
-
-        auto l = material->ShadingModel;
-    }
+    if (skinDeformer > 0)
+        load_skin(fbxMesh, mesh);
 
     if (blendDeformer > 0)
-        load_blendhapeinfo(fbxMesh);
+        load_blendshape(fbxMesh, mesh);
 
-
-    int deformerCount = fbxMesh->GetDeformerCount(FbxDeformer::eSkin);
-    if (deformerCount == 0)
-        return mesh;
-    
-    FbxMatrix  * fbxlinkTransformsMatrix = new FbxMatrix[vertines.size()];
-    memset(fbxlinkTransformsMatrix, 0, sizeof(FbxMatrix)*vertines.size());
-
-    /// load skin data
-    for (int deformerIdx = 0; deformerIdx < deformerCount; ++deformerIdx)
+    if (skinDeformer == 0)
     {
-        FbxSkin * pFbxSkin = (FbxSkin*)(fbxMesh->GetDeformer(deformerIdx, FbxDeformer::eSkin));
+        int meshOwners = fbxMesh->GetNodeCount();
+        FbxMatrix transform = fbxMesh->GetNode()->EvaluateLocalTransform();
+        auto localPosition = fbxMesh->GetNode()->EvaluateLocalTranslation();
+        auto localRotation = fbxMesh->GetNode()->EvaluateLocalRotation();
+        auto localScale    = fbxMesh->GetNode()->EvaluateLocalScaling();
 
-        int lClusterCount = pFbxSkin->GetClusterCount();
-        for (int clusterIdx = 0; clusterIdx != lClusterCount; ++clusterIdx)
+        FbxMatrix globalTransform = fbxMesh->GetNode()->EvaluateGlobalTransform();
+        for (size_t i = 0; i < vertices.size(); ++i)
         {
-            FbxCluster* pFbxCluster = pFbxSkin->GetCluster(clusterIdx);
-            if (pFbxCluster->GetLink() == NULL)
-                continue;
-
-            auto it = std::find(m_bones.begin(), m_bones.end(), pFbxCluster->GetLink());
-            if (it == m_bones.end())
-                continue;
-
-            int boneIdx = std::distance(m_bones.begin(), it);
-            mesh->m_skeleton.push_back(joint());
-
-            FbxAMatrix lReferenceGlobalInitPosition0;
-            FbxMatrix lReferenceGlobalInitPosition = pFbxCluster->GetTransformMatrix(lReferenceGlobalInitPosition0);
-
-            int indexCount = pFbxCluster->GetControlPointIndicesCount();
-            int* indices = pFbxCluster->GetControlPointIndices();
-            double* weights = pFbxCluster->GetControlPointWeights();
-            for (int k = 0; k < indexCount; ++k)
-            {
-                int ixcounts = 0;
-                int idx = indices[k];
-#if 1
-                auto vit = vertexIdxMap.equal_range(idx);
-                for (auto rangeIT = vit.first; rangeIT != vit.second; ++rangeIT)
-                {
-                    size_t vertIdx = rangeIT->second;
-                    bool try2replace = true;
-                    for (int w = 0; w < 4; ++w)
-                    {
-                        if (vertines[vertIdx].weights[w] < math::Epsilon)
-                        {
-                            vertines[vertIdx].weights[w] = (float)weights[k];
-                            vertines[vertIdx].indices[w] = (float)boneIdx;
-                            try2replace = false;
-                            break;
-                        }
-                    }
-                    if (try2replace)
-                        checkForReplace(vertines[vertIdx], boneIdx, (float)weights[k]);
-
-                    fbxlinkTransformsMatrix[vertIdx] += lReferenceGlobalInitPosition * weights[k];
-                }
-#else
-                for (size_t ii = 0; ii < vertines.size(); ++ii)
-                {
-                    if (vertines[ii].idx == idx)
-                    {
-                        bool try2replace = true;
-                        for (int w = 0; w < 4; ++w)
-                        {
-                            if (vertines[ii].weights[w] < EPSILON)
-                            {
-                                vertines[ii].weights[w] = (float)weights[k];
-                                vertines[ii].indices[w] = (float)boneIdx;
-                                try2replace = false;
-                                break;
-                            }
-                        }
-                        if (try2replace)
-                            checkForReplace(vertines[ii], boneIdx, (float)weights[k]);
-
-                        fbxlinkTransformsMatrix[ii] += lReferenceGlobalInitPosition * weights[k];
-                    }
-                }
-#endif
-            }
-        }
+            vec3 p = vertices[i].position;
+            FbxVector4 fbxp = globalTransform.MultNormalize(FbxVector4(p.x, p.y, p.z, 0.0));
+            vertices[i].position = FBX_VEC4_2_VEC3(fbxp);
+        //    vertines[i].position *= 0.01f;
+        }/**/
     }
-
-
-//    m_aabb.clear();
-    for (size_t i = 0; i < vertines.size(); ++i)
-    {
-        vec3 p = vertines[i].position;
-        FbxVector4 fbxp = fbxlinkTransformsMatrix[i].MultNormalize(FbxVector4(p.x, p.y, p.z, 0.0));
-        vertines[i].position = FBX_VEC4_2_VEC3(fbxp);
-
-        float wsum = (vertines[i].weights.x + vertines[i].weights.y + vertines[i].weights.z + vertines[i].weights.w);
-        if (wsum != 0.0f)
-            vertines[i].weights /= wsum;
-    }
-    delete[] fbxlinkTransformsMatrix;
 
     return mesh;
 }
@@ -356,40 +381,40 @@ AssetFbx::s_mesh * AssetFbx::loadmesh(FbxMesh * fbxMesh)
 
 void AssetFbx::buildhierarchy()
 {
-    for (size_t i = 0; i < m_bones.size(); ++i)
+    for (size_t i = 0; i < m_fbx_node_bones.size(); ++i)
     {
         joint join;
-        sprintf(join.name, "%s", m_bones[i]->GetName());
-        join.id = m_joints.size();
+        sprintf(join.name, "%s", m_fbx_node_bones[i]->GetName());
+        join.id = static_cast<int>(m_joints.size());
         join.parentid = -1;
 
         m_joints.push_back(join);
     }
 
-    for (size_t i = 0; i < m_bones.size(); ++i)
+    for (size_t i = 0; i < m_fbx_node_bones.size(); ++i)
     {
-        for (int j = 0; j < m_bones[i]->GetChildCount(); j++)
+        for (int j = 0; j < m_fbx_node_bones[i]->GetChildCount(); j++)
         {
-            FbxNode * child = m_bones[i]->GetChild(j);
-            auto it = std::find(m_bones.begin(), m_bones.end(), child);
-            if (it != m_bones.end())
+            FbxNode * child = m_fbx_node_bones[i]->GetChild(j);
+            auto it = std::find(m_fbx_node_bones.begin(), m_fbx_node_bones.end(), child);
+            if (it != m_fbx_node_bones.end())
             {
-                size_t  d = std::distance(m_bones.begin(), it);
-                m_joints[d].parentid = i;
+                size_t  d = std::distance(m_fbx_node_bones.begin(), it);
+                m_joints[d].parentid = static_cast<int>(i);
             }
         }
     }
 }
 
-void AssetFbx::loadbinds()
+void AssetFbx::load_bind_poses()
 {
     // set bind poses
-    for (size_t i = 0; i < m_bones.size(); ++i)
+    for (size_t i = 0; i < m_fbx_node_bones.size(); ++i)
     {
-        auto * node = m_bones[i];
-        for (size_t j = 0; j < m_meshes.size(); ++j)
+        auto * node = m_fbx_node_bones[i];
+        for (size_t j = 0; j < m_fbx_node_meshes.size(); ++j)
         {
-            FbxCluster * cluster = GetDeformerClasterForBone(node, m_meshes[j]);
+            FbxCluster * cluster = GetDeformerClasterForBone(node, m_fbx_node_meshes[j]);
             if (!cluster)
                 continue;
 
@@ -400,7 +425,7 @@ void AssetFbx::loadbinds()
             FbxVector4 s = lClusterGlobalInitPosition.GetS();
             FbxQuaternion q = lClusterGlobalInitPosition.GetQ();
 
-            m_joints[i].bind_pos = vec3((float)t[0], (float)t[1], (float)t[2]);
+            m_joints[i].bind_pos = math::make_vec3((float)t[0], (float)t[1], (float)t[2]);
             m_joints[i].bind_rot = quat((float)q[0], (float)q[1], (float)q[2], (float)q[3]);
         }
     }
@@ -415,10 +440,10 @@ AssetFbx::s_animation * AssetFbx::loadanim()
         m_pScene->SetCurrentAnimationStack(animStack);
 
         int frameCount = 0;
-        for (size_t j = 0; j < m_bones.size(); ++j)
+        for (size_t j = 0; j < m_fbx_node_bones.size(); ++j)
         {
-            m_bones[j]->GetAnimationInterval(pTimeInterval, animStack);
-            frameCount = math::max(frameCount, (int)pTimeInterval.GetStop().GetFrameCount());
+            m_fbx_node_bones[j]->GetAnimationInterval(pTimeInterval, animStack);
+            frameCount = fmaxf(frameCount, (int)pTimeInterval.GetStop().GetFrameCount());
         }
         m_frames = frameCount;
 
@@ -454,19 +479,115 @@ FbxAnimLayer * AssetFbx::get_animlayer(int id, int * frames_count)
     {
         auto takeInfo = m_pScene->GetTakeInfo(name);
         auto duration = takeInfo->mLocalTimeSpan.GetDuration();
-        (*frames_count) = duration.GetFrameCount();
+        (*frames_count) = static_cast<int>(duration.GetFrameCount());
     }
 
     return lCurrentAnimationStack->GetMember<FbxAnimLayer>();
 }
 
 
-void AssetFbx::load_skininfo(FbxMesh * fbxMesh)
+void AssetFbx::load_skin(FbxMesh * fbxMesh, s_mesh * mesh)
 {
+    auto & vertices = mesh->vertices;
+    int deformerCount = fbxMesh->GetDeformerCount(FbxDeformer::eSkin);
+    std::vector<FbxMatrix> fbxlinkTransformsMatrix(mesh->vertices.size());
+
+    /// load skin data
+    for (int deformerIdx = 0; deformerIdx < deformerCount; ++deformerIdx)
+    {
+        FbxSkin* skin = (FbxSkin*)(fbxMesh->GetDeformer(deformerIdx, FbxDeformer::eSkin));
+
+        int lClusterCount = skin->GetClusterCount();
+        for (int clusterIdx = 0; clusterIdx != lClusterCount; ++clusterIdx)
+        {
+            auto cluster = skin->GetCluster(clusterIdx);
+            auto link = cluster->GetLink();
+            if (cluster->GetLink() == NULL)
+                continue;
+
+            auto it = std::find(m_fbx_node_bones.begin(), m_fbx_node_bones.end(), cluster->GetLink());
+            if (it == m_fbx_node_bones.end())
+                continue;
+
+            int boneIdx = static_cast<int>(std::distance(m_fbx_node_bones.begin(), it));
+            mesh->skeleton.push_back(joint());
+            mesh->skeleton.back().id = boneIdx;
+
+            FbxAMatrix lReferenceGlobalInitPosition0;
+            FbxMatrix lReferenceGlobalInitPosition = cluster->GetTransformMatrix(lReferenceGlobalInitPosition0);
+
+            int indexCount  = cluster->GetControlPointIndicesCount();
+
+            int* indices    = cluster->GetControlPointIndices();
+            double* weights = cluster->GetControlPointWeights();
+
+            for (int k = 0; k < indexCount; ++k)
+            {
+                int ixcounts = 0;
+                int idx = indices[k];
+#if 0
+                auto vit = vertexIdxMap.equal_range(idx);
+                for (auto& rangeIT = vit.first; rangeIT != vit.second; ++rangeIT)
+                {
+                    size_t vertIdx = rangeIT->second;
+                    bool try2replace = true;
+                    for (int w = 0; w < 4; ++w)
+                    {
+                        if (vertines[vertIdx].weights[w] < math::Epsilon)
+                        {
+                            vertines[vertIdx].weights[w] = (float)weights[k];
+                            vertines[vertIdx].indices[w] = (float)boneIdx;
+                            try2replace = false;
+                            break;
+                        }
+                    }
+                    if (try2replace)
+                        replaceVert(vertines[vertIdx], boneIdx, (float)weights[k]);
+
+                    fbxlinkTransformsMatrix[vertIdx] += lReferenceGlobalInitPosition * weights[k];
+                }
+#else
+                for (size_t ii = 0; ii < vertices.size(); ++ii)
+                {
+                    if (vertices[ii].idx != idx)
+                        continue;
+
+                    bool try2replace = true;
+                    float* ptr = (float*)&vertices[ii].weights.x;
+                    for (int w = 0; w < 4; ++w)
+                    {
+                        if (ptr[w] < math::Epsilon)
+                        {
+                            ptr[w] = (float)weights[k];
+                            ptr[w] = (float)boneIdx;
+                            try2replace = false;
+                            break;
+                        }
+                    }
+                    if (try2replace)
+                        replaceVert(vertices[ii], boneIdx, (float)weights[k]);
+
+                    fbxlinkTransformsMatrix[ii] += lReferenceGlobalInitPosition * weights[k];
+                }
+#endif
+            }
+        }
+    }
+
+    for (size_t i = 0; i < vertices.size(); ++i)
+    {
+        vec3 p = vertices[i].position;
+        FbxVector4 fbxp = fbxlinkTransformsMatrix[i].MultNormalize(FbxVector4(p.x, p.y, p.z, 0.0));
+        vertices[i].position = FBX_VEC4_2_VEC3(fbxp);
+
+        float wsum = (vertices[i].weights.x + vertices[i].weights.y + vertices[i].weights.z + vertices[i].weights.w);
+        if (wsum != 0.0f)
+            vertices[i].weights /= wsum;
+    }
 }
 
 
-void AssetFbx::load_blendhapeinfo(FbxMesh * fbxMesh)
+void AssetFbx::load_blendshape(FbxMesh * fbxMesh, s_mesh* mesh)
 {
     int lVertexCount = fbxMesh->GetControlPointsCount();
 
@@ -549,12 +670,11 @@ void AssetFbx::load_blendhapeinfo(FbxMesh * fbxMesh)
                 {
                     for (int d = 0; d < 3; d++)
                     {
-                        bbmin = math::min(bbmin, (float)lDstVertexArray[v][d]);
-                        bbmax = math::max(bbmax, (float)lDstVertexArray[v][d]);
+                        bbmin = fminf(bbmin, (float)lDstVertexArray[v][d]);
+                        bbmax = fmaxf(bbmax, (float)lDstVertexArray[v][d]);
                     }
                 }
                 printf("\nframe[%d]: %.3f : %.3f ", i, bbmin, bbmax);
-
             } // 
         } // foreach lChannelIndex
     } //foreach lBlendShapeIndex
