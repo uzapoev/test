@@ -149,9 +149,9 @@ private:
     void traverse(UnityGameObject & gob);
 
 public:
-    std::unordered_set<atomic_string>   m_meshes;
-    std::unordered_set<atomic_string>   m_textures;
-    std::unordered_set<atomic_string>   m_materials;
+    std::unordered_set<interned_string>   m_meshes;
+    std::unordered_set<interned_string>   m_textures;
+    std::unordered_set<interned_string>   m_materials;
 
     std::vector<UnityGameObject*>   m_drawable_nodes;
     std::vector<UnityGameObject>    m_nodes;
@@ -172,7 +172,7 @@ public:
 
     void            clear();
 
-    atomic_string guid_2_path(std::string_view guid)
+    interned_string guid_2_path(std::string_view guid)
     {
         auto it = m_textures.find(std::string(guid));
         if(it != m_textures.end())
@@ -193,11 +193,11 @@ private:
 
 public:
 
-    std::unordered_map<atomic_string, atomic_string>        m_assets; // key - guid, value - path
-    std::unordered_map<atomic_string, atomic_string>        m_meshes; // key - guid, value - path
-    std::unordered_map<atomic_string, atomic_string>        m_textures; // key - guid, value - path
-    std::unordered_map<atomic_string, atomic_string>        m_materials; // key - guid, value - path
-    std::unordered_multimap<atomic_string, atomic_string>   m_meshes_multimap; // key - guid, value - path
+    std::unordered_map<interned_string, interned_string>        m_assets; // key - guid, value - path
+    std::unordered_map<interned_string, interned_string>        m_meshes; // key - guid, value - path
+    std::unordered_map<interned_string, interned_string>        m_textures; // key - guid, value - path
+    std::unordered_map<interned_string, interned_string>        m_materials; // key - guid, value - path
+    std::unordered_multimap<interned_string, interned_string>   m_meshes_multimap; // key - guid, value - path
 };
 
 #endif

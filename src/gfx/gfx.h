@@ -63,25 +63,16 @@
 
 
 typedef enum gfx_options {
-    gfx_options_debug = 1 << 0,
-    gfx_options_verbose = 1 << 1,
-    gfx_options_callstack = 1 << 2,
+    gfx_options_debug       = 1 << 0,
+    gfx_options_verbose     = 1 << 1,
+    gfx_options_callstack   = 1 << 2,
 } gfx_options;
 
 
-typedef enum gpu_device_type {
-    gpu_device_type_discrete,
-    gpu_device_type_embbed
-} gpu_device_type;
-
-
-typedef enum gfx_backend {
-    gfx_backend_auto,   //metal for apple, webgpu - html, vulkan - win/android, dx12 - win
-    gfx_backend_vulkan,
-    gfx_backend_d3d12,
-    gfx_backend_metal,
-    gfx_backend_webgpu,
-} gfx_backend;
+typedef enum gfx_gpu_type {
+    gfx_gpu_discrete,
+    gfx_gpu_integrated
+} gfx_gpu_type;
 
 
 typedef enum gfx_msg {
@@ -91,10 +82,13 @@ typedef enum gfx_msg {
 } gfx_msg;
 
 
-typedef enum gfx_gpu_type {
-    gfx_gpu_discrete,
-    gfx_gpu_integrated
-} gfx_gpu_type;
+typedef enum gfx_backend {
+    gfx_backend_auto,   //metal for apple, webgpu - html, vulkan - win/android, dx12 - win
+    gfx_backend_vulkan,
+    gfx_backend_d3d12,
+    gfx_backend_metal,
+    gfx_backend_webgpu,
+} gfx_backend;
 
 
 typedef enum gfx_buffer_usage {
@@ -141,14 +135,15 @@ typedef enum gfx_pixel_format {
 
     gfx_pixel_format_pvrtc_rgb_2bpp,
     gfx_pixel_format_pvrtc_rgba_2bpp,
-
     gfx_pixel_format_pvrtc_rgb_4bpp,
     gfx_pixel_format_pvrtc_rgba_4bpp,
 
     gfx_pixel_format_bc1,               //! dxt1 8  
     gfx_pixel_format_bc2,               //! dxt3 16
     gfx_pixel_format_bc3,               //! dxt5 16
-    gfx_pixel_format_bc6,               //
+ //   gfx_pixel_format_bc4,               //! ATI1N
+ //   gfx_pixel_format_bc5,               //! ATI2N
+    gfx_pixel_format_bc6,               // 
     gfx_pixel_format_bc7,               //
 
     gfx_pixel_format_astc4x4,           //
@@ -296,7 +291,28 @@ typedef enum gfx_blend_op {
     gfx_blend_op_rev_substract,
 } gfx_blend_op;
 
- 
+
+typedef enum gfx_pipeline_flags {
+    gfx_colormask_r = 1 << 0,
+    gfx_colormask_g = 1 << 1,
+    gfx_colormask_b = 1 << 2,
+    gfx_colormask_a = 1 << 3,
+    gfx_colormask_all = gfx_colormask_r | gfx_colormask_g | gfx_colormask_b | gfx_colormask_a,
+    gfx_depth_test = 1 << 4,
+    gfx_depth_write = 1 << 5,
+    gfx_blend = 1 << 6,
+    gfx_stencil = 1 << 7,
+} gfx_pipeline_flags;
+
+
+typedef enum gfx_semantic {
+    gfx_position,
+    gfx_color,
+    gfx_normal,
+    gfx_uv0,
+} gfx_semantic;
+
+
 typedef enum gfx_shader_stage {
     gfx_shader_vertex,
     gfx_shader_hull,
@@ -332,47 +348,54 @@ typedef enum gfx_submit_options {
 
 struct gfx_handle_pool_t;
 
-typedef struct { uintptr_t idx; } gfx_context_t;
-typedef struct { uintptr_t idx; } gfx_swapchain_t;
-typedef struct { uintptr_t idx; } gfx_buffer_t;
-typedef struct { uintptr_t idx; } gfx_texture_t;
-typedef struct { uintptr_t idx; } gfx_sampler_t;
-typedef struct { uintptr_t idx; } gfx_shader_t;  
-typedef struct { uintptr_t idx; } gfx_descriptor_set_t;
-typedef struct { uintptr_t idx; } gfx_pipeline_t;
-typedef struct { uintptr_t idx; } gfx_pipeline_compute_t;
-typedef struct { uintptr_t idx; } gfx_render_target_t;
-typedef struct { uintptr_t idx; } gfx_command_buffer_t;
+typedef struct { uint64_t idx; } gfx_context_t;
+typedef struct { uint64_t idx; } gfx_swapchain_t;
+typedef struct { uint64_t idx; } gfx_buffer_t;
+typedef struct { uint64_t idx; } gfx_texture_t;
+typedef struct { uint64_t idx; } gfx_sampler_t;
+typedef struct { uint64_t idx; } gfx_shader_t;  
+typedef struct { uint64_t idx; } gfx_descriptor_set_t;
+typedef struct { uint64_t idx; } gfx_pipeline_t;
+typedef struct { uint64_t idx; } gfx_pipeline_compute_t;
+typedef struct { uint64_t idx; } gfx_render_target_t;
+typedef struct { uint64_t idx; } gfx_command_buffer_t;
+
 
 // type - info/warning/error
 typedef void (*gfx_callback)(gfx_msg type, const char* msg, ...);
-typedef void (*gfx_allocation_callback)(gfx_uniform_type type, intptr_t size); // 
+//typedef void (*gfx_allocation_callback)(gfx_uniform_type type, intptr_t size); // 
+
+typedef struct gfx_allocator_t {
+    void* (*allocate_pfn)  (size_t size);
+    void* (*realloc_pfn)   (void* ptr, size_t size);
+    void  (*free_pfn)      (void* ptr);
+} gfx_allocator_t;
 
 typedef struct gfx_settings_t {
     const char*             appname             = "gfx";
-    uint32_t                options = 0;
+    uint32_t                options             = 0;
 
     gfx_backend             backend             = gfx_backend_auto;
     intptr_t                handle              = 0;
 
     struct {
-        uint32_t            staging_buffer_size = 8* 1024 * 1024;
-        uint32_t            buffer_pool_capacity = 1024;
-        uint32_t            shaders_pool_capacity = 1024;
-        uint32_t            textures_pool_capacity = 8096;
+        uint32_t            staging_buffer_size     = 8* 1024 * 1024;
+        uint32_t            buffer_pool_capacity    = 4096*4;
+        uint32_t            shaders_pool_capacity   = 1024;
+        uint32_t            textures_pool_capacity  = 8192;
     } limits;
 
-    struct  {
-        void *  (*allocate_pfn)  (size_t size);
-        void *  (*realloc_pfn)   (void *ptr, size_t size);
-        void    (*free_pfn)      (void* ptr);
-    } allocator;
+    gfx_allocator_t         allocator;
 
     gfx_callback            dbglog;
 } gfx_settings_t;
 
 
 typedef struct gfx_caps_t {
+    gfx_gpu_type            gpu_type;
+    char                    gpu_name[64];
+    char                    gpu_vendor[64];
+
     uint8_t                 support_pvr;        //
     uint8_t                 support_etc;        //
     uint8_t                 support_astc;       //
@@ -494,27 +517,14 @@ typedef struct gfx_vertex_slot_t {
 
 typedef struct gfx_vertex_assembly {
     gfx_topology            topology = gfx_topology_points;
-    
+
     uint32_t                slot_count;
-    gfx_vertex_slot_t*      slots;
-    
-     uint32_t                attributes_count;
-     gfx_vertex_attribute*   attributes;
+    gfx_vertex_slot_t *     slots;
+
+    uint32_t                attributes_count;
+    gfx_vertex_attribute *  attributes;
 
 } gfx_vertex_assembly;
-
-
-typedef enum gfx_pipeline_flags {
-    gfx_colormask_r     = 1 << 0,
-    gfx_colormask_g     = 1 << 1,
-    gfx_colormask_b     = 1 << 2,
-    gfx_colormask_a     = 1 << 3,
-    gfx_colormask_all   = gfx_colormask_r | gfx_colormask_g | gfx_colormask_b | gfx_colormask_a,
-    gfx_depth_test      = 1 << 4,
-    gfx_depth_write     = 1 << 5,
-    gfx_blend           = 1 << 6,
-    gfx_stencil         = 1 << 7,
-} gfx_pipeline_flags;
 
 
 typedef struct gfx_render_states_desc_t {
@@ -583,55 +593,27 @@ typedef struct gfx_pipeline_desc_t {
 } gfx_pipeline_desc_t;
 
 
-typedef struct gfx_statistics_t {
-    uint32_t                texture_count;
-    uint32_t                texture_memory;
-
-    uint32_t                ubo_buffers_count;
-    uint32_t                ubo_buffers_memory;  
-
-    uint32_t                ib_buffers_count;
-    uint32_t                ib_buffers_memory;
-
-    uint32_t                vb_buffers_count;
-    uint32_t                vb_buffers_memory;
-
-} gfx_statistics_t;
-
-
 typedef struct gfx_render_pass_desc_t {
     uint32_t clear_color;
     uint32_t clear_depth;
 } gfx_render_pass_desc_t;
 
 
-
-
 typedef struct gfx_device_info_t {
-    gpu_device_type     type;           // discrete/embbed
-    char                name[64];       // 
+    gfx_gpu_type    type;           // discrete/embbed
+    char            name[64];       // 
 } gfx_device_info_t;
 
-gfx_api int32_t         gfx_enumerate_devices(gfx_device_info_t * infos, int32_t capacity);
+gfx_api int32_t                 gfx_enumerate_devices(gfx_device_info_t * infos, int32_t capacity);
+gfx_api gfx_backend             gfx_detect_bakend(gfx_backend * backends, uint32_t size);
+gfx_api void                    gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
 
-gfx_api gfx_backend     gfx_detect_bakend(gfx_backend * backends, uint32_t size);
-gfx_api void            gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
-gfx_api void            gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain);
+gfx_api void                    gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
+gfx_api void                    gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain);
 
-gfx_api void            gfx_get_caps(gfx_settings_t* settings, gfx_context_t** ctx);
-
-gfx_api int32_t         gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t * swapchain, gfx_render_target_t** target);
-gfx_api void            gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t * swapchain, uint32_t idx);
-
-//gfx_api void     gfx_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t * desc, gfx_buffer_t** buffer);
-//gfx_api void     gfx_create_shader(gfx_context_t* ctx, gfx_shader_desc_t * desc, gfx_shader_t** shader/*,out gfx_uniform_t * uniforms, inout uint32_t *cout*/);
-//gfx_api void     gfx_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t * desc, gfx_sampler_t** sampler);
-//gfx_api void     gfx_create_texture(gfx_context_t* ctx, gfx_texture_desc_t * desc, gfx_texture_t** texture);
-//gfx_api void     gfx_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t * desc, gfx_pipeline_t** pipeline);
-//gfx_api void     gfx_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-//gfx_api void     gfx_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
-//gfx_api void     gfx_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);
+gfx_api int32_t                 gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t * swapchain, gfx_render_target_t** target);
+gfx_api void                    gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t * swapchain, uint32_t idx);
 
 gfx_api gfx_buffer_t *          gfx_create_buffer2(gfx_context_t* ctx, gfx_buffer_desc_t* desc);
 gfx_api gfx_shader_t *          gfx_create_shader2(gfx_context_t* ctx, gfx_shader_desc_t* desc);
@@ -642,41 +624,45 @@ gfx_api gfx_render_target_t *   gfx_create_render_target2(gfx_context_t* ctx, gf
 gfx_api gfx_descriptor_set_t *  gfx_create_descriptor_set2(gfx_context_t* ctx, gfx_shader_t* shader);
 gfx_api gfx_command_buffer_t *  gfx_create_cmd2(gfx_context_t* ctx);
 
-gfx_api void     gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+gfx_api void                    gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
 
-gfx_api void     gfx_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);
-gfx_api void     gfx_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);
-gfx_api void     gfx_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler);
-gfx_api void     gfx_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture);
-gfx_api void     gfx_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
-gfx_api void     gfx_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
-gfx_api void     gfx_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
-gfx_api void     gfx_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api void                    gfx_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);
+gfx_api void                    gfx_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);
+gfx_api void                    gfx_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler);
+gfx_api void                    gfx_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture);
+gfx_api void                    gfx_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
+gfx_api void                    gfx_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
+gfx_api void                    gfx_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+gfx_api void                    gfx_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 
 // handle - shader|type|id
-gfx_api uint32_t gfx_shader_get_uniforms    (gfx_shader_t* shader, gfx_uniform_t * uniforms);
-gfx_api uint64_t gfx_uniform_location       (gfx_shader_t * shader, const char* name);
-gfx_api void     gfx_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
-gfx_api void     gfx_uniform_set_buffer     (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset);
-gfx_api void     gfx_uniform_set_texture    (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t * texture);
-gfx_api void     gfx_uniform_set_sampler    (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t * sampler);
+gfx_api uint32_t                gfx_shader_get_uniforms     (gfx_shader_t* shader, gfx_uniform_t * uniforms);
+gfx_api uint64_t                gfx_uniform_location        (gfx_shader_t* shader, const char* name);
+gfx_api void                    gfx_uniform_set_buffer_data (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
+gfx_api void                    gfx_uniform_set_buffer      (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset);
+gfx_api void                    gfx_uniform_set_texture     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t * texture);
+gfx_api void                    gfx_uniform_set_sampler     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t * sampler);
 
-gfx_api void     gfx_cmd_begin              (gfx_command_buffer_t* cmd);
-gfx_api void     gfx_cmd_begin_pass         (gfx_command_buffer_t* cmd, gfx_render_target_t* target);
-gfx_api void     gfx_cmd_end_pass           (gfx_command_buffer_t* cmd);
+gfx_api void                    gfx_cmd_begin_marker        (gfx_command_buffer_t* cmd, const char * marker);
+gfx_api void                    gfx_cmd_insert_marker       (gfx_command_buffer_t* cmd, const char * marker);
+gfx_api void                    gfx_cmd_end_marker          (gfx_command_buffer_t* cmd);
 
-gfx_api void     gfx_cmd_scissor            (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-gfx_api void     gfx_cmd_viewport           (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-gfx_api void     gfx_cmd_bind_pipeline      (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-gfx_api void     gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
-gfx_api void     gfx_cmd_bind_index_buffer  (gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer);
-gfx_api void     gfx_cmd_bind_vertex_buffer (gfx_command_buffer_t* cmd, uint32_t slot, gfx_buffer_t* buffer);
-gfx_api void     gfx_cmd_draw               (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-gfx_api void     gfx_cmd_draw_indexed       (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
-gfx_api void     gfx_cmd_dispatch_compute   (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+gfx_api void                    gfx_cmd_begin               (gfx_command_buffer_t* cmd);
+gfx_api void                    gfx_cmd_begin_pass          (gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+gfx_api void                    gfx_cmd_end_pass            (gfx_command_buffer_t* cmd);
 
-gfx_api void     gfx_cmd_end(gfx_command_buffer_t* cmd);
-gfx_api void     gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+gfx_api void                    gfx_cmd_scissor             (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+gfx_api void                    gfx_cmd_viewport            (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+gfx_api void                    gfx_cmd_bind_pipeline       (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+gfx_api void                    gfx_cmd_bind_descriptor_set (gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
+gfx_api void                    gfx_cmd_bind_index_buffer   (gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer);
+gfx_api void                    gfx_cmd_bind_vertex_buffer  (gfx_command_buffer_t* cmd, uint32_t slot, gfx_buffer_t* buffer);
+gfx_api void                    gfx_cmd_draw                (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+gfx_api void                    gfx_cmd_draw_indexed        (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
+gfx_api void                    gfx_cmd_dispatch_compute    (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+
+gfx_api void                    gfx_cmd_end(gfx_command_buffer_t* cmd);
+gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
 // WIP: occlusion query, timestamp, mipmap, raytracing
 // 
@@ -737,15 +723,22 @@ gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, 
 gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width);
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
 
-gfx_api void        gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** pool);
+gfx_api void        gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** pool, gfx_allocator_t * allocator);
 gfx_api void        gfx_pool_destroy(gfx_handle_pool_t* pool);
-gfx_api uint64_t    gfx_pool_acquire(gfx_handle_pool_t* pool);
-gfx_api void        gfx_pool_release(gfx_handle_pool_t* pool, uint64_t handle);
-gfx_api void        gfx_pool_resize(gfx_handle_pool_t* pool, size_t capacity);
+gfx_api uint64_t    gfx_pool_alloc(gfx_handle_pool_t* pool);
+gfx_api void        gfx_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api void*       gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
+
 gfx_api void*       gfx_pool_get_data(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_stride(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_size(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_has_free(gfx_handle_pool_t* pool);
+
+
+/*
+* gfx_handle_pool_t* pool = gfx_pool_create(sizeof(vk_buffer_t), capacity);
+* vk_buffer_t * buffer = gfx_pool_allocate(pool);
+* 
+*/
 
 #endif // __gfx_webgpu_h__

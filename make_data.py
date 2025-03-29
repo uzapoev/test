@@ -1,5 +1,6 @@
 import os, sys, stat, time
 import subprocess
+import shutil
 from PIL import Image
 from pathlib import Path
 from shutil import copyfile
@@ -8,8 +9,10 @@ from subprocess import check_call
 
 compressonator = './utils/compressonatorcli/compressonatorcli.exe'
 tmp_image_path = "./assets/temp/image"
-dst_compressed_path = './assets/temp/image_compressed'
+dst_compressed_path = './assets/temp/image_compressed/bc3'
+dst_lm_compressed_path = './assets/temp/image_compressed/bc6'
 image_extensions = ['.jpg','.jpeg', '.bmp', '.png', '.gif', '.tga']
+lightmap_extensions = ['.exr']
 
 def pause():
     programPause = raw_input("Press the <ENTER> key to continue...")
@@ -35,6 +38,9 @@ def makedirs_silent(root):
     except OSError: # mute if exists
         pass
         
+def clear_dir(root):
+    rmtree_silent(root)
+    makedirs_silent(root)
         
 def resize_textures(files, dst_dir):
      for path in files:
@@ -48,8 +54,8 @@ def resize_textures(files, dst_dir):
             imageOriginal = Image.open(path)
             width, height = imageOriginal.size
             print(path, width, height)
-            if width > 1024 or height > 1024:
-                imageResized = imageOriginal.resize((1024, 1024), Image.LANCZOS )
+            if width > 512 or height > 512:
+                imageResized = imageOriginal.resize((512, 512), Image.LANCZOS )
                 imageResized.save(dst_file_path, 'PNG')
             else:
                 imageOriginal.save(dst_file_path, 'PNG')
@@ -58,12 +64,15 @@ def resize_textures(files, dst_dir):
 def compress_textures(compression_type, src_dir, dst_dir):
     result = subprocess.run([compressonator, "-fd", compression_type, "-fx", "DDS", "-ff", "PNG", "-miplevels", "10", src_dir, dst_dir])
     print(result)
+    
+def compress_lighmaps(compression_type, src_dir, dst_dir):
+    result = subprocess.run([compressonator, "-fd", compression_type, "-fx", "DDS", "-ff", "exr", "-miplevels", "10", src_dir, dst_dir])
+    print(result)
 
 
-def export_textures(filepathes):
-    makedirs_silent(dst_compressed_path)
-    resize_textures(filepathes, tmp_image_path);
-    compress_textures("BC3", tmp_image_path, dst_compressed_path)
+def export_textures(filepathes, dst_path, pixelformat):
+    makedirs_silent(dst_path)
+    compress_textures(pixelformat, tmp_image_path, dst_path)
 
 
 def filelist(path):
@@ -89,7 +98,10 @@ if __name__ == "__main__":
     os.makedirs(build_dir, exist_ok=True)
     os.makedirs(tmp_image_path, exist_ok=True)
     
+    clear_dir(tmp_image_path);
+    
     texture_list = []
+    lightmap_list = []
     mesh_list = []
 
     files = filelist('./assets')
@@ -100,13 +112,30 @@ if __name__ == "__main__":
         filename, extension = os.path.splitext(filepath)
         
         if tmp_image_path in filepath:
-            print("!!!!!skip!!!!" + filepath)
+            #print("!!!!!skip!!!!" + filepath)
             continue
         # textures
         if extension in image_extensions:
             texture_list.append(filepath)
+            
+        if extension in lightmap_extensions:
+            lightmap_list.append(filepath)
         #meshes
 
-    export_textures(texture_list)
+    clear_dir(tmp_image_path)
+
+    resize_textures(texture_list, tmp_image_path)
+    makedirs_silent(dst_compressed_path)
+    compress_textures("BC3", tmp_image_path, dst_compressed_path)
+    clear_dir(tmp_image_path)
+    
+    for filepath in lightmap_list:
+        print("!!!!!lm!!!!" + filepath)
+        shutil.copy2(filepath, tmp_image_path) 
+    makedirs_silent(dst_lm_compressed_path)
+    compress_lighmaps("BC6H", tmp_image_path, dst_lm_compressed_path)
+   # clear_dir(tmp_image_path)
+   # export_textures(lightmap_list, dst_lm_compressed_path, "BC6")
+    
     os.chdir(build_dir)
     os.system("pause")

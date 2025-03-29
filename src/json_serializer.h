@@ -1,7 +1,21 @@
 #ifndef __json_serializer_h__
 #define __json_serializer_h__
 
-#include "json.h"
+//#include "json.h"
+
+#include <cstdint>
+#include <cmath>
+#include <cctype>
+#include <string>
+#include <deque>
+#include <map>
+#include <type_traits>
+#include <initializer_list>
+#include <ostream>
+#include <iostream>
+#include <sstream>
+#include <vector>
+
 #include "common.h"
 #include "gason.h"
 
@@ -43,8 +57,8 @@ template<class T> inline auto                       jproperties() { }
 namespace json
 {
     template<class T> inline T              from_json_string(const std::string& jstr);
-    template<class T> inline json::JSON     to_json_string(T& oject);
-    template<class T> inline json::JSON     to_json(T& oject);
+  //  template<class T> inline json::JSON     to_json_string(T& oject);
+   // template<class T> inline json::JSON     to_json(T& oject);
 
     namespace detail
     {
@@ -86,8 +100,8 @@ namespace json
             inline tuple_for_each(const Tuple& tuple, Func&& func) {}
 
 
-        #define jprop   typename std::enable_if_t<has_properties<T>::value>
-        #define jnoprop typename std::enable_if_t<!has_properties<T>::value>
+      //  #define jprop   typename std::enable_if_t<has_properties<T>::value>
+      //  #define jnoprop typename std::enable_if_t<!has_properties<T>::value>
 
         typedef struct base_field_info_t {
             const char* name        = "";
@@ -111,7 +125,7 @@ namespace json
         struct is_vector<std::vector<T> > {
             static bool const value = true;
         };
-
+        /*
 
         template <class T> inline void jsonread_vec(const json::JSON& j, std::vector<T>& value)
         {
@@ -122,6 +136,7 @@ namespace json
                 value.push_back(std::move(tmpvalue));
             }
         }
+        */
 
         template <class T> inline void jsonread_vec2(const JsonValue& jvalue, std::vector<T>& value)
         {
@@ -146,7 +161,7 @@ namespace json
             }*/
         }
 
-        template <class T> void jsonwrite(json::JSON& j, const std::string& key, T& value)            { j[key] = json::to_json(value);   }
+     /*   template <class T> void jsonwrite(json::JSON& j, const std::string& key, T& value)            { j[key] = json::to_json(value);   }
         template <> inline void jsonwrite(json::JSON& j, const std::string& key, std::string& value)  { j[key] = value; }
         template <> inline void jsonwrite(json::JSON& j, const std::string& key, float& value)        { j[key] = value; }
         template <> inline void jsonwrite(json::JSON& j, const std::string& key, double& value)       { j[key] = value; }
@@ -173,7 +188,7 @@ namespace json
                 arr.append(v[i]);
             }
             j[k] = arr;
-        }
+        }*/
 
 
         template <typename T, typename std::enable_if_t<has_properties<T>::value>* = nullptr>
@@ -230,7 +245,7 @@ namespace json
         }
     }
 
-
+    /*
     template<class T>
     inline void deserialize(T& object, const json::JSON& jdata)
     {
@@ -252,7 +267,7 @@ namespace json
                 {
                     object.*arg->member = (member_type)jobject.ToFloat();
                 }
-                else if constexpr (std::is_integral_v<member_type>)             // bool, int, int16m int32...
+                else if constexpr (std::is_integral_v<member_type>)             // bool, int, int16 int32...
                 {
                     object.*arg->member = (member_type)jobject.ToInt();
                 }
@@ -266,7 +281,7 @@ namespace json
                 }
             });
         }
-    }
+    }*/
 
     template<class T>
     inline T from_json_string(const std::string& jstr)
@@ -287,13 +302,13 @@ namespace json
         auto n = value.toNode();
         */
 
-        auto jdata = json::JSON::Load(jstr);
+    //    auto jdata = json::JSON::Load(jstr);
 
-        deserialize(object, jdata);
+     //   deserialize(object, jdata);
 
-        return std::move(object);
+     //   return std::move(object);
     }
-
+/*
     template<class T>
     inline json::JSON to_json_string(T& object)
     {
@@ -307,7 +322,7 @@ namespace json
     template<class T> inline json::JSON to_json(T& oject)
     {
         return {};
-    }
+    }*/
 }
 
 

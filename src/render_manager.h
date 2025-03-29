@@ -9,17 +9,19 @@ struct offset_allocator;
 
 template<class T>
 struct shader_slot {
-    atomic_string   key;
-    T               value = {};
+    interned_string     key;        // 
+    interned_string     guid;       // for textures
+    T                   value = {};
 };
 
 typedef struct gfx_material_instance_t {
     gfx_shader_t*                   shader = nullptr;
     gfx_pipeline_t*                 pipeline = nullptr;
 
-    shader_slot<gfx_texture_t*>     textures[16];
-    shader_slot<vec4>               vectors[64];
-    shader_slot<float>              scalars[64];
+    shader_slot<gfx_texture_t*>     textures[32];
+    shader_slot<float4>             vectorsf[64];
+    shader_slot<int4>               vectorsi[64];
+    shader_slot<float>              scalarsf[64];
 } gfx_material_instance_t;
 
 
@@ -30,40 +32,48 @@ typedef struct gfx_material_t {
 
 
 typedef struct gfx_mesh_t {
-    const char *        guid;
-    gfx_index_format    format;
-    uint32_t            vertex_count;
-    gfx_buffer_t*       vertex_buffer;
-    uint32_t            vertex_buffer_offset;
+    uint32_t                vertex_count;
+    gfx_buffer_t*           vertex_buffer;
+    uint32_t                vertex_buffer_offset;
 
-    uint32_t            index_count;
-    gfx_buffer_t*       index_buffer;  
-    uint32_t            index_buffer_offset;
+    gfx_index_format        index_format;
+    uint32_t                index_count;
+    gfx_buffer_t*           index_buffer;  
+    uint32_t                index_buffer_offset;
 
-    uint32_t            submesh_count;
-    uint32_t            submeshes[16];
+    uint32_t                submesh_count;
+    uint32_t                submeshes[16];
 
-    aabbox              bounds;
+    aabbox                  bounds;
 }gfx_mesh_t;
 
 
+typedef struct collision_mesh_t
+{
+    uint32_t                vertex_count;
+    uint32_t                vertex_stride;
+
+    float *                 vertex_data;            // pos/normal/uv
+    uint16_t *              index_data;             // pos/normal/uv
+} collider_mesh_t;
+
 
 typedef struct gfx_mesh_pool_t {
-    offset_allocator*   vertex_allocator;
-    offset_allocator*   index_allocator;
+    offset_allocator*       vertex_allocator;
+    offset_allocator*       index_allocator;
 
-    uint32_t            vertex_buffer_size;
-    uint32_t            index_buffer_size;
+    uint32_t                vertex_buffer_size;
+    uint32_t                index_buffer_size;
 
-    gfx_buffer_t*       vertex_buffer;
-    gfx_buffer_t*       index_buffer;
+    gfx_buffer_t*           vertex_buffer;
+    gfx_buffer_t*           index_buffer;
 } gfx_mesh_pool_t;
 
 
 typedef struct gfx_lightmap_t {
-    gfx_texture_t*      lightmap;
-    gfx_texture_t*      lightmask;
-    vec4                scale_offset;
+    gfx_texture_t*          lightmap;
+    gfx_texture_t*          lightmask;
+    vec4                    scale_offset;
 } gfx_lightmap_t;
 
 
@@ -75,9 +85,48 @@ typedef struct renderer_t
 
     mat4                    transform;
     aabbox                  bounds;
-    aabbox                  world_bounds;
+    bbox                    world_bounds;
 } renderer_t;
 
+
+struct pass
+{
+    struct instance_batch
+    {
+        gfx_mesh_t *        mesh;
+        uint32_t            count;
+    };
+
+    struct pass_batch
+    {
+        gfx_pipeline_t * pipeline;
+        instance_batch * intsances;
+    };
+};
+
+
+// current frame + previous frame
+struct per_frame_data
+{
+    vec4    time;
+    vec4    cam_pos;
+    vec4    cam_dir;
+    vec4    cam_param;  // near, far, fov,
+
+    mat4    view;
+    mat4    proj;
+    mat4    view_proj;
+
+    mat4    view_inv;
+    mat4    proj_inv;
+    mat4    view_proj_inv;
+};
+
+struct per_instance_data
+{
+    mat4    model;
+    mat4    mvp;
+};
 
 
 static void draw_renderer(gfx_command_buffer_t * cmd, const renderer_t * renderer)
@@ -87,7 +136,7 @@ static void draw_renderer(gfx_command_buffer_t * cmd, const renderer_t * rendere
 
     gfx_cmd_bind_descriptor_set(cmd, set);
     gfx_cmd_bind_vertex_buffer(cmd, 0, mesh->vertex_buffer);
-    gfx_cmd_bind_index_buffer(cmd, mesh->format, mesh->index_buffer);
+    gfx_cmd_bind_index_buffer(cmd, mesh->index_format, mesh->index_buffer);
 
     int32_t start_idx = 0;
     for (size_t sub_idx = 0; sub_idx < mesh->submesh_count; sub_idx++)

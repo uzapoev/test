@@ -14,10 +14,10 @@
 * auto panel = gui->add<panel>();
 * auto layout = gui->create_layout_box();
 
-* auto button0 = gui->create<button>("label", [](button*) { printf("");} );
-* auto button1 = gui->create<button>("label", [](button*) { printf("");} );
-* auto button2 = gui->create<button>("label", [](button*) { printf("");} );
-* auto button3 = gui->create<button>("label", [](button*) { printf("");} );
+* auto button0 = gui->create<button>("style", "label", [](button*) { printf("");} );
+* auto button1 = gui->create<button>("style", "label", [](button*) { printf("");} );
+* auto button2 = gui->create<button>("style", "label", [](button*) { printf("");} );
+* auto button3 = gui->create<button>("style", "label", [](button*) { printf("");} ); 
 * 
 * layout->add(button0);
 * layout->add(button1);
@@ -26,6 +26,24 @@
 * 
 * panel->set_layout(layout);
 * 
+* 
+* gui->on_input_event( event );
+* gui->resize(width, height);
+* 
+* for(uint32_t i = 0; i < gui->batch_count() ++i)
+* {
+*   auto batch = gui->batch(i);
+*   
+*   gfx_bind_vertex_buffer(batch->vertex_buffer);
+*   gfx_bind_index_buffer(batch->index_buffer);
+*   gfx_bind_index_buffer(batch->descriptor_set);
+* 
+*   switch(batch->modificator)
+*   {
+*       case scissor:   break;
+*       case stencil:   break;
+*   }
+* }
 */
 
 
@@ -34,7 +52,9 @@
 // class layout
 // class action 
 // class canvas;
- 
+
+// class localization{  map<interned_string, std::wstring> }
+// 
 // class widget: sprite
 // class panel:  widget
 // class button: widget // toggle, 
@@ -61,9 +81,15 @@ class font
 
 class sprite
 {
-    atomic_string           m_name;
+    interned_string         m_name;
     vec4                    m_uvrect;
     class texture *         m_texture;
+};
+
+class style
+{
+    // color, size, image
+    vec4                    color;
 };
 
 struct gui_batch_t
@@ -93,10 +119,12 @@ public:
     void                    on_mouse_button(int x, int y, int btn, int state);
     void                    on_keyboard(int btn, int state);
 
+    void                    advance(float dt);
     void                    resize(int w, int h);
 
     const sprite *          get_sprite(const char * name);
     const gui_batch_t *     batch();
+    uint32_t                batches() const; 
 
 private:
     struct uivertex
@@ -107,7 +135,7 @@ private:
     };
 
 private:
-    typedef std::unordered_map<std::string, sprite*>  sprtite_map;
+    typedef std::unordered_map<std::string_view, sprite*>  sprtite_map;
 
     int                     m_width     = 0;
     int                     m_height    = 0; 
@@ -122,8 +150,12 @@ private:
 class uilayout
 {
 public:
-    static uilayout*        create_box_layout();    // horisontal/vertical
-    static uilayout*        create_grid_layout();   // 
+    static uilayout*        create_box_layout()     { return nullptr; } // horisontal/vertical
+    static uilayout*        create_grid_layout()    { return nullptr; } // 
+
+    virtual void            rearrange();
+public:
+    void                    add(widget * w) {};
 };
 
 
@@ -139,22 +171,18 @@ private:
 };
 
 
-struct rc_ptr
-{
-    virtual                 ~rc_ptr() {};
-    int                     retain()   { return m_counter.fetch_add(1); }
-    int                     release()  { return m_counter.fetch_add(-1);}
-    std::atomic<int>        m_counter; 
-};
 
-
-class widget : rc_ptr
+class widget
 {
+    friend class gui;
 public:
                             widget(widget * parent = nullptr);
     virtual                ~widget();
 
 public:
+    int                     retain()                { return m_ref_counter.fetch_add(1); }
+    int                     release()               { return m_ref_counter.fetch_sub(1); }
+
     vec2                    postition()             { return {m_rect.x, m_rect.y}; }
     void                    move(const vec2& p);
     bool                    contain(const vec2& p);
@@ -188,6 +216,7 @@ public:
     virtual bool            on_scroll(const vec2 &p);
 
 private:
+
     vec4                    m_rect;
     vec2                    m_anchor;
     gui::State              m_state;
@@ -197,14 +226,7 @@ private:
     widget *                m_parent = nullptr;
     uilayout*               m_layout = nullptr;
     std::vector<widget*>    m_childs;
-
-
-    enum gui_state_e
-    {
-     //   visible,
-     //   focused,
-     //   active,
-    };
+    std::atomic<int>        m_ref_counter;
 
     /*
     * float,int, string, vector,  
@@ -218,10 +240,12 @@ public:
     friend gui;
 };
 
+
 class panel : public widget
 {
     void                    maximize();
 };
+
 
 class lable : public widget
 {
@@ -240,7 +264,7 @@ public:
     }
 
 public:
-    void set_caption();
+    void set_caption(const std::string & caption);
     void set_callback();
     void set_icon();
     

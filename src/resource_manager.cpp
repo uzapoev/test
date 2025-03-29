@@ -1,16 +1,171 @@
 #include "resource_manager.h"
 
-
 #include <algorithm>
 #include <set>
 
 #include "render_manager.h"
 #include "json_serializer.h"
 
-static const std::filesystem::path mesh_extension(".mesh");
-
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
+
+
+static const std::filesystem::path mesh_extension(".mesh");
+
+size_t filesize(FILE* file)
+{
+    fseek(file, 0, SEEK_END);
+    size_t size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    return size;
+}
+
+struct stream_impl
+{
+    stream_impl(FILE * file) : m_file(file)
+    {
+        m_write_buffer_size = 1024*4;
+        m_write_buffer = new char [m_write_buffer_size]();
+
+        m_read_buffer_size = m_write_buffer_size;
+        m_read_buffer = new char[m_write_buffer_size]();
+
+        refill_buffer();
+    }
+
+    size_t read(uint32_t size, char* data)
+    {
+        size_t bytes_read = 0;
+        while (bytes_read < size) {
+            if (m_read_pos == m_read_buffer_size) {
+                refill_buffer();
+                if (m_read_pos == m_read_buffer_size) {
+                    break; // End of file
+                }
+            }
+            data[bytes_read++] = m_read_buffer[m_read_pos++];
+        }
+        return bytes_read;
+    }
+
+    size_t write(uint32_t size, const char * data)
+    {
+        size_t bytes_written = 0;
+        while (bytes_written < size) {
+            if (m_write_pos == m_write_buffer_size) {
+                write_buffer();
+            }
+            m_write_buffer[m_write_pos++] = data[bytes_written++];
+        }
+        return bytes_written;
+    }
+
+    size_t seek(size_t offset, int whence) 
+    {
+        flush(); // Flush the write buffer before seeking
+
+        int result = fseek(m_file, (long)offset, whence);
+
+        m_file_pos = result;
+        m_read_pos = m_read_buffer_size; // Invalidate the read buffer
+
+        return result;
+    }
+
+    void flush()
+    {
+        write_buffer();
+    }
+
+private:
+    void refill_buffer()
+    {
+        size_t result = fread(m_read_buffer, 1, m_read_buffer_size, m_file);
+        m_read_pos = 0;
+        m_file_pos += result;
+    }
+
+    void write_buffer()
+    {
+        size_t result = fwrite(m_write_buffer, 1, m_write_pos, m_file);
+        fflush(m_file);
+        m_write_pos = 0;
+        m_file_pos += result;
+    }
+
+private:
+    FILE *      m_file = nullptr;
+    size_t      m_file_pos = 0;
+
+    char *      m_read_buffer = nullptr;
+    size_t      m_read_buffer_size = 0;
+    size_t      m_read_pos = 0;
+
+    char *      m_write_buffer = nullptr;
+    size_t      m_write_buffer_size = 0;
+    size_t      m_write_pos = 0;
+};
+
+
+
+filestream* filestream::open(const char* path, const char* mode)
+{
+    FILE* file = fopen(path, mode);
+    if (file == nullptr)
+        return nullptr;
+
+    filestream * fstream = new filestream();
+    fstream->m_impl = new stream_impl(file);
+
+    return fstream;
+}
+
+filestream* filestream::open_rb(const char* path)
+{
+    return filestream::open(path, "rb");
+}
+
+filestream* filestream::open_wb(const char* path)
+{
+    return filestream::open(path, "wb+");
+}
+
+
+
+uint32_t  filestream::read(uint32_t size, void* out_data)
+{
+    return (uint32_t)m_impl->read(size, (char*)out_data);
+}
+
+uint32_t  filestream::write(uint32_t size, const void* in_data)
+{
+    return (uint32_t)m_impl->write(size, (char*)in_data);
+}
+
+void filestream::flush()
+{
+    m_impl->flush();
+}
+
+void filestream::seek(uint32_t offset, int whence)
+{
+    m_impl->seek(offset, whence);
+}
+
+
+
+texture::texture(interned_string guid, interned_string name, gfx_texture_t* tex)
+    : resource(guid, name)
+    , m_texture(tex)
+{   
+}
+
+rendermesh::rendermesh(interned_string guid, interned_string name, gfx_mesh_t mesh)
+    : resource(guid, name)
+    , m_mesh(mesh)
+{
+}
+
 
 
 size_t filedata2(const char* path, char** buff)
@@ -22,9 +177,7 @@ size_t filedata2(const char* path, char** buff)
     FILE* file = fopen(path, "rb");
     if (file != NULL)
     {
-        fseek(file, 0, SEEK_END);
-        size = ftell(file);
-        fseek(file, 0, SEEK_SET);
+        size = filesize(file);
 
         if (size > g_size)
             g_ptr = realloc(g_ptr, size + 1);
@@ -69,13 +222,13 @@ void resource_manager::init()
 
     gfx_vertex_attribute attributes[] = {
         { 0, 0, gfx_vertex_format_float4,   0                   },
-        { 3, 0, gfx_vertex_format_float4,   sizeof(vec4) * 1    },
-        { 2, 0, gfx_vertex_format_float4,   sizeof(vec4) * 2    },
-        { 1, 0, gfx_vertex_format_float4,   sizeof(vec4) * 3    },
+        { 3, 0, gfx_vertex_format_float4,   sizeof(vec4) * 1    },  // uv
+        { 2, 0, gfx_vertex_format_float4,   sizeof(vec4) * 2    },  // normal
+        { 1, 0, gfx_vertex_format_float4,   sizeof(vec4) * 3    },  // color
     };
 
     gfx_vertex_slot_t slots[] = {
-        {0, sizeof(vec4) * 4, gfx_vertex_rate_vertex},
+        {0, sizeof(vec4) * _countof(attributes), gfx_vertex_rate_vertex},
         //     {1, sizeof(instance_data), gfx_vertex_rate_instance}
     };
 
@@ -90,6 +243,9 @@ void resource_manager::init()
         piplene_desc.render_states.blend.color_src = gfx_blend_mode_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
         piplene_desc.render_states.blend.color_dst = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
     m_default_pipeline = gfx_create_pipeline2(m_ctx, &piplene_desc);
+
+    m_meshes.reserve(65536);
+    m_textures.reserve(65536);
 }
 
 void resource_manager::mount(const std::string & dir)
@@ -114,7 +270,9 @@ void resource_manager::mount(const std::string & dir)
 
         std::string guid;
         if (has_guid_in_name(filename, &guid))
+        {
             m_guid_2_path.emplace(&guid[0], path);
+        }
     }
 }
 
@@ -125,10 +283,6 @@ std::string resource_manager::find(const std::string & name)
     
     static std::string empty;
 
-    auto it = m_file_pathes.find(lowername);
-    if(it != m_file_pathes.end())
-        return it->second.u8string();
-
     auto it2 = m_guid_2_path.find(name);
     if (it2 != m_guid_2_path.end())
     {
@@ -138,10 +292,12 @@ std::string resource_manager::find(const std::string & name)
     return empty;
 }
 
+
+/*
 void resource_manager::set_defaults(gfx_shader_t* shader, gfx_texture_t* texture)
 {
     m_default_shader = shader;
-}
+}*/
 
 std::vector<char> resource_manager::file_data(const std::string_view & path)
 {
@@ -153,9 +309,7 @@ std::vector<char> resource_manager::file_data(const std::string_view & path)
         if(file == nullptr)
             return data;
 
-        fseek(file, 0, SEEK_END);
-        size_t size = ftell(file);
-        fseek(file, 0, SEEK_SET);
+        size_t size = filesize(file);
         data.resize(size);
         
         fread(data.data(), size, sizeof(char), file);
@@ -163,30 +317,6 @@ std::vector<char> resource_manager::file_data(const std::string_view & path)
     }
     
     return data;
-}
-
-
-std::shared_ptr<gfx_mesh_t> resource_manager::load_mesh(const char * name)
-{
-    auto it = m_meshes.find(name);
-    if(it != m_meshes.end())
-    {
-        return it->second;
-    }
-    
-    auto path = find(name);
-    if(path.empty())
-        return nullptr;
-
-    gfx_mesh_t mesh =  {};
-    mesh.guid = atomic_string(name).c_str();
-    
-    if(!create_mesh_from_file_path(m_ctx, path.data(), &mesh))
-        return nullptr;
-
-    auto shared_ptr = std::make_shared<gfx_mesh_t>(mesh);
-    m_meshes.emplace(name, shared_ptr);
-    return shared_ptr;
 }
 
 
@@ -207,11 +337,11 @@ std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * nam
             gfx_uniform_set_texture(material->descriptor_set, handle, instance->textures[i].value);
     }
 
-    for (size_t i = 0; i < _countof(instance->vectors); ++i)
+    for (size_t i = 0; i < _countof(instance->vectorsf); ++i)
     {
-        uint64_t handle = gfx_uniform_location(instance->shader, instance->vectors[i].key.c_str());
+        uint64_t handle = gfx_uniform_location(instance->shader, instance->vectorsf[i].key.c_str());
         if (handle)
-            gfx_uniform_set_buffer_data(material->descriptor_set, handle, &instance->vectors[i].value, sizeof(vec4));
+            gfx_uniform_set_buffer_data(material->descriptor_set, handle, &instance->vectorsf[i].value, sizeof(vec4));
     }
 
     m_materials.push_back(material);
@@ -219,6 +349,53 @@ std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * nam
     return material;
 }
 
+texture* resource_manager::load_texture(const char* name)
+{
+    auto it = m_textures.find(name);
+    if (it != m_textures.end())
+    {
+        return it->second;
+    }
+
+    auto path = find(name);
+    if (!path.empty())
+    {
+        gfx_texture_t* handle = nullptr;
+        create_texture_from_file_path(m_ctx, path.c_str(), &handle);
+
+        texture * result = new texture(name, path, handle);
+        m_textures.emplace(name, result);
+        return result;
+    }
+    return nullptr;
+}
+
+rendermesh* resource_manager::load_mesh(const char* name)
+{
+    if(name == nullptr)
+        return nullptr;
+
+    auto it = m_meshes.find(name);
+    if (it != m_meshes.end())
+    {
+        return it->second;
+    }
+
+    auto path = find(name);
+    if (!path.empty())
+    {
+        gfx_mesh_t handle = {};
+
+        if (!create_mesh_from_file_path(m_ctx, path.data(), &handle))
+        return nullptr;
+
+        rendermesh * mesh = new rendermesh(name, path, handle);
+        m_meshes.emplace(name, mesh);
+        return mesh;
+    }
+    return nullptr;
+}
+/*
 std::shared_ptr<gfx_texture_t> resource_manager::load_texture(const char * name)
 {
     auto it = m_textures.find(name);
@@ -245,7 +422,7 @@ std::shared_ptr<gfx_texture_t> resource_manager::load_texture(const char * name)
     }
 
     return nullptr;
-}
+}*/
 
 void resource_manager::load_shader(const char* path)
 {
@@ -253,8 +430,8 @@ void resource_manager::load_shader(const char* path)
 
 struct material_descriptor
 {
-    atomic_string                               shader;
-    std::vector< shader_slot<atomic_string>>    textures;
+    interned_string                               shader;
+    std::vector< shader_slot<interned_string>>    textures;
     std::vector< shader_slot<vec4>  >           vectors;
     std::vector< shader_slot<float> >           scalars;
     
@@ -269,7 +446,7 @@ struct material_descriptor
 JsonSerializeExternal(shader_slot<vec4>, SerializeFieldWithKey("key", key), SerializeFieldWithKey("value", value));
 JsonSerializeExternal(shader_slot<float>, SerializeFieldWithKey("key", key), SerializeFieldWithKey("value", value));
 
-JsonSerializeExternal(shader_slot<atomic_string>,
+JsonSerializeExternal(shader_slot<interned_string>,
     SerializeFieldWithKey("name", key),
     SerializeFieldWithKey("guid", value)
     //SerializeFieldWithKey("scaleOffset", value)
@@ -302,23 +479,24 @@ gfx_material_instance_t* resource_manager::load_material_instance(const std::str
 
     for(size_t i = 0; i < descriptor.textures.size(); ++i)
     {
+        auto tex = load_texture(descriptor.textures[i].value.c_str());
         material->textures[i].key = descriptor.textures[i].key;
-        material->textures[i].value = load_texture(descriptor.textures[i].value.c_str()).get();
+        material->textures[i].value = tex  ? tex->texture_() : nullptr;
     }
 
     for (size_t i = 0; i < descriptor.vectors.size(); ++i)
     {
-        material->vectors[i].key = descriptor.vectors[i].key;
-        material->vectors[i].value = descriptor.vectors[i].value;
+        material->vectorsf[i].key = descriptor.vectors[i].key;
+        material->vectorsf[i].value = math::make_float4(descriptor.vectors[i].value);
     }
 
     for (size_t i = 0; i < descriptor.scalars.size(); ++i)
     {
-        material->scalars[i].key = descriptor.scalars[i].key;
-        material->scalars[i].value = descriptor.scalars[i].value;
+        material->scalarsf[i].key = descriptor.scalars[i].key;
+        material->scalarsf[i].value = descriptor.scalars[i].value;
     }
 
-    m_material_instances.emplace(atomic_string(guid), material);
+    m_material_instances.emplace(interned_string(guid), material);
     return material.get();
 }
 
@@ -451,6 +629,7 @@ void create_mesh_from_file_data(gfx_context_t * ctx, const char *name, char * da
         vb_desc.data = (uint8_t*)vertex_data_ptr;
         vb_desc.size = header->vertex_stride * header->vertex_count;
     gfx_buffer_t* vb = gfx_create_buffer2(ctx, &vb_desc);
+  //  gfx_update_buffer_data(ctx, vb, vertex_data_ptr, vb_desc.size, 0);
 
     gfx_buffer_desc_t ib_desc = {};
         ib_desc.label = name;
@@ -459,12 +638,17 @@ void create_mesh_from_file_data(gfx_context_t * ctx, const char *name, char * da
         ib_desc.size = header->index_stride * header->index_count;
     gfx_buffer_t* ib = gfx_create_buffer2(ctx, &ib_desc);
 
-    out_mesh->format = header->index_stride == 2 ? gfx_index_format_16 : gfx_index_format_32;
+    out_mesh->index_format = header->index_stride == 2 ? gfx_index_format_16 : gfx_index_format_32;
     out_mesh->submesh_count = header->submesh_count;
     out_mesh->index_buffer  = ib;
     out_mesh->vertex_buffer = vb;
     out_mesh->vertex_count  = header->vertex_count;
     out_mesh->index_count   = header->index_count;
+
+    for(uint32_t i = 0; i < out_mesh->vertex_count; ++i)
+    {
+        out_mesh->bounds.extend(*(vec3*)(vertex_data_ptr + header->vertex_stride * i));
+    }
 
     for (uint32_t i = 0; i < header->submesh_count; ++i)
         out_mesh->submeshes[i] = submeshes[i];
@@ -619,7 +803,7 @@ void create_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size
                 case MAKEFOURCC('D', 'X', 'T', '3'): desc.format = gfx_pixel_format_bc2; break;
                 case MAKEFOURCC('D', 'X', 'T', '5'): desc.format = gfx_pixel_format_bc3; break;
                 case MAKEFOURCC('D', 'X', '1', '0'): desc.format = gfx_pixel_format_bc7; break;
-                default: soft_breakpoint(); break;
+                default: debug::breakpoint(); break;
             };
 
             if(desc.format == gfx_pixel_format_bc7)

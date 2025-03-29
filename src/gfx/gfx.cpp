@@ -32,29 +32,40 @@
 #define HANDLE_HASH(_handle_)       ( ((uint64_t)_handle_ >> 48) & HANDLEMASK )
 
 
-typedef struct gfx_handle_index_t {
+typedef struct gfx_handle_t {
     uint16_t            index;
     uint16_t            hash;
-    uint16_t            gen;
+    uint16_t            generation;
     uint16_t            flag;
-} gfx_handle_index_t;
+} gfx_handle_t;
+
+
+gfx_handle_t uint64_2_handle(uint64_t h)
+{
+    return *(gfx_handle_t*)&h;
+}
+
+uint64_t handle_2_uint64(gfx_handle_t h)
+{
+    return *(uint64_t*)&h;
+}
 
 typedef struct gfx_handle_pool_t {
     size_t              size;
-    size_t              memsize;
     void*               data;
-    gfx_handle_index_t* indexes;
 
     size_t              capacity;
     size_t              stride;
     uint16_t            hash;
+
+    size_t              used_chunks;
+    gfx_handle_t*       handles;
+    uint32_t*           free_list;
+    uint32_t*           generation_counters;
+
+    gfx_allocator_t*    allocator;
 } gfx_handle_pool_t;
 
-
-union _handle_union {
-    gfx_handle_index_t  index;
-    uint64_t            handle;
-};
 
 static uint16_t hash16(const char* str, size_t len)
 {
@@ -68,19 +79,34 @@ static uint16_t hash16(const char* str, size_t len)
 }
 
 
-void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool)
+void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t* allocator)
 {
     gfx_handle_pool_t*pool = (gfx_handle_pool_t*)calloc(1, sizeof(gfx_handle_pool_t));
     if(pool == nullptr)
         return;
 
-    pool->size = 0;
-    pool->capacity = 0;
-    pool->stride = stride;
-    pool->hash = hash16((char*)pool, sizeof(intptr_t));
+    pool->size                  = stride * capacity;
+    pool->stride                = stride;
+    pool->capacity              = capacity;
+    pool->used_chunks           = 0;
+    pool->hash                  = hash16((char*)pool, sizeof(intptr_t));
+    pool->data                  = calloc(capacity, stride);
+    pool->handles               = (gfx_handle_t*)calloc(capacity, sizeof(gfx_handle_t));
+    pool->free_list             = (uint32_t*)calloc(capacity, sizeof(uint32_t));
+    pool->generation_counters   = (uint32_t*)calloc(capacity, sizeof(uint32_t));
 
-   // gfx_pool_resize(pool, capacity/16);
-    gfx_pool_resize(pool, capacity);
+    if (!pool->data || !pool->handles || !pool->free_list || !pool->generation_counters) {
+        gfx_pool_destroy(pool);
+        return;
+    }
+
+    for (uint32_t i = 0; i < capacity; ++i) {
+        pool->free_list[i] = i;
+        pool->handles[i].index = i;
+        pool->handles[i].flag = 0;
+        pool->handles[i].hash = pool->hash;
+        pool->handles[i].generation = pool->generation_counters[i];
+    }
 
     *out_pool = pool;
 }
@@ -88,78 +114,47 @@ void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_poo
 void gfx_pool_destroy(gfx_handle_pool_t* pool)
 {
     free(pool->data);
-    free(pool->indexes);
+    free(pool->handles);
+    free(pool->free_list);
+    free(pool->generation_counters);
     free(pool);
 }
 
-void gfx_pool_resize(gfx_handle_pool_t* pool, size_t capacity)
+uint64_t gfx_pool_alloc(gfx_handle_pool_t* pool)
 {
-    intptr_t* new_data_ptr = (intptr_t*)realloc(pool->data, pool->stride * capacity);
-    gfx_handle_index_t* new_indexes_ptr = (gfx_handle_index_t*)realloc(pool->indexes, sizeof(gfx_handle_index_t)* capacity);
+    if(pool->used_chunks >= pool->capacity)
+        return 0;
 
-    if (new_data_ptr != nullptr && new_indexes_ptr != nullptr) {
-        for (size_t i = pool->capacity; i < capacity; i++)
-        {
-            new_indexes_ptr[i].index = (uint16_t)i;
-            new_indexes_ptr[i].hash = pool->hash;
-            new_indexes_ptr[i].flag = 0;
-            new_indexes_ptr[i].gen = 0;
-        }
-        pool->capacity = capacity;
-        pool->data = new_data_ptr;
-        pool->indexes = new_indexes_ptr;
-        pool->memsize = pool->capacity * pool->stride;
-    }
+    gfx_handle_t invalid_handle = {  };
+    if (pool->used_chunks == pool->capacity) return 0; // No available chunk
+
+    uint32_t index = pool->free_list[pool->used_chunks++];
+    pool->handles[index].generation = pool->generation_counters[index];
+
+    return handle_2_uint64 (pool->handles[index]);
 }
 
-uint64_t gfx_pool_acquire(gfx_handle_pool_t* pool)
+void gfx_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 {
-    // reuse deallocated handle.
-    // todo: replace to linkedlist
-    for(int i = 0; i < pool->size; ++i) {
-        if(!pool->indexes[i].flag) {
-            pool->indexes[i].flag = 1;
-            pool->indexes[i].gen += 1;
+    gfx_handle_t handle = uint64_2_handle(_handle);
 
-            pool->size++;
-            _handle_union u = { pool->indexes[i] };
-            return u.handle;
-        }
-    }
-    pool->indexes[pool->size].gen++;
-    pool->indexes[pool->size].flag = 1;
-    pool->size++;
-    _handle_union u = { pool->indexes[pool->size - 1] };
+    if (pool->used_chunks == 0 || handle.index >= pool->capacity) return;
+    if (pool->generation_counters[handle.index] != handle.generation) return; // Handle is invalid
 
-    void * ptr = gfx_pool_map(pool, u.handle);
-    memset(ptr, 0, pool->stride);
-    return u.handle;
+    pool->free_list[--pool->used_chunks] = handle.index;
+    pool->generation_counters[handle.index]++;
 }
 
-void gfx_pool_release(gfx_handle_pool_t* pool, uint64_t handle)
+void * gfx_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
 {
-    _handle_union u ={};
-    u.handle = handle;
+    gfx_handle_t handle = uint64_2_handle(_handle);
+    if(handle.hash != pool->hash)
+        return nullptr;
 
-    gfx_handle_index_t idx = pool->indexes[u.index.index];
-    if (idx.gen == u.index.gen && idx.hash == u.index.hash) {
-        auto ptr = gfx_pool_map(pool, handle);
-        memset(ptr, 0, pool->stride);
-        pool->indexes[u.index.index].flag = 0;
-        pool->indexes[u.index.index].gen++;
-        pool->size--;
-    }
-}
+    if (handle.index >= pool->capacity) return nullptr;
+    if (pool->generation_counters[handle.index] != handle.generation) return nullptr; // Handle is invalid
 
-void * gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle)
-{
-    gfx_handle_index_t idx = pool->indexes[HANDLE_INDEX(handle)];
-    uint64_t a = *(uint64_t*)&handle;
-    uint64_t b = *(uint64_t*)&idx;
-    if(a == b) {
-        return (char*)pool->data + (pool->stride * idx.index);
-    } 
-    return nullptr;
+    return (char*)pool->data + (handle.index * pool->stride);
 };
 
 void* gfx_pool_get_data(gfx_handle_pool_t* pool) {
@@ -171,11 +166,11 @@ size_t gfx_pool_get_stride(gfx_handle_pool_t* pool) {
 }
 
 size_t gfx_pool_get_size(gfx_handle_pool_t* pool) {
-    return (pool != nullptr) ? pool->size : 0;
+    return (pool != nullptr) ? pool->used_chunks : 0;
 }
 
 size_t gfx_pool_has_free(gfx_handle_pool_t* pool) {
-    return (pool != nullptr) ? (pool->size < pool->capacity) : 0;
+    return (pool != nullptr) ? (pool->used_chunks < pool->capacity) : 0;
 }
 
 
@@ -186,19 +181,19 @@ typedef struct teststruct {
 void test_pool()
 {
     gfx_handle_pool_t * pool = nullptr;
-    gfx_pool_create(sizeof(teststruct), 256, &pool);
+    gfx_pool_create(sizeof(teststruct), 256, &pool, nullptr);
 
     uint64_t handles[16] = {0};
     for(size_t i = 0; i < 16; ++i) {
-        handles[i] = gfx_pool_acquire(pool);
+        handles[i] = gfx_pool_alloc(pool);
         teststruct* ptr = (teststruct*)gfx_pool_map(pool, handles[i]);
         ptr->data = i;
     }
 
     teststruct *ptr1 = (teststruct*)gfx_pool_map(pool, handles[2]);
-    gfx_pool_release(pool, handles[2]);
+    gfx_pool_free(pool, handles[2]);
     teststruct *ptr2 = (teststruct*)gfx_pool_map(pool, handles[2]);
-    uint64_t replaced = gfx_pool_acquire(pool);
+    uint64_t replaced = gfx_pool_alloc(pool);
     teststruct *ptr3 = (teststruct*)gfx_pool_map(pool, replaced);
 
     gfx_pool_destroy(pool);
@@ -264,27 +259,25 @@ typedef struct gfx_api_pfn
 
 static gfx_api_pfn * g_tbl = nullptr;
 
-void gfx_init_webgpu(gfx_api_pfn* func_table);
-void gfx_init_vulkan(gfx_api_pfn* func_table);
-void gfx_init_metal(gfx_api_pfn* func_table);
-void gfx_init_dx12(gfx_api_pfn* func_table);
+extern void gfx_init_webgpu(gfx_api_pfn* func_table);
+extern void gfx_init_vulkan(gfx_api_pfn* func_table);
+extern void gfx_init_metal(gfx_api_pfn* func_table);
+extern void gfx_init_dx12(gfx_api_pfn* func_table);
 
 
 gfx_api gfx_backend  gfx_detect_bakend(gfx_backend* backends, uint32_t size)
 {
-#ifdef GFX_PLATFORM_APPLE
+#if defined(GFX_PLATFORM_APPLE)
     return gfx_backend_metal;
-#endif
-
-#ifdef GFX_PLATFORM_ANDROID
+#elif defined(GFX_PLATFORM_ANDROID)
     return gfx_backend_vulkan;
-#endif
-
-#ifdef GFX_PLATFORM_WEB
+#elif defined(GFX_PLATFORM_WEB)
     return gfx_backend_webgpu;
-#endif
-
+#elif defined(GFX_PLATFORM_WIN)
     return gfx_backend_vulkan;
+#else
+    #error "unknown gfx platform"
+#endif
 }
 
 void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
@@ -303,10 +296,21 @@ void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
 
     switch(settings->backend)
     {
+        #ifdef VULKAN_AVAILABLE
         case gfx_backend_vulkan:    gfx_init_vulkan(g_tbl); break;
+        #endif
+
+        #ifdef WEBGPU_AVAILABLE
         case gfx_backend_webgpu:    gfx_init_webgpu(g_tbl); break;
-      //  case gfx_backend_metal:     gfx_init_metal(g_tbl);  break;
-      //  case gfx_backend_d3d12:     gfx_init_dx12(g_tbl);   break;
+        #endif
+
+        #ifdef METAL_AVAILABLE
+        case gfx_backend_metal:     gfx_init_metal(g_tbl);  break;
+        #endif
+
+        #ifdef DX12_AVAILABLE
+        case gfx_backend_d3d12:     gfx_init_dx12(g_tbl);   break;
+        #endif
     }
 
     g_tbl->pfn_init(settings, ctx);
@@ -420,8 +424,7 @@ gfx_api gfx_command_buffer_t* gfx_create_cmd2(gfx_context_t* ctx)
 }
 
 
-
-void gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
+gfx_api void gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
 {
     g_tbl->pfn_update_buffer_data(ctx, buffer, data, size, offset);
 }
@@ -714,10 +717,10 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
         case gfx_pixel_format_etc2_rgb8a1:		return (w >> 2) * (h >> 2) * 16;    //! Compresses RGB888 data without Alpha channel
         case gfx_pixel_format_etc2_rgba8:		return (w >> 2) * (h >> 2) * 8;     //! Compresses RGBA8888 data with full alpha support
 
-        case gfx_pixel_format_bc1:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 8;
-        case gfx_pixel_format_bc2:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 16;
-        case gfx_pixel_format_bc3:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 16;
-        case gfx_pixel_format_bc6:              return GFX_MAX(1, w>>2) * GFX_MAX(1, h>>2) * GFX_MAX(1, d>>2) * 16;
+        case gfx_pixel_format_bc1:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 8;
+        case gfx_pixel_format_bc2:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
+        case gfx_pixel_format_bc3:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
+        case gfx_pixel_format_bc6:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
         case gfx_pixel_format_bc7:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
 
         case gfx_pixel_format_astc4x4:          return BLOCK_COUNT(w, 4)  * BLOCK_COUNT(h, 4)  * BLOCK_COUNT(d, 4) * 16;
@@ -747,7 +750,6 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
     assert(0);
     return 0; 
 }
-
 
 uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width) 
 {
@@ -798,7 +800,6 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
     return 0;
 }
 
-
 uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
 {
     return ((n + alignment - 1) / alignment) * alignment; 
@@ -813,11 +814,11 @@ uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
 void gfx_init_vulkan(gfx_api_pfn* func_table)
 {
 #ifdef VULKAN_AVAILABLE
-    func_table->pfn_init = vk_create_renderer;
-    func_table->pfn_create_swapchain = vk_create_swapchain;
+    func_table->pfn_init                    = vk_create_renderer;
+    func_table->pfn_create_swapchain        = vk_create_swapchain;
 
-    func_table->pfn_acquire_img = vk_acquire_img;
-    func_table->pfn_present_img = vk_present_img;
+    func_table->pfn_acquire_img             = vk_acquire_img;
+    func_table->pfn_present_img             = vk_present_img;
 
     func_table->pfn_create_buffer           = vk_create_buffer;
     func_table->pfn_create_shader           = vk_create_shader;
@@ -837,6 +838,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_destroy_descriptor_set  = vk_destroy_descriptor_set;
     func_table->pfn_destroy_cmd             = vk_destroy_cmd;
 
+    func_table->pfn_update_buffer_data      = vk_update_buffer_data;
 
     func_table->pfn_uniform_location        = vk_uniform_location;
     func_table->pfn_uniform_set_buffer      = vk_uniform_set_buffer;

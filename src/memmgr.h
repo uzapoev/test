@@ -10,9 +10,9 @@
 
 #ifdef _WIN32
     #pragma warning (disable: 4530)// C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
-    #include <xutility>
-    #include <windows.h>
+ //   #include <windows.h>
 #elif defined (__APPLE__)
+    #include <stdio.h>
     #include <stdlib.h>
     #include <pthread.h>
     #include <mach/mach.h>
@@ -26,6 +26,7 @@
 #endif
 
 #include <map>
+#include <mutex>
 #include <unordered_map>
 
 ////////////////////////
@@ -35,10 +36,10 @@ extern bool                 s_allocatorDeepLogEnable;
 extern allocationCallback   s_allocationCallback;
 extern void*                s_allocationCallbackData;
 
-void       memory_enable_tracking();
-void       memory_enable_allocation_traking(bool value);
-void       memory_dump(struct memory_stats_t* stats);
-uint32_t   memory_allocated();
+void    memory_enable_tracking();
+void    memory_enable_allocation_traking(bool value);
+void    memory_dump(struct memory_stats_t* stats);
+size_t  memory_allocated();
 
 
 typedef struct memory_stats_t
@@ -65,8 +66,8 @@ public:
     void    initialize();
     void    destroy();
 
-    void  * alloc( size_t size );
-    void  * alloc16( size_t size );
+    void *  alloc( size_t size );
+    void *  alloc16( size_t size );
 
     void    free(void *);
     void    free16(void *);
@@ -85,30 +86,25 @@ private:
     static void callback(size_t sz, void* ptr, void* data);// throw();
 
 protected:
-    
-#ifndef _WIN32
-    pthread_mutex_t         m_mutex;
-#else
-    CRITICAL_SECTION        m_mutex;
-#endif
+    std::mutex        m_mutex;
 
     struct memblock_t
     {
         memblock_t(size_t sz, void* p) :ptr(p), size(sz) { memset(frames, 0, sizeof(frames)); }
 
-        memblock_t(const memblock_t& src) { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); }
-        memblock_t& operator = (const memblock_t& src) { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); return *this; }
+        memblock_t(const memblock_t& src)               { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); }
+        memblock_t& operator = (const memblock_t& src)  { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); return *this; }
 
         bool    operator == (void* ptr) const { return ptr == ptr; }
 
       //  inline friend bool operator == (const memblock& b1, const memblock& b2) { return b1.ptr == b2.ptr; }
       //  inline friend bool operator <  (const memblock& b1, const memblock& b2) { return b1.ptr < b2.ptr; }
 
-        static const int    kStackSize = 32 - sizeof(void*) - sizeof(size_t);//32-4-4;
+        static const int    k_max_stack_size = 16;
 
         void*               ptr;
         size_t              size;
-        intptr_t            frames[kStackSize] = {}; // replace to stack frames 
+        intptr_t            frames[k_max_stack_size] = {}; // replace to stack frames 
     };
 
 
@@ -116,7 +112,6 @@ protected:
     struct internal_allocator
     {
         typedef T value_type;
-     //   static uint32_t _allocated_size;
 
         internal_allocator() = default;
 
@@ -127,12 +122,8 @@ protected:
         inline void deallocate(T* p, size_t n)  noexcept { std::free(p); }
     };
 
-   // template<class T>
-   // static uint32_t MemoryManager::internal_allocator<T>::_allocated_size = 0;
-
     using memblock_allocator = internal_allocator< std::pair<const intptr_t, memblock_t>>;
-    typedef std::map<intptr_t, memblock_t, std::less<intptr_t>, memblock_allocator>    mem_block_map;
- //   typedef std::unordered_map< intptr_t, memblock_t, std::hash<intptr_t>, std::equal_to<intptr_t>, memblock_allocator >    mem_block_map;
+    using mem_block_map      = std::unordered_map< intptr_t, memblock_t, std::hash<intptr_t>, std::equal_to<intptr_t>, memblock_allocator >;
 
     mem_block_map   m_blocks;
 };
@@ -142,9 +133,6 @@ static bool operator==(const MemoryManager::internal_allocator <T>&, const Memor
 
 template<class T, class U>
 static bool operator!=(const MemoryManager::internal_allocator <T>&, const MemoryManager::internal_allocator <U>&) { return false; }
-
-extern  MemoryManager * g_pMemoryManager;
- 
 
 
 #endif

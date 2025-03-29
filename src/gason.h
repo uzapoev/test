@@ -84,10 +84,13 @@ inline bool JsonValue::hasKey(const char* key) const
 
     do
     {
+        if(n == nullptr)
+         return false;
         if (!strcmp(key, n->key))
             return true;
         n = n->next;
     }while (n != nullptr);
+
     return false;
 }
 
@@ -168,10 +171,10 @@ public:
     JsonAllocator() : head(nullptr) {};
     JsonAllocator(const JsonAllocator &) = delete;
     JsonAllocator &operator=(const JsonAllocator &) = delete;
-    JsonAllocator(JsonAllocator &&x) : head(x.head) {
+    JsonAllocator(JsonAllocator &&x) noexcept : head(x.head) {
         x.head = nullptr;
     }
-    JsonAllocator &operator=(JsonAllocator &&x) {
+    JsonAllocator &operator=(JsonAllocator &&x) noexcept {
         head = x.head;
         x.head = nullptr;
         return *this;

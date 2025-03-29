@@ -3,41 +3,39 @@
 
 void gui_test(int width, int height)
 {
+    float dt = 1.0f / 60.0f;
+
     auto test_gui = new gui(width, height);
     //auto wgui = test_gui->load_from_json();//load_html(...); load_xml(...);
    // auto psnrl = test_gui->
 
     auto btn0 = test_gui->create<button>("label 0", []() { printf("callback"); });
-  /*  auto btn1 = wgui->create<button>("label 0", []() { printf("callback"); });
- 
-    gui->advance(dt);
-
-    gui->on_mouse_move(x, y);
-    gui->on_mouse_button(x, y, btn, state);
-    gui->on_keyboard(btn, state);
+    auto btn1 = test_gui->create<button>("label 0", []() { printf("callback"); });
 
 
-    var ctx = gui->context();
+    test_gui->advance(dt);
+  //  test_gui->on_mouse_move(x, y);
+ //   test_gui->on_mouse_button(x, y, btn, state);
+  //  test_gui->on_keyboard(btn, state);
+
+  /*
+    var ctx = test_gui->context();
     var verts = ctx->vertexes();
     var indexes = ctx->indexes();
 
     cmd_bind_buffers(verts, indexes);
 
-    for(int i = 0; i < ctx->bathches(); ++i)
+    for(int i = 0; i < ctx->batches(); ++i)
     {
         var batch = ctx->batch(i);
         cmd_bind_descriptor_set(batch.descriptor);
         cmd_draw_indexed(batch.start_idx, batch.count);
-    }
+    }*/
     
-    auto layout = gui::layout::create_box_layout();
+    auto layout = uilayout::create_box_layout();
     layout->add(btn0);
     layout->add(btn1);
 
-    auto window = gui::create<window>();
-    window->set_layout(layout);*/
-
- //   auto layout = gui::layout::create_box_layout(/*horisontal*/);
 
     auto root = new widget();
     root->set_fixed_size({1024, 1024});
@@ -82,6 +80,10 @@ void gui::on_keyboard(int btn, int state)
 {
 }
 
+void gui::advance(float dt)
+{
+}
+
 
 void gui::resize(int w, int h)
 {
@@ -105,6 +107,10 @@ const gui_batch_t* gui::batch()
     return nullptr;
 }
 
+uint32_t gui::batches() const
+{
+    return 0;
+}
 
 bool point_in_rect(const vec2 &p, const vec4 & rect)
 {

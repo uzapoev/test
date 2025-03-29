@@ -4,13 +4,13 @@
 #include <stdlib.h>  // rand
 #include <stdint.h>  // int8_t
 #include <math.h>
-#include <float.h>
+//#include <float.h>
 
 #define MATH_INLINE inline
 
-typedef struct vec2     { float x = 0.0f, y = 0.0f; } vec2;
-typedef struct vec3     { float x = 0.0f, y = 0.0f, z = 0.0f; } vec3;
-typedef struct vec4     { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f;} vec4;
+typedef struct vec2     { float x = 0.0f, y = 0.0f;                     } vec2;
+typedef struct vec3     { float x = 0.0f, y = 0.0f, z = 0.0f;           } vec3;
+typedef struct vec4     { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; } vec4;
 
 typedef struct float2   { float x = 0.0f, y = 0.0f;                     } float2;
 typedef struct float3   { float x = 0.0f, y = 0.0f, z = 0.0f;           } float3;
@@ -49,6 +49,8 @@ namespace math { bool fcmp(float, float); };
 MATH_INLINE bool operator == (const vec2& a, const vec2& b) { return math::fcmp(a.x, b.x) && math::fcmp(a.y, b.y); }
 MATH_INLINE bool operator == (const vec3& a, const vec3& b) { return math::fcmp(a.x, b.x) && math::fcmp(a.y, b.y) && math::fcmp(a.z, b.z); }
 MATH_INLINE bool operator == (const vec4& a, const vec4& b) { return math::fcmp(a.x, b.x) && math::fcmp(a.y, b.y) && math::fcmp(a.z, b.z) && math::fcmp(a.w, b.w); }
+
+//MATH_INLINE float4 operator = (const vec4& a) {return { a.x, a.y, a.z, a.w};}
 
 MATH_INLINE vec3 operator - (const vec3& v) { return { -v.x, -v.y, -v.z }; }
 
@@ -99,11 +101,14 @@ namespace math
     MATH_INLINE vec4 make_vec4(const vec3 &a)                       { return { a.x, a.y, a.z, 1.0f}; }
     MATH_INLINE vec4 make_vec4(float x, float y, float z, float w)  { return { x, y, z, w}; }
 
+    MATH_INLINE float4 make_float4(const vec4& a)                       { return { a.x, a.y, a.z, a.w}; }
+    MATH_INLINE float4 make_float4(float x, float y, float z, float w)  { return { x, y, z, w}; }
+
     MATH_INLINE vec3  cross(const vec3& a, const vec3& b)       { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
     MATH_INLINE vec3  cross(const vec4& a, const vec4& b)       { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
 
     MATH_INLINE float dot(const vec3& a, const vec3& b)         { return a.x * b.x + a.y * b.y + a.z * b.z; }
-    MATH_INLINE float dot(const vec4& a, const vec4& b)         { return a.x * b.x + a.y * b.y + a.z * b.z; }
+    MATH_INLINE float dot(const vec4& a, const vec4& b)         { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
 
     MATH_INLINE float length(const vec2& a)                     { return sqrtf(a.x * a.x + a.y * a.y); }
     MATH_INLINE float length(const vec3& a)                     { return sqrtf(a.x * a.x + a.y * a.y + a.z * a.z); }
@@ -329,8 +334,8 @@ public:
     MATH_INLINE quat operator * (float scalar) const        { return quat(x * scalar, y * scalar, z * scalar, w * scalar); }
     MATH_INLINE quat operator / (float scalar) const        { return quat(x / scalar, y / scalar, z / scalar, w / scalar); }
 
-    friend quat operator*(const quat &a, const quat &b)     {return quat::mul(a, b);}
-    friend quat operator*(const quat &rhs, float s)         { return quat(rhs.x * s, rhs.y * s, rhs.z * s, rhs.w *s); }
+  //  friend quat operator*(const quat &a, const quat &b)     {return quat::mul(a, b);}
+  //  friend quat operator*(const quat &rhs, float s)         { return quat(rhs.x * s, rhs.y * s, rhs.z * s, rhs.w *s); }
 
 public:
     float x, y, z, w;
@@ -404,10 +409,16 @@ public:
 
     static vec4 mul(const mat4& m, const vec4& p)
     {
-        float x = math::dot(p, m.column(0));
-        float y = math::dot(p, m.column(1));
-        float z = math::dot(p, m.column(2));
-        float w = math::dot(p, m.column(3));
+        //float x = math::dot(p, m.column(0));
+        //float y = math::dot(p, m.column(1));
+        //float z = math::dot(p, m.column(2));
+        //float w = math::dot(p, m.column(3));
+
+        float x = m.m00 * p.x + m.m01 * p.y + m.m02 * p.z + m.m03 * p.w;
+        float y = m.m10 * p.x + m.m11 * p.y + m.m12 * p.z + m.m13 * p.w;
+        float z = m.m20 * p.x + m.m21 * p.y + m.m22 * p.z + m.m23 * p.w;
+        float w = m.m30 * p.x + m.m31 * p.y + m.m32 * p.z + m.m33 * p.w;
+
         return { x, y, z, w };
     }
 
@@ -623,8 +634,36 @@ struct aabbox
     const vec4   bbox_max() const { return {m_max.x, m_max.y, m_max.z, m_max.w}; }
 
 private:
-    vec4 m_min = { FLT_MAX, FLT_MAX, FLT_MAX, 1.0f };
-    vec4 m_max = { FLT_MIN, FLT_MIN, FLT_MIN, 1.0f };
+    vec4 m_min = {  9999.9f,  9999.9f,  9999.9f, 1.0f };
+    vec4 m_max = { -9999.9f, -9999.9f, -9999.9f, 1.0f };
+};
+
+// oriented bbox
+struct bbox
+{
+    static bbox create(const aabbox & aabbox, const mat4 & transform)
+    {
+        auto bmin = aabbox.bbox_min();
+        auto bmax = aabbox.bbox_max();
+
+        bbox result;
+
+        result.points[0] = math::make_vec4(bmin.x, bmax.y, bmax.z, 1.0f);
+        result.points[1] = math::make_vec4(bmax.x, bmax.y, bmax.z, 1.0f);
+        result.points[2] = math::make_vec4(bmin.x, bmin.y, bmax.z, 1.0f);
+        result.points[3] = math::make_vec4(bmax.x, bmin.y, bmax.z, 1.0f);
+        result.points[4] = math::make_vec4(bmin.x, bmax.y, bmin.z, 1.0f);
+        result.points[5] = math::make_vec4(bmax.x, bmax.y, bmin.z, 1.0f);
+        result.points[6] = math::make_vec4(bmin.x, bmin.y, bmin.z, 1.0f);
+        result.points[7] = math::make_vec4(bmax.x, bmin.y, bmin.z, 1.0f);
+
+        for (int i = 0; i < 8; ++i)
+            result.points[i] = mat4::mul(transform, result.points[i]);
+
+        return result;
+    }
+
+    vec4 points[8];
 };
 
 
@@ -651,11 +690,21 @@ struct plane
 };
 
 
+MATH_INLINE int frustum_check_point(const mat4 & vp, const vec3 & pos)
+{
+    vec4 clip = mat4::mul(vp, { pos.x, pos.y, pos.z, 1.0f }); // clip space
+    if (fabs(clip.x) > clip.w) return false;
+    if (fabs(clip.y) > clip.w) return false;
+    if (fabs(clip.z) > clip.w) return false;
+    return true;
+}
+
 struct frustum
 {
     static frustum from_view_proj(const mat4 & viewproj)
     {
         frustum p;
+        p.view_proj = viewproj;
         p.planes[0] = plane(viewproj.column(3) + viewproj.column(0)).normalized(); // (+x) left 
         p.planes[1] = plane(viewproj.column(3) - viewproj.column(0)).normalized(); // (-x) right
 
@@ -687,12 +736,31 @@ struct frustum
         return 2; // inside
     }
 
+    static MATH_INLINE int check_bbox(const frustum& f, const bbox& bbox)
+    {
+        int total = 0;
+        for (int i = 0; i < 6; i++)
+        {
+            const plane& p = f.planes[i];
+            int out = 0;
+            out += ((p.dot(bbox.points[0]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.points[1]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.points[2]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.points[3]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.points[4]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.points[5]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.points[6]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.points[7]) < 0.0) ? 1 : 0);
+            if (out == 8)
+                return false;
+            total += out;
+        }
+        return 1;
+    }
+
     static MATH_INLINE int check_point(const frustum& f, const vec3& pos)
     {
-        for (int i = 0; i < 6; i++)
-            if (f.planes[i].dot(pos) <= 0.0f)
-                return 0;
-        return 1;
+        return frustum_check_point(f.view_proj, pos);
     }
 
     static MATH_INLINE int check_sphere(const frustum& f, const vec3& pos, float r)
@@ -749,6 +817,8 @@ struct frustum
         return 1;
     }
 
+
+    mat4  view_proj;
     plane planes[6];
 };
 
@@ -767,24 +837,7 @@ namespace math
 
     MATH_INLINE mat4 mul(const mat4 &a, const mat4& b)
     {
-        mat4 ret;
-        ret.m[0]  = a.m[0] * b.m[0]  + a.m[4] * b.m[1]  + a.m[8]  * b.m[2]  + a.m[12] * b.m[3];
-        ret.m[1]  = a.m[1] * b.m[0]  + a.m[5] * b.m[1]  + a.m[9]  * b.m[2]  + a.m[13] * b.m[3];
-        ret.m[2]  = a.m[2] * b.m[0]  + a.m[6] * b.m[1]  + a.m[10] * b.m[2]  + a.m[14] * b.m[3];
-        ret.m[3]  = a.m[3] * b.m[0]  + a.m[7] * b.m[1]  + a.m[11] * b.m[2]  + a.m[15] * b.m[3];
-        ret.m[4]  = a.m[0] * b.m[4]  + a.m[4] * b.m[5]  + a.m[8]  * b.m[6]  + a.m[12] * b.m[7];
-        ret.m[5]  = a.m[1] * b.m[4]  + a.m[5] * b.m[5]  + a.m[9]  * b.m[6]  + a.m[13] * b.m[7];
-        ret.m[6]  = a.m[2] * b.m[4]  + a.m[6] * b.m[5]  + a.m[10] * b.m[6]  + a.m[14] * b.m[7];
-        ret.m[7]  = a.m[3] * b.m[4]  + a.m[7] * b.m[5]  + a.m[11] * b.m[6]  + a.m[15] * b.m[7];
-        ret.m[8]  = a.m[0] * b.m[8]  + a.m[4] * b.m[9]  + a.m[8]  * b.m[10] + a.m[12] * b.m[11];
-        ret.m[9]  = a.m[1] * b.m[8]  + a.m[5] * b.m[9]  + a.m[9]  * b.m[10] + a.m[13] * b.m[11];
-        ret.m[10] = a.m[2] * b.m[8]  + a.m[6] * b.m[9]  + a.m[10] * b.m[10] + a.m[14] * b.m[11];
-        ret.m[11] = a.m[3] * b.m[8]  + a.m[7] * b.m[9]  + a.m[11] * b.m[10] + a.m[15] * b.m[11];
-        ret.m[12] = a.m[0] * b.m[12] + a.m[4] * b.m[13] + a.m[8]  * b.m[14] + a.m[12] * b.m[15];
-        ret.m[13] = a.m[1] * b.m[12] + a.m[5] * b.m[13] + a.m[9]  * b.m[14] + a.m[13] * b.m[15];
-        ret.m[14] = a.m[2] * b.m[12] + a.m[6] * b.m[13] + a.m[10] * b.m[14] + a.m[14] * b.m[15];
-        ret.m[15] = a.m[3] * b.m[12] + a.m[7] * b.m[13] + a.m[11] * b.m[14] + a.m[15] * b.m[15];
-        return ret;
+        return mat4::mul(a, b);
     }
 
     MATH_INLINE vec3 mul(const quat &q, const vec3& p)

@@ -38,13 +38,9 @@ typedef struct vk_context_t
     VkPhysicalDevice                    physicaldevice      = nullptr;
     VkSurfaceKHR                        surface             = nullptr;
     uint32_t                            frame_idx           = 0;
-    uint32_t                            frame_number      = 0;
+    uint32_t                            frame_number        = 0;
 
-    struct {
-        void* (*allocate_pfn)  (size_t size);
-        void* (*realloc_pfn)   (void* ptr, size_t size);
-        void  (*free_pfn)      (void* ptr);
-    } allocator;
+    gfx_allocator_t                     allocator;
 
     struct { 
         uint32_t family;
@@ -82,7 +78,6 @@ typedef struct vk_context_t
     VmaAllocator                        vma_allocator;
  #endif
 
-    gfx_statistics_t                    statistics;
     vk_command_buffer_t*                cmd_buffer_pool[32];
     uint32_t                            cmd_pool_size;
 

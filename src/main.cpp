@@ -10,6 +10,7 @@
 #include "platform/platform.h"
 #include "mathlib.h"
 #include "common.h"
+#include "memmgr.h"
 
 #include "scene/scene.h"
 
@@ -33,20 +34,13 @@ struct instance_data
     mat4    model;
 };
 
-struct logger
-{
-    static void log(const char * msg)         { printf("\x1b[37m %s \033[0m", msg? msg : ""); }
-    static void log_error(const char * msg)   { printf("\x1B[31m %s \033[0m", msg? msg : ""); }
-    static void log_warning(const char * msg) { printf("\x1b[33m %s \033[0m", msg? msg : ""); }
-};
-
 
 static scene                g_scene;
 
 
 void scene_test(gfx_context_t* ctx, const char * data_path, const char* scene_name)
 {
-    g_scene = scene::load(scene_name);
+    g_scene = scene::create_from_json_file(scene_name);
 }
 
 
@@ -67,6 +61,9 @@ void log_func(gfx_msg type, const char* msg, ...)
 }
 
 
+#include "threads.h"
+
+
 camera g_camera;
 static gfx_context_t* ctx = nullptr;
 static gfx_swapchain_t* swapchain = nullptr;
@@ -76,18 +73,31 @@ static gfx_command_buffer_t* cmds[2] = {};
 static uint64_t mvp_location = 0;
 uintptr_t g_handle;
 
-
 void platform_main(uintptr_t handle, int argc, char** argv)
 {
+    debug::log("i %d", 0);
+    debug::log_error("e %d", 1);
+    debug::log_warning("w %d", 2);
+
+    memory_enable_tracking();
+
+    uintptr_t frames[64] = {};
+    debug::callstack(frames, _countof(frames));
+
+//    float x = fmaxf(-0.0003f, -0.022f);
+
+    thread_test();
+
     g_handle = handle;
     gfx_settings_t settings = { "test.app" };
         settings.handle = handle;
         settings.backend = gfx_backend_vulkan;
-     //   settings.options = gfx_options_debug | gfx_options_verbose | gfx_options_callstack;
+  //      settings.options = gfx_options_debug | gfx_options_verbose | gfx_options_callstack;
         settings.dbglog = log_func;
-        settings.allocator.allocate_pfn = [](size_t size) -> void* { return calloc(1, size); };
-        settings.allocator.realloc_pfn = [](void* ptr, size_t size) -> void* { return realloc(ptr, size); };
-        settings.allocator.free_pfn = [](void* ptr) -> void { return free(ptr); };
+    //    settings.limits.buffer_pool_capacity = 
+        settings.allocator.allocate_pfn = [](size_t size)               { return calloc(1, size); };
+        settings.allocator.realloc_pfn  = [](void* ptr, size_t size)    { return realloc(ptr, size); };
+        settings.allocator.free_pfn     = [](void* ptr)                 { return free(ptr); };
     gfx_init(&settings, &ctx);
     gfx_create_swapchain(ctx, handle, &swapchain);
 
@@ -99,7 +109,7 @@ void platform_main(uintptr_t handle, int argc, char** argv)
 
     cmds[0] = gfx_create_cmd2(ctx);
     cmds[1] = gfx_create_cmd2(ctx);
-
+    
     gfx_shader_t* shader = nullptr;
     create_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
 
@@ -124,9 +134,9 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         piplene_desc.assembly.slots = slots;
         piplene_desc.assembly.slot_count = _countof(slots);
     pipeline = gfx_create_pipeline2(ctx, &piplene_desc);
-
+    
     mvp_location            = gfx_uniform_location(shader, "mvp");
-    auto color_location     = gfx_uniform_location(shader, "_color");
+   /* auto color_location     = gfx_uniform_location(shader, "_color");
     auto texture_location   = gfx_uniform_location(shader, "_texture0");
     auto sampler_location   = gfx_uniform_location(shader, "_textureSampler");
     auto lightmap_location  = gfx_uniform_location(shader, "_lightmap");
@@ -136,21 +146,23 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         linear_filtering.minmag = gfx_filter_linear;
         linear_filtering.mipmap = gfx_filter_linear;
    //     linear_filtering.anisotropy = 8;
-    gfx_sampler_t* sampler = gfx_create_sampler2(ctx, &linear_filtering);
+    gfx_sampler_t* sampler = gfx_create_sampler2(ctx, &linear_filtering);*/
 
     rect_t rc = platform_get_window_size(handle);
     uint16_t width = rc.w - rc.x;
     uint16_t height = rc.h - rc.y;
     float aspect = (float)(width) / (float)(height);
 
-    g_camera.set_fov(60);
+    g_camera.set_fov(55);
     g_camera.set_near_far(0.1f, 1500.0f);
     g_camera.set_apect(aspect);
-    g_camera.set_pos(math::make_vec3(0, 0, -10));
-    g_camera.set_target(math::make_vec3(0, 0, 0));
+    g_camera.set_pos(math::make_vec3(4.366324f, 9.78074f, 185.8569f));
+  //  g_camera.set_pos(math::make_vec3(0, 0, -5));
+    g_camera.set_target(g_camera._pos + math::make_vec3(0, 0, 1));
 
  //   scene_test(ctx, "../data/unity", "Southside.big.json");
-    scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
+  //  scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
+    scene_test(ctx, "../data/unity", "../data/unity/City.json");
 }
 
 
@@ -163,18 +175,21 @@ void update_camera(camera & cam)
     dir += input_kb_state(Input::Keyboard::S)     ?  cam.forward() : math::Zero;
     dir += input_kb_state(Input::Keyboard::A)     ?  cam.left()    : math::Zero;
     dir += input_kb_state(Input::Keyboard::D)     ? -cam.left()    : math::Zero;
-    dir *= input_kb_state(Input::Keyboard::Shift) ?  8.0f : 1.0f;
+    dir *= input_kb_state(Input::Keyboard::Shift) ?  10.0f : 1.0f;
     auto p = input_point_pos();
 
     vec2 mp = { (float)-p.dx, (float)p.dy };
     cam.set_mouse_dt(mp);
-    cam.move(dir * Time::dt() * 20.0f);
+    cam.move(dir * Time::dt() * 1.0f);
     cam.update();
 }
 
 
+
+
 void platform_tick(void* userdata)
 {
+   // measure ms("\nplatform_tick");
     Time::tick();
 
     update_camera(g_camera);
@@ -185,23 +200,31 @@ void platform_tick(void* userdata)
     if (input_kb_state(Input::Keyboard::NumPad_Subtract))
         g_camera.set_fov(g_camera.m_fov - 0.1f);
 
+    if (input_kb_state(Input::Keyboard::M))
+    {
+        memory_stats_t  stats = {};
+        memory_dump(&stats);
+        debug::log("\nmemsize : %d", stats.totalSize);
+    }
+
     rect_t rect = platform_get_window_size(g_handle);
 
     float width = (float)(rect.w - rect.x);
     float height = (float)(rect.h - rect.y);
 
-    g_camera.setup(g_camera.m_fov, width / height, 0.001f, 1550.0f);
+    g_camera.setup(g_camera.m_fov, width / height, 0.01f, 100.0f);
+    g_camera.update();
 
-    mat4 vp = g_camera.vp();
+    mat4 vp = g_camera.view_proj();
 
-    auto & render_queue = g_scene.visible();
-
-    for (int i = 0; i < render_queue.size(); ++i)
+    auto & render_queue = g_scene.cull(vp);
     {
-        mat4 mvp = math::mul(vp, render_queue[i].transform);
-        gfx_uniform_set_buffer_data(render_queue[i].material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
+        for (int i = 0; i < render_queue.size(); ++i)
+        {
+            mat4 mvp = math::mul(vp, render_queue[i]->transform);
+            gfx_uniform_set_buffer_data(render_queue[i]->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
+        }
     }
-
 
     gfx_render_target_t* target = nullptr;
     int32_t idx = gfx_acquire_img(ctx, swapchain, &target);
@@ -218,7 +241,8 @@ void platform_tick(void* userdata)
 
     for (int i = 0; i < render_queue.size(); ++i)
     {
-        const renderer_t& renderer = render_queue[i];
+        const renderer_t& renderer = *render_queue[i];
+  
         if(curr_pipeline != renderer.material->instance->pipeline)
         {
             curr_pipeline = renderer.material->instance->pipeline;
@@ -231,6 +255,10 @@ void platform_tick(void* userdata)
     gfx_cmd_end(cmd);
 
     gfx_submit_cmd(ctx, cmd, gfx_submit_wait_for_image_ready);
-
     gfx_present_img(ctx, swapchain, idx);
+}
+
+
+void platform_destroy(void* userdata)
+{
 }

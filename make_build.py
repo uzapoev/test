@@ -42,7 +42,7 @@ if __name__ == "__main__":
     if x > 0 and x < 3:
         build_dir = resolve_path("./build")
        # rmtree_silent(build_dir)
-       # makedirs_silent(build_dir)
+        makedirs_silent(build_dir)
         os.chdir(build_dir)
         check_call(["cmake", ".."])
     

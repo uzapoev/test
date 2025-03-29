@@ -596,11 +596,11 @@ void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
     }, wctx);
 #endif
 
-    gfx_pool_create(sizeof(wgpu_sampler_t),  16,    &wctx->sampler_pool);
-    gfx_pool_create(sizeof(wgpu_texture_t),  1024,  &wctx->texture_pool);
-    gfx_pool_create(sizeof(wgpu_buffer_t),   4096,  &wctx->buffer_pool);
-    gfx_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool);
-    gfx_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool);
+    gfx_pool_create(sizeof(wgpu_sampler_t),  16,    &wctx->sampler_pool,  nullptr);
+    gfx_pool_create(sizeof(wgpu_texture_t),  1024,  &wctx->texture_pool,  nullptr);
+    gfx_pool_create(sizeof(wgpu_buffer_t),   4096,  &wctx->buffer_pool,   nullptr);
+    gfx_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool,   nullptr);
+    gfx_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool, nullptr);
 
     create_default_resources(*ctx);
 }

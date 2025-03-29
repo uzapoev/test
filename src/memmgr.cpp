@@ -16,60 +16,50 @@
 #define USE_ALLOCATION_CALLBACK     1
 
 bool                s_allocatorDeepLogEnable    = true;
-allocationCallback  s_allocationCallback        = NULL;
-void*               s_allocationCallbackData    = NULL;
+allocationCallback  s_allocationCallback        = nullptr;
+void*               s_allocationCallbackData    = nullptr;
 
 
 #ifdef _WIN32
+    #pragma warning(disable: 6387 28183 28196 28251 28252 28253 )
+
     #define sys_malloc(x)           ::malloc(x)
     #define sys_free(x)             ::free(x)
     #define sys_msize(x)            ::_msize(x)
 
     #define memlog(...)             printf(__VA_ARGS__)
-    typedef CRITICAL_SECTION        pthread_mutex_t;
-    #define mutex_lock( x )         EnterCriticalSection ( x )
-    #define mutex_unlock( x )       LeaveCriticalSection ( x )
-    #define mutex_destroy( x )      DeleteCriticalSection( x )
 #elif defined (__APPLE__)
-    #define sys_malloc(x)       ::malloc(x)
-    #define sys_free(x)         ::free(x)
-    #define sys_msize(x)        ::malloc_size(x)
+    #define sys_malloc(x)           ::malloc(x)
+    #define sys_free(x)             ::free(x)
+    #define sys_msize(x)            ::malloc_size(x)
 
-    #define memlog(...)         printf(__VA_ARGS__)
-    #define mutex_lock( x )     pthread_mutex_lock( x )
-    #define mutex_unlock( x )   pthread_mutex_unlock( x );
-    #define mutex_destroy( x )  pthread_mutex_destroy( x );
+    #define memlog(...)             printf(__VA_ARGS__)
+    #define mutex_lock( x )         pthread_mutex_lock( x )
+    #define mutex_unlock( x )       pthread_mutex_unlock( x );
+    #define mutex_destroy( x )      pthread_mutex_destroy( x );
 #elif defined (__ANDROID__)
     #include <android/log.h>
-    #define sys_malloc(x)       ::malloc(x)
-    #define sys_free(x)         ::free(x)
-    #define sys_msize(x)        ::malloc_usable_size(x)
+    #define sys_malloc(x)           ::malloc(x)
+    #define sys_free(x)             ::free(x)
+    #define sys_msize(x)            ::malloc_usable_size(x)
 
-    #define msize(x)            0 //malloc_usable_size(x)
-    #define memlog(...)         __android_log_print(ANDROID_LOG_INFO, "memory", __VA_ARGS__)
-    #define mutex_lock( x )     pthread_mutex_lock( x )
-    #define mutex_unlock( x )   pthread_mutex_unlock( x );
-    #define mutex_destroy( x )  pthread_mutex_destroy( x );
+    #define msize(x)                0 //malloc_usable_size(x)
+    #define memlog(...)             __android_log_print(ANDROID_LOG_INFO, "memory", __VA_ARGS__)
+    #define mutex_lock( x )         pthread_mutex_lock( x )
+    #define mutex_unlock( x )       pthread_mutex_unlock( x );
+    #define mutex_destroy( x )      pthread_mutex_destroy( x );
 
 #elif defined (__NINTENDO__)
-    #define memlog(...)         printf(__VA_ARGS__)
+    #define memlog(...)             printf(__VA_ARGS__)
 
-    #define sys_malloc(x)   ::malloc(x)
-    #define sys_free(x)     ::free(x)
-    #define sys_msize(x)    (0)
+    #define sys_malloc(x)           ::malloc(x)
+    #define sys_free(x)             ::free(x)
+    #define sys_msize(x)            (0)
 
-    #define mutex_lock( x )     
-    #define mutex_unlock( x )   
-    #define mutex_destroy( x )  
+    #define mutex_lock( x )
+    #define mutex_unlock( x )
+    #define mutex_destroy( x )
 #endif
-
-struct thread_scopelocker
-{
-    thread_scopelocker( pthread_mutex_t & mutex):m_mutex(mutex) { mutex_lock(&m_mutex);    }
-    ~thread_scopelocker()                                       { mutex_unlock(&m_mutex);    }
-
-    pthread_mutex_t    &     m_mutex;
-};
 
 static volatile size_t g_total_allocated_memory = 0;
 static volatile bool g_trace_allocations = 0;
@@ -109,7 +99,7 @@ void memory_dump(memory_stats_t* stats)
         memcpy(stats, &mem_total_allocs, sizeof(memory_stats_t));
 }
 
-uint32_t memory_allocated()
+size_t memory_allocated()
 {
     return g_total_allocated_memory;
 }
@@ -121,31 +111,18 @@ MemoryManager::MemoryManager()
 #if USE_ALLOCATION_CALLBACK
     setAllocationCallback(MemoryManager::callback, this);
 #endif
-    
-#if THREAD_SAFE
-  #ifndef _WIN32
-    
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-    
-    pthread_mutex_init(&m_mutex, &attr);
-  #else
-    InitializeCriticalSection( &m_mutex );
-  #endif
-#endif
 }
 
 
 
 MemoryManager::~MemoryManager()
 {
-    g_pMemoryManager = NULL;
-    setAllocationCallback(NULL,NULL);
-    
+    g_pMemoryManager = nullptr;
+    setAllocationCallback(nullptr, nullptr);
+
     {
     #if THREAD_SAFE
-        thread_scopelocker loc(m_mutex);
+        std::lock_guard lock(m_mutex);
     #endif
         mem_block_map(m_blocks).swap(m_blocks);//the STL swap trick to trim memory
         memlog("\n----------------------------------------------------------");
@@ -156,54 +133,56 @@ MemoryManager::~MemoryManager()
         size_t totalLeak = 0;    
     //    MemBlocks::const_iterator it, ite = m_blocks.end();
         FILE * file = fopen("memlog.log", "w");
-    
-        const size_t stack_size = memblock_t::kStackSize;
 
         //char  framesinfo[stack_size][16] = { 0 };
-        char  *framesinfo[stack_size] = {0};
-        for(int i = 0; i < stack_size; ++i)
+        char * framesinfo[memblock_t::k_max_stack_size] = { };
+
+        for(int i = 0; i < memblock_t::k_max_stack_size; ++i)
             framesinfo[i] = (char*)malloc(sizeof(char)*2048);
          
-        for(auto &it = m_blocks.begin(); it != m_blocks.end(); ++it)
+        for(auto & it = m_blocks.begin(); it != m_blocks.end(); ++it)
         {
-            for(int i = 0; i<stack_size; ++i)
-                memset(framesinfo[i], 0, sizeof(char)* 2048);
+            for(int i = 0; i< memblock_t::k_max_stack_size; ++i)
+                if(framesinfo[i] != nullptr)
+                    memset(framesinfo[i], 0, sizeof(char)* 2048);
     //        StackInfoBlocks::iterator infoIt = m_infoblocks.find(it->first);
 
             const memblock_t& block = (*it).second;
-            memlog("\n %lx  size: %5i", (unsigned long)block.ptr, (int) block.size);
-            if(file)fprintf(file, "\n %lx  size: %5i", (unsigned long)block.ptr, (int) block.size);
+            memlog("\n %llx  size: %zd", (uintptr_t)block.ptr, block.size);
+
+            if(file)
+                fprintf(file, "\n %llx  size: %zd", (uintptr_t)block.ptr, block.size);
 
             if(block.frames[0] != 0)
             {
                 int framescount = sizeof(block.frames)/sizeof(block.frames[0]);
-          //      Debug::stacktrace_names(block.frames, framescount, (char**)framesinfo);
+             //   debug::stacktrace_names(block.frames, framescount, (char**)framesinfo);
 
                 for (int i = 0; i < framescount; i++)
                 {
                     if(block.frames[i] == 0)
                         break;
-                    if(file)fprintf(file, "\n\t%s", framesinfo[i]);
+
+                    if(file)
+                        fprintf(file, "\n\t%s", framesinfo[i]);
                 }
             }
             totalLeak += block.size;
         }
         if (file)fclose(file);
     
-        for(int i = 0; i<stack_size; ++i)
+        for(int i = 0; i< memblock_t::k_max_stack_size; ++i)
             ::free(framesinfo[i]);
     
         memlog("\n************************************************************");
-        memlog("\n* Total leak is: %i kB, , bytes in %lu blocks", (int)totalLeak/1024, m_blocks.size() );
+        memlog("\n* Total leak is: %zd kB, , bytes in %zd blocks", totalLeak/1024, m_blocks.size() );
         memlog("\n************************************************************\n");
     }
 #ifdef _DEBUG
 //    system("pause");
 #endif/**/
 
-#if THREAD_SAFE
-    mutex_destroy(&m_mutex);
-#endif
+
     m_blocks.clear();
 }
 
@@ -220,16 +199,16 @@ void MemoryManager::destroy()
 void * MemoryManager::alloc(size_t size )
 {
 #if THREAD_SAFE
-    thread_scopelocker loc(m_mutex);
+    std::lock_guard lock(m_mutex);
 #endif
     
     if ( !size )
-        return NULL;
+        return nullptr;
 
     if(size > 1024*64)
         printf("");
 
-    void *mem = NULL;
+    void *mem = nullptr;
 
 #ifdef CRASH_ON_STATIC_ALLOCATION
         *((int*)0x0) = 1;
@@ -251,7 +230,7 @@ void * MemoryManager::alloc(size_t size )
 void * MemoryManager::alloc16(size_t size)
 {
     if ( !size )
-        return NULL;
+        return nullptr;
     //  size = ( size + 3 & ~3); 4 bit align
     size = (size + 15 & ~15);//16 bit align
 
@@ -266,7 +245,7 @@ void * MemoryManager::alloc16(size_t size)
 void MemoryManager::free(void *ptr)
 {
 #if THREAD_SAFE
-    thread_scopelocker loc(m_mutex);
+    std::lock_guard lock(m_mutex);
 #endif
     if ( !ptr )
         return;
@@ -274,9 +253,6 @@ void MemoryManager::free(void *ptr)
     if(s_allocationCallback )
         callback(0, ptr, this);
 
-#ifdef CRASH_ON_STATIC_ALLOCATION
-        *((int*)0x0) = 1;
-#endif
     size_t originsize = sys_msize(ptr);
     g_total_allocated_memory -= originsize;
     Mem_UpdateFreeStats(originsize);
@@ -286,21 +262,18 @@ void MemoryManager::free(void *ptr)
 void   MemoryManager::free16(void *ptr)
 {
 #if THREAD_SAFE
-    thread_scopelocker loc(m_mutex);
+    std::lock_guard lock(m_mutex);
 #endif
     if ( !ptr )
         return;
 
-#ifdef CRASH_ON_STATIC_ALLOCATION
-    *((int*)0x0) = 1;
-#endif
     sys_free( ptr );
 }
 
 void MemoryManager::dump()
 {
 #if THREAD_SAFE
-    thread_scopelocker loc(m_mutex);
+    std::lock_guard lock(m_mutex);
 #endif
     
     size_t totalMemUsage = 0;
@@ -308,7 +281,7 @@ void MemoryManager::dump()
     {
         totalMemUsage += it->second.size;
     }
-    memlog("\nsize: %lu kB", totalMemUsage /1024);
+    memlog("\nsize: %zd kB", totalMemUsage /1024);
 }
 
 
@@ -423,8 +396,6 @@ char* Mem_CopyString( const char *in )
 
 
 
-
-
 void printMemoryStats()
 {
 #ifdef _WIN32
@@ -462,21 +433,14 @@ void printMemoryStats()
 //
 //MemoryTracker ttr;
 
-
-#ifdef _WIN32
-#define NOTHROW throw()
-#else
-#define NOTHROW throw(std::bad_alloc)
-#endif
-
 #if USE_CUSTOM_NEW_ALLOCATION
 
-void *operator new(size_t size) noexcept
+void *operator new(size_t size)/* noexcept*/
 {
     if (g_trace_allocations)
         memlog("+");
 
-    void* ptr = NULL;
+    void* ptr = nullptr;
     if(g_pMemoryManager)
     {
         ptr = g_pMemoryManager->alloc(size);
@@ -484,20 +448,22 @@ void *operator new(size_t size) noexcept
     else
     {
         ptr = sys_malloc(size);
-
-        size_t originsize = sys_msize(ptr);
-        Mem_UpdateAllocStats(originsize);
-        g_total_allocated_memory += originsize;
+        if(ptr != nullptr)
+        {
+            size_t originsize = sys_msize(ptr);
+            Mem_UpdateAllocStats(originsize);
+            g_total_allocated_memory += originsize;
+        }
     }
     return ptr;
 }
 
-void * operator new[](size_t size) noexcept
+void * operator new[](size_t size) /*noexcept*/
 {
     if (g_trace_allocations)
         memlog("+");
 
-    void* ptr = NULL;
+    void* ptr = nullptr;
     if(g_pMemoryManager)
     {
         ptr = g_pMemoryManager->alloc(size);

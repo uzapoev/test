@@ -108,7 +108,7 @@ typedef struct metal_descriptor_set_pool_t {
 
     uint8_t                         dirty;
     metal_writes_t* writes;
-    struct metal_descriptor_set_t* descriptor_sets;
+    struct metal_descriptor_set_t*  descriptor_sets;
 
     gfx_buffer_t* ubo;
     uint32_t                        ubo_buffer_data_size;
@@ -119,13 +119,13 @@ typedef struct metal_descriptor_set_pool_t {
 
 typedef struct metal_descriptor_set_t {
     gfx_descriptor_set_t            handle;
-    struct metal_shader_t* shader;
-    metal_descriptor_set_pool_t* pool;
+    struct metal_shader_t*          shader;
+    metal_descriptor_set_pool_t*    pool;
     int8_t                          isfree;
     uint32_t                        writes_count;
-    metal_writes_t* writes;
+    metal_writes_t*                 writes;
 
-    void* ubo_ptr;
+    void*                           ubo_ptr;
 } metal_descriptor_set_t;
 
 
@@ -434,12 +434,12 @@ void metal_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer
     }
 
     if (desc->data == nullptr)
-        buffer = [mctx->device newBufferWithLength : desc->size
-        options : options];
+        buffer = [mctx->device newBufferWithLength : desc->size 
+                                           options : options];
     else
-        buffer = [mctx->device newBufferWithBytes : desc->data
-        length : desc->size
-        options : options];
+        buffer = [mctx->device newBufferWithBytes : desc->data 
+                                           length : desc->size 
+                                          options : options];
 
     if (buffer == nullptr)
         mctx->dbglog(gfx_msg_error, "failed create buffer");
@@ -675,9 +675,9 @@ void metal_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_text
     {
         for (uint32_t level = 0; level < desc->mip_levels; ++level)
         {
-            uint32_t width = MAX(desc->width >> level, 1);
+            uint32_t width  = MAX(desc->width  >> level, 1);
             uint32_t height = MAX(desc->height >> level, 1);
-            uint32_t depth = MAX(desc->depth >> level, 1);
+            uint32_t depth  = MAX(desc->depth  >> level, 1);
 
             uint32_t size = gfx_utils_image_layer_size(width, height, depth, desc->format);
             uint32_t bytes_per_row = !is_compressed_format(desc->format) ? gfx_utils_image_row_pitch(desc->format, width) : 0;

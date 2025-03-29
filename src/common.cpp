@@ -1,98 +1,24 @@
 #include "common.h"
+#include <stdarg.h>
+
 
 #ifdef _WIN32
-#include <windows.h>
-#include <immintrin.h>
-#endif
-#ifdef __APPLE__
-#include <CoreFoundation/CoreFoundation.h>
-#endif
+    #include <windows.h>
+    #include <dbghelp.h>
+    #pragma comment(lib, "dbghelp.lib")
+    #define snprintf _snprintf
 
-#ifdef __NINTENDO__
-#include <nn/os.h>
+    #pragma warning( disable: 26819)
 #endif
 
-#include <math.h>
-#include <stdio.h>
+std::unordered_set <std::string>interned_string::s_interned;
 
-//#include <string>
-
-#ifdef _WIN32
-#define snprintf _snprintf
-#endif
-
-std::unordered_set <std::string>atomic_string::interned;
 int measure::intend = 0;
-/*
-void bin2cstr(const char * filepath, const char * varname, const void * _data, size_t size)
-{
-    const uint8_t* data = (uint8_t*)_data;
+auto s_prev = std::chrono::high_resolution_clock::now();
 
-    std::string d;
 
-    char buffer[1024] = "";
-    sprintf(buffer, "static const unsigned char %s[%u] =\n{\n", varname, size);
-    d += buffer;
-
-    if (NULL != data)
-    {
-#define BX_STRINGIZE(_x) BX_STRINGIZE_(_x)
-#define BX_STRINGIZE_(_x) #_x
-
-#define HEX_DUMP_WIDTH 16
-#define HEX_DUMP_SPACE_WIDTH 96
-#define HEX_DUMP_FORMAT "%-" BX_STRINGIZE(HEX_DUMP_SPACE_WIDTH) "." BX_STRINGIZE(HEX_DUMP_SPACE_WIDTH) "s"
-
-        char hex[HEX_DUMP_SPACE_WIDTH + 1];
-        char ascii[HEX_DUMP_WIDTH + 1];
-
-        uint32_t hexPos = 0;
-        uint32_t asciiPos = 0;
-        for (uint32_t ii = 0; ii < size; ++ii)
-        {
-            memset(buffer, 0, sizeof(buffer));
-            snprintf(&hex[hexPos], sizeof(hex)-hexPos, "0x%02x, ", data[asciiPos]);
-            hexPos += 6;
-
-            ascii[asciiPos] = isprint(data[asciiPos]) && data[asciiPos] != '\\' ? data[asciiPos] : '.';
-            asciiPos++;
-
-            if (HEX_DUMP_WIDTH == asciiPos)
-            {
-                ascii[asciiPos] = '\0';
-                const char *format = "\t" HEX_DUMP_FORMAT"// %s\n";
-                sprintf(buffer, format, hex, ascii);
-                data += asciiPos;
-                hexPos = 0;
-                asciiPos = 0;
-
-                d += buffer;
-            }
-        }
-
-        if (0 != asciiPos)
-        {
-            ascii[asciiPos] = '\0';
-            sprintf(buffer, "\t" HEX_DUMP_FORMAT "// %s\n", hex, ascii);
-            d += buffer;
-        }
-
-        d += "};\n";
-    }
-    if (filepath != NULL && _data != NULL)
-    {
-        FILE * file = fopen(filepath, "w+");
-        if (file != NULL)
-        {
-            fwrite(d.c_str(), d.size(), 1, file);
-            fclose(file);
-        }
-    }
-}
-*/
-
-float Time::s_dt = 0.0f;
-float Time::s_elapsed_time = 0.0f;
+float s_dt = 0.0f;
+float s_elapsed_time = 0.0f;
 
 float Time::dt()
 {
@@ -107,73 +33,14 @@ float Time::elapsed()
 
 void Time::tick()
 {
-    float _dt = 1.0f / 60.0f;
-#ifdef _WIN32
-    static const int MAX_SAMPLE_COUNT = 50;
+    auto curr = std::chrono::high_resolution_clock::now();
+    
+    auto diff_ms = std::chrono::duration_cast<std::chrono::milliseconds>(curr - s_prev);
+    auto diff_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(curr - s_prev);
+    s_prev = curr;
 
-    static float frameTimes[MAX_SAMPLE_COUNT];
-    static float timeScale = 0.0f;
-    static float actualElapsedTimeSec = 0.0f;
-    static INT64 freq = 0;
-    static INT64 lastTime = 0;
-    static int sampleCount = 0;
-    static bool initialized = false;
-
-    INT64 time = 0;
-    float elapsedTimeSec = 0.0f;
-
-    if (!initialized)
-    {
-        initialized = true;
-        QueryPerformanceFrequency(reinterpret_cast<LARGE_INTEGER*>(&freq));
-        QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&lastTime));
-        timeScale = 1.0f / freq;
-    }
-
-    QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&time));
-    elapsedTimeSec = (time - lastTime) * timeScale;
-    lastTime = time;
-
-    if (fabsf(elapsedTimeSec - actualElapsedTimeSec) < 1.0f)
-    {
-        memmove(&frameTimes[1], frameTimes, sizeof(frameTimes)-sizeof(frameTimes[0]));
-        frameTimes[0] = elapsedTimeSec;
-
-        if (sampleCount < MAX_SAMPLE_COUNT)
-            ++sampleCount;
-    }
-
-    actualElapsedTimeSec = 0.0f;
-
-    for (int i = 0; i < sampleCount; ++i)
-        actualElapsedTimeSec += frameTimes[i];
-
-    if (sampleCount > 0)
-        actualElapsedTimeSec /= sampleCount;
-
-    _dt = actualElapsedTimeSec /** 5*/;
-#elif defined(__APPLE__)
-    static double start_time = CFAbsoluteTimeGetCurrent();
-    double dt = CFAbsoluteTimeGetCurrent() - start_time;
-    start_time = CFAbsoluteTimeGetCurrent();
-    _dt = dt;
-#elif defined(__ANDROID__)
-    static double lasttime = 0.0;
-
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-
-    double currtime = tv.tv_sec*1000. + tv.tv_usec / 1000.;
-    double elapsed = (currtime - lasttime) / 1000.0;
-    lasttime = currtime;
-
-    _dt = elapsed;
-#elif defined(__NINTENDO__)
-
-#endif
-
-    s_dt = _dt;
-    s_elapsed_time += s_dt; 
+    s_dt = diff_ms.count()/100.0f;
+    s_elapsed_time += s_dt;
 }
 
 
@@ -200,7 +67,7 @@ std::string bin2hex::dump(const char* data, size_t size, const char * name)
         snprintf(&buffer[hexPos], hex_symbol_width - hexPos, "0x%02x, ", u8data[asciiPos]);
         snprintf(&buffer[hex_symbol_width], 3, "// " );
 
-        sprintf(tmp, "%*0x%02x,", asciiPos*6, u8data[asciiPos]);
+        sprintf(tmp, "%*0x %02x,", asciiPos*6, u8data[asciiPos]);
         buffer[text_symbol_pos + asciiPos] = isprint(u8data[asciiPos]) && u8data[asciiPos] != '\\' ? u8data[asciiPos] : '.';
     
         asciiPos++;  
@@ -228,7 +95,7 @@ std::string bin2hex::dump(const char* data, size_t size, const char * name)
 }
 
 
-size_t Hash::murmur32(const void* key, size_t size, unsigned int seed)
+uint32_t Hash::murmur32(const void* key, uint32_t size, uint32_t seed)
 {
     // 'm' and 'r' are mixing constants generated offline.
     // They're not really 'magic', they just happen to work well.
@@ -236,7 +103,7 @@ size_t Hash::murmur32(const void* key, size_t size, unsigned int seed)
     const int r = 24;
 
     // Initialize the hash to a 'random' value
-    size_t h = seed ^ size;
+    uint32_t h = seed ^ size;
 
     // Mix 4 bytes at a time into the hash
     const unsigned char * data = (const unsigned char *)key;
@@ -274,19 +141,19 @@ size_t Hash::murmur32(const void* key, size_t size, unsigned int seed)
 }
 
 
-int64_t Hash::murmur64(const void* key, size_t len, int64_t seed)
+uint64_t Hash::murmur64(const void* key, uint32_t len, uint32_t seed)
 {
     const int64_t m = 0xc6a4a7935bd1e995ull;
     const int r = 47;
 
-    int64_t h = seed ^ (len * m);
+    uint64_t h = seed ^ (len * m);
 
     const int64_t * data = (const int64_t *)key;
     const int64_t * end = data + (len / 8);
 
     while (data != end)
     {
-        int64_t k = *data++;
+        uint64_t k = *data++;
 
         k *= m;
         k ^= k >> r;
@@ -317,7 +184,7 @@ int64_t Hash::murmur64(const void* key, size_t len, int64_t seed)
     return h;
 }
 
-size_t Hash::bernstein_ci(const void* data_in, size_t size, unsigned int seed)
+size_t Hash::bernstein_ci(const void* data_in, uint32_t size, uint32_t seed)
 {
     const unsigned char * data = (const unsigned char*)data_in;
     unsigned int    h = seed;
@@ -333,7 +200,7 @@ size_t Utf8::wchar_to_utf8(const wchar_t* w, size_t size, uint8_t* s)
 {
     uint32_t  c;
     short* p = (short*)w;
-    byte* q = (byte*)s; byte* q0 = q;
+    uint8_t* q = (uint8_t*)s; uint8_t* q0 = q;
     while (1) {
         c = *p++;
         if (c == 0) break;
@@ -347,8 +214,8 @@ size_t Utf8::wchar_to_utf8(const wchar_t* w, size_t size, uint8_t* s)
 
 size_t Utf8::utf8_to_wchar(const uint8_t* s, size_t size, wchar_t* w)
 {
-    uint32_t  cache, wait, c;
-    byte* p = (byte*)s;
+    uint32_t  cache = 0, wait = 0, c = 0;
+    uint8_t* p = (uint8_t*)s;
     short* q = (short*)w; short* q0 = q;
     while (1) {
         c = *p++;
@@ -361,6 +228,73 @@ size_t Utf8::utf8_to_wchar(const uint8_t* s, size_t size, wchar_t* w)
     }
     *q = 0;
     return q - q0;
+}
+
+#define arg_vprintf(msg)    va_list arglist;        \
+                            va_start(arglist, msg); \
+                            vprintf(msg, arglist);  \
+                            va_end(arglist);
+
+void debug::log(const char* msg, ...) 
+{
+    arg_vprintf(msg);
+    printf("\033[0m\n");
+}
+
+void debug::log_error(const char* msg, ...)
+{
+    printf("\x1b[31m");
+    arg_vprintf(msg);
+    printf("\033[0m\n");
+}
+
+void debug::log_warning(const char* msg, ...)
+{ 
+    printf("\x1B[33m");
+    arg_vprintf(msg);
+    printf("\033[0m\n");
+}
+
+void debug::breakpoint()
+{
+#ifdef _WIN32 
+    __debugbreak();
+#else
+    __builtin_trap();
+#endif
+}
+
+void debug::callstack(uintptr_t* frames, uint32_t count)
+{
+
+#ifdef _WIN32
+    static bool lazyinit = false;
+    if (!lazyinit) {
+        SymInitialize(GetCurrentProcess(), NULL, TRUE);
+        SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+        lazyinit = true;
+    }
+
+    int skipframes = 2;
+    int frame_count = RtlCaptureStackBackTrace(skipframes, (DWORD)count, (PVOID*)frames, NULL);
+
+    HANDLE hprocess = GetCurrentProcess();
+    char tmpbuffer[sizeof(SYMBOL_INFO) + 64] = "";
+    for (uint64_t i = 0; i < frame_count; ++i)
+    {
+        DWORD ldsp = 0;
+        IMAGEHLP_LINE64 line = { sizeof(IMAGEHLP_LINE64) };
+        PSYMBOL_INFO symbol = (PSYMBOL_INFO)tmpbuffer;
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = 64;
+
+        // SymGetLineFromAddr64(hprocess, adress, &ldsp, &line);
+        SymFromAddr(hprocess, frames[i], 0, symbol);
+
+        debug::log("\n  %s", symbol->Name);
+    //    printf("\n\t%s", symbol->Name);
+    }
+#endif
 }
 
 
@@ -493,9 +427,6 @@ namespace quantinizer
 
     uint16_t encode16f(float value)
     {
-    #ifdef SSE
-        _mm_cvtph_ps();
-    #endif
         Bits v, s;
         v.f = value;
         uint32_t sign = v.si & signN;

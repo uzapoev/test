@@ -4,100 +4,99 @@
 #include <assert.h>
 #include <string.h> // memcmp
 #include <stdlib.h> // rand,clock
+#include <stdarg.h> // va_arg
 #include <stdint.h> // types
 #include <time.h>   // time
 
 #include <string>
 #include <chrono>
+#include <mutex>
+#include <functional>
 #include <unordered_set>
 
+#define PROFILE_SAMPLE(SAMPLE_NAME) measure ms(SAMPLE_NAME);
 
-class Time
+struct Time
 {
-public:
     static float    dt();       // delta time between ticks
-    static float    elapsed();
+    static float    elapsed();  // elapsed time sins app started
     static void     tick();     // update timers
-
-private:
-    static float    s_dt;
-    static float    s_elapsed_time;
 };
 
 
-static void soft_breakpoint()
+struct bin2hex
 {
-#ifdef _WIN32 
-    __debugbreak();
-#else
-    __builtin_trap();
-#endif
-}
-
-
-class bin2hex
-{
-public:
     static std::string dump(const char* data, size_t len, const char* name);
 };
 
 
 struct Hash
 {
-    static size_t   murmur32(const void* data, size_t size, unsigned int seed = 5381);
-    static int64_t  murmur64(const void *data, size_t size, int64_t seed = 5381);
-
-    static size_t   bernstein_ci(const void* data, size_t size, unsigned int seed = 5381);
+    static uint32_t murmur32(const void* data, uint32_t size, uint32_t seed = 5381);
+    static uint64_t murmur64(const void *data, uint32_t size, uint32_t seed = 5381);
+    static size_t   bernstein_ci(const void* data, uint32_t size, uint32_t seed = 5381);
 };
 
 
 struct Utf8
 {   
-    static size_t wchar_to_utf8(const wchar_t* data, size_t size, uint8_t* s);
-    static size_t utf8_to_wchar(const uint8_t* data, size_t size, wchar_t* w);
+    static size_t   wchar_to_utf8(const wchar_t* data, size_t size, uint8_t* s);
+    static size_t   utf8_to_wchar(const uint8_t* data, size_t size, wchar_t* w);
 };
 
 
-struct atomic_string
+struct debug
+{
+    static void     log(const char* msg, ...);
+    static void     log_error(const char* msg, ...);
+    static void     log_warning(const char* msg, ...);
+
+    static void     breakpoint();
+    static void     callstack(uintptr_t * frames, uint32_t count);
+};
+
+
+struct interned_string
 {
 public:
-    atomic_string()                                 {}
-    atomic_string(const char * str)                 { m_str = make_atom(str); }
-    atomic_string(const std::string & str)          { m_str = make_atom(str); }
-    atomic_string(const std::string_view & str)     { m_str = make_atom(str.data()); }
+    interned_string()                                       {}
+    interned_string(const char * str)                       { m_str = make_intern(str); }
+    interned_string(const std::string & str)                { m_str = make_intern(str); }
+    interned_string(const std::string_view & str)           { m_str = make_intern(str.data()); }
 
-    inline size_t          lenght() const           { return m_str.length(); }
-    inline const char *    data()   const           { return m_str.data(); }
-    inline const char *    c_str()  const           { return m_str.data(); }
-    inline bool            empty()  const           { return m_str.length() == 0; }
+    inline size_t          length() const                   { return m_str.length(); }
+    inline const char *    data()   const                   { return m_str.data(); }
+    inline const char *    c_str()  const                   { return m_str.data(); }
+    inline bool            empty()  const                   { return m_str.length() == 0; }
 
-    inline void operator = (const std::string & str){ m_str = make_atom(str); }
-    inline void operator = (const std::string_view & str){ m_str = make_atom(str.data()); }
+    inline void operator = (const std::string & str)        { m_str = make_intern(str); }
+    inline void operator = (const std::string_view & str)   { m_str = make_intern(str.data()); }
 
-    inline friend bool operator == (const atomic_string& b1, const atomic_string& b2) { return b1.m_str == b2.m_str; }
-  //  inline friend bool operator == (const atomic_string& b1, const atomic_string& b2) { return b1.m_str == b2.m_str; }
-    inline friend bool operator <  (const atomic_string& b1, const atomic_string& b2) { return b1.m_str < b2.m_str; }
+    inline friend bool operator == (const interned_string& b1, const interned_string& b2) { return b1.m_str == b2.m_str; }
+    inline friend bool operator <  (const interned_string& b1, const interned_string& b2) { return b1.m_str < b2.m_str; }
 
-    static size_t size()
+    static size_t msize()
     {
         size_t s = 0;
-        for (auto it = interned.begin(); it != interned.end(); ++it)
+        for (auto it = s_interned.begin(); it != s_interned.end(); ++it)
             s += it->size();
         return s;
     }
 
 private:
-    static std::unordered_set <std::string> interned;
-    static const char* make_atom(const std::string& value)
+    static std::unordered_set <std::string> s_interned;
+    static const char* make_intern(const std::string& value)
     {
-        return interned.insert(value).first->c_str();
+        return s_interned.insert(value).first->c_str();
     }
 
     std::string_view  m_str;
 };
 
-template <> struct std::hash<atomic_string> { 
-    inline std::size_t operator() (const atomic_string& s) const 
+
+template <> struct std::hash<interned_string> 
+{ 
+    inline std::size_t operator() (const interned_string& s) const 
     { 
         return std::hash<const char*> {} (s.c_str());
     } 
@@ -120,12 +119,12 @@ public:
     inline size_t           size() const                { return sizeof(m_uuid); }
 
     inline bool             operator <  (const Guid & other) const { return memcmp(c_str(), other.c_str(), size()) < 0;  }
-    inline bool             operator == (const Guid & other) const { return memcmp(c_str(), other.c_str(), size()) == 0; }
-    inline bool             operator != (const Guid & other) const { return memcmp(c_str(), other.c_str(), size()) != 0; }
+    inline bool             operator == (const Guid & other) const { return m_lo == other.m_lo && m_hi == other.m_hi; }
+    inline bool             operator != (const Guid & other) const { return m_lo != other.m_lo && m_hi != other.m_hi; }
 protected:
     union
     {
-        struct { uint64_t lo, hi; };
+        struct { uint64_t m_lo, m_hi; };
         char     m_uuid[32 + 1];// 32 sign + '\0'
     };
 };
@@ -156,6 +155,8 @@ private:
     std::chrono::high_resolution_clock::time_point m_start;
     std::chrono::high_resolution_clock::time_point m_end;
 };
+
+
 
 
 
