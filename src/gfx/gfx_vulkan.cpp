@@ -2278,20 +2278,20 @@ void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t*
         1u, &descriptor_set, 0, nullptr);
 }
 
-void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer)
+void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
 {
     vk_buffer_t* vkbuffer = (vk_buffer_t*)buffer;
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
     VkIndexType index_type = gfx_index_format_2_vk(format);
-    vkCmdBindIndexBuffer(vk_cmd->cmd, vkbuffer->buffer, 0, index_type);
+    vkCmdBindIndexBuffer(vk_cmd->cmd, vkbuffer->buffer, offset, index_type);
 }
 
-void vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t binding, gfx_buffer_t* buffer)
+void vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t binding, uint32_t offset, gfx_buffer_t* buffer)
 {
     vk_buffer_t* vkbuffer = (vk_buffer_t*)buffer;
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-    VkDeviceSize offsets[] = { 0 };
+    VkDeviceSize offsets[] = { offset };
     vkCmdBindVertexBuffers(vk_cmd->cmd, binding, 1, &vkbuffer->buffer, offsets);
 }
 

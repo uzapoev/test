@@ -188,11 +188,16 @@ int main(int argc, char ** argv)
             assert(!(msg.message == WM_DISPLAYCHANGE));
         }
 
-        platform_tick(nullptr);
+        if(!exit)
+        {
+            platform_tick(nullptr);
 
-        g_point_states[0].dx = 0;
-        g_point_states[0].dy = 0;
+            g_point_states[0].dx = 0;
+            g_point_states[0].dy = 0;
+        }
     }
+
+    platform_destroy(nullptr);
 }
 
 

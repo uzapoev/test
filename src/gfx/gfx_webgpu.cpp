@@ -1600,23 +1600,23 @@ void wgpu_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32
 }
 
 
-void wgpu_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer)
+void wgpu_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
     wgpu_buffer_t*  wgpu_buffer = (wgpu_buffer_t*)buffer;
 
     WGPUIndexFormat idx_format = (format == gfx_index_format_16) ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32;
 
-    wgpuRenderPassEncoderSetIndexBuffer(wgpu_cmd->pass, wgpu_buffer->buffer, idx_format, 0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetIndexBuffer(wgpu_cmd->pass, wgpu_buffer->buffer, idx_format, offset, WGPU_WHOLE_SIZE);
 }
 
 
-void wgpu_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, gfx_buffer_t* buffer)
+void wgpu_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
     wgpu_buffer_t * wgpu_buffer = (wgpu_buffer_t*)buffer;
 
-    wgpuRenderPassEncoderSetVertexBuffer(wgpu_cmd->pass, slot, wgpu_buffer->buffer, 0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetVertexBuffer(wgpu_cmd->pass, slot, wgpu_buffer->buffer, offset, WGPU_WHOLE_SIZE);
 }
 
 //

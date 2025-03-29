@@ -247,8 +247,8 @@ typedef struct gfx_api_pfn
     void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     void     (*pfn_cmd_bind_pipeline) (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
     void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
-    void     (*pfn_cmd_bind_buffer_ib) (gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer);
-    void     (*pfn_cmd_bind_buffer_vb) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_buffer_t* buffer);
+    void     (*pfn_cmd_bind_buffer_ib) (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
+    void     (*pfn_cmd_bind_buffer_vb) (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
     void     (*pfn_cmd_draw) (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
     void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
     void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
@@ -498,15 +498,15 @@ void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t
 }
 
 
-void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, gfx_buffer_t* buffer)
+void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
 { 
-    g_tbl->pfn_cmd_bind_buffer_ib(cmd, format,  buffer);
+    g_tbl->pfn_cmd_bind_buffer_ib(cmd, format, offset, buffer);
 }
 
 
-void gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, gfx_buffer_t* buffer)
+void gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer)
 { 
-    g_tbl->pfn_cmd_bind_buffer_vb(cmd, slot, buffer);
+    g_tbl->pfn_cmd_bind_buffer_vb(cmd, slot, offset, buffer);
 }
 
 

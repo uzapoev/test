@@ -230,6 +230,9 @@ private:
     gfx_context_t *                                                 m_ctx = nullptr;
     gfx_shader_t*                                                   m_default_shader = nullptr;
     gfx_pipeline_t *                                                m_default_pipeline = nullptr;
+
+    gfx_mesh_pool_t                                                 m_mesh_pool;
+
     std::unordered_set<interned_string>                             m_dirs;
     std::unordered_map<interned_string, std::filesystem::path>      m_guid_2_path;
 
@@ -267,8 +270,8 @@ struct vertex_compressed
 extern size_t   read_file_data(const char* path, char** data);
 extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vsize, uint32_t isize, gfx_mesh_pool_t* pool);
 
-extern bool     create_mesh_from_file_path(gfx_context_t* ctx, const char* path, gfx_mesh_t* out_mesh);
-extern void     create_mesh_from_file_data(gfx_context_t* ctx, const char* name, char* path, size_t size, gfx_mesh_t* out_mesh);
+extern bool     create_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t* pool, const char* path, gfx_mesh_t* out_mesh);
+extern void     create_mesh_from_file_data(gfx_context_t* ctx, gfx_mesh_pool_t* pool, const char* name, char* data, size_t size, gfx_mesh_t* out_mesh);
 
 extern void     create_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_texture_t** out_texture);
 extern void     create_texture_from_file_data(gfx_context_t* ctx, char* data, size_t size, gfx_texture_t** out_texture);

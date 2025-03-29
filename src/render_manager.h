@@ -65,6 +65,9 @@ typedef struct gfx_mesh_pool_t {
     uint32_t                vertex_buffer_size;
     uint32_t                index_buffer_size;
 
+    uint32_t                vertex_buffer_offset;
+    uint32_t                index_buffer_offset;
+
     gfx_buffer_t*           vertex_buffer;
     gfx_buffer_t*           index_buffer;
 } gfx_mesh_pool_t;
@@ -135,8 +138,8 @@ static void draw_renderer(gfx_command_buffer_t * cmd, const renderer_t * rendere
     auto set = renderer->material->descriptor_set;
 
     gfx_cmd_bind_descriptor_set(cmd, set);
-    gfx_cmd_bind_vertex_buffer(cmd, 0, mesh->vertex_buffer);
-    gfx_cmd_bind_index_buffer(cmd, mesh->index_format, mesh->index_buffer);
+    gfx_cmd_bind_vertex_buffer(cmd, 0, mesh->vertex_buffer_offset, mesh->vertex_buffer);
+    gfx_cmd_bind_index_buffer(cmd, mesh->index_format, mesh->index_buffer_offset, mesh->index_buffer);
 
     int32_t start_idx = 0;
     for (size_t sub_idx = 0; sub_idx < mesh->submesh_count; sub_idx++)

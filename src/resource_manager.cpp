@@ -216,9 +216,34 @@ static bool has_guid_in_name(const std::filesystem::path & filename, std::string
 }
 
 
+gfx_mesh_pool_t create_mesh_pool(gfx_context_t * ctx, uint32_t vb_size, uint32_t ib_size)
+{
+    gfx_mesh_pool_t result = {};
+
+    result.index_buffer_size = 16 * 1024 * 1024;
+
+    gfx_buffer_desc_t vb_desc = {};
+        vb_desc.label = "mesh_pool_vertex_buffer";
+        vb_desc.usage = gfx_buffer_usage_vertex;
+        vb_desc.size = vb_size;
+    result.vertex_buffer = gfx_create_buffer2(ctx, &vb_desc);
+    result.vertex_buffer_size = vb_size;
+
+    gfx_buffer_desc_t ib_desc = {};
+        ib_desc.label = "mesh_pool_index_buffer";
+        ib_desc.usage = gfx_buffer_usage_index;
+        ib_desc.size = ib_size;
+    result.index_buffer = gfx_create_buffer2(ctx, &ib_desc);
+    result.index_buffer_size = ib_size;
+    //result.index_allocator = 
+    return result;
+}
+
 void resource_manager::init()
 {
     create_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
+
+    m_mesh_pool = create_mesh_pool(m_ctx, 256*1024*1024, 16*1024*1024);
 
     gfx_vertex_attribute attributes[] = {
         { 0, 0, gfx_vertex_format_float4,   0                   },
@@ -386,8 +411,8 @@ rendermesh* resource_manager::load_mesh(const char* name)
     {
         gfx_mesh_t handle = {};
 
-        if (!create_mesh_from_file_path(m_ctx, path.data(), &handle))
-        return nullptr;
+        if (!create_mesh_from_file_path(m_ctx, &m_mesh_pool, path.data(), &handle))
+            return nullptr;
 
         rendermesh * mesh = new rendermesh(name, path, handle);
         m_meshes.emplace(name, mesh);
@@ -590,13 +615,13 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
     pool->index_buffer = gfx_create_buffer2(ctx, &ib);
 }
 
-bool create_mesh_from_file_path(gfx_context_t* ctx, const char * path, gfx_mesh_t* out_mesh)
+bool create_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t * pool, const char * path, gfx_mesh_t* out_mesh)
 {
     char* data = nullptr;
     size_t size = read_file_data2(path, &data);
     if(size != 0)
     {
-        create_mesh_from_file_data(ctx, strrchr(path, '/'), data, size, out_mesh);
+        create_mesh_from_file_data(ctx, pool, strrchr(path, '/'), data, size, out_mesh);
     }
     else
     {
@@ -608,7 +633,7 @@ bool create_mesh_from_file_path(gfx_context_t* ctx, const char * path, gfx_mesh_
     return true;
 }
 
-void create_mesh_from_file_data(gfx_context_t * ctx, const char *name, char * data, size_t size, gfx_mesh_t*out_mesh)
+void create_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, const char *name, char * data, size_t size, gfx_mesh_t*out_mesh)
 {
     char* curent_ptr = data;
 
@@ -623,25 +648,58 @@ void create_mesh_from_file_data(gfx_context_t * ctx, const char *name, char * da
 
     int* submeshes = (int*)curent_ptr;
 
-    gfx_buffer_desc_t vb_desc = {};
-        vb_desc.label = name;
-        vb_desc.usage = gfx_buffer_usage_vertex;
-        vb_desc.data = (uint8_t*)vertex_data_ptr;
-        vb_desc.size = header->vertex_stride * header->vertex_count;
-    gfx_buffer_t* vb = gfx_create_buffer2(ctx, &vb_desc);
-  //  gfx_update_buffer_data(ctx, vb, vertex_data_ptr, vb_desc.size, 0);
+    uint32_t vertex_buffer_size = header->vertex_stride * header->vertex_count;
+    uint32_t index_buffer_size = header->index_stride * header->index_count;
 
-    gfx_buffer_desc_t ib_desc = {};
-        ib_desc.label = name;
-        ib_desc.usage = gfx_buffer_usage_index;
-        ib_desc.data = (uint8_t*)index_data_ptr;
-        ib_desc.size = header->index_stride * header->index_count;
-    gfx_buffer_t* ib = gfx_create_buffer2(ctx, &ib_desc);
+    gfx_buffer_t* vertex_buffer = nullptr;
+    gfx_buffer_t* index_buffer = nullptr;
+
+    bool ispooled = false;
+    if(pool != nullptr)
+    {
+        int vertex_left = pool->vertex_buffer_size - pool->vertex_buffer_offset;
+        int index_left = pool->index_buffer_size - pool->index_buffer_offset;
+
+        if (vertex_left > vertex_buffer_size && index_left > index_buffer_size)
+        {
+            vertex_buffer = pool->vertex_buffer;
+            index_buffer = pool->index_buffer;
+
+            gfx_update_buffer_data(ctx, vertex_buffer, vertex_data_ptr, vertex_buffer_size, pool->vertex_buffer_offset);
+            gfx_update_buffer_data(ctx, index_buffer, index_data_ptr, index_buffer_size, pool->index_buffer_offset);
+
+            out_mesh->vertex_buffer_offset = pool->vertex_buffer_offset;
+            out_mesh->index_buffer_offset = pool->index_buffer_offset;
+
+            pool->vertex_buffer_offset += vertex_buffer_size;
+            pool->index_buffer_offset += index_buffer_size;
+        }
+    }
+
+    if(vertex_buffer == nullptr)
+    {
+        gfx_buffer_desc_t vb_desc = {};
+            vb_desc.label = name;
+            vb_desc.usage = gfx_buffer_usage_vertex;
+            vb_desc.data = (uint8_t*)vertex_data_ptr;
+            vb_desc.size = header->vertex_stride * header->vertex_count;
+        vertex_buffer = gfx_create_buffer2(ctx, &vb_desc);
+    }
+
+    if(index_buffer == nullptr)
+    {
+        gfx_buffer_desc_t ib_desc = {};
+            ib_desc.label = name;
+            ib_desc.usage = gfx_buffer_usage_index;
+            ib_desc.data = (uint8_t*)index_data_ptr;
+            ib_desc.size = header->index_stride * header->index_count;
+        index_buffer = gfx_create_buffer2(ctx, &ib_desc);
+    }
 
     out_mesh->index_format = header->index_stride == 2 ? gfx_index_format_16 : gfx_index_format_32;
     out_mesh->submesh_count = header->submesh_count;
-    out_mesh->index_buffer  = ib;
-    out_mesh->vertex_buffer = vb;
+    out_mesh->index_buffer  = index_buffer;
+    out_mesh->vertex_buffer = vertex_buffer;
     out_mesh->vertex_count  = header->vertex_count;
     out_mesh->index_count   = header->index_count;
 

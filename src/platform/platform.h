@@ -98,6 +98,7 @@ typedef struct platform_ctx_t {
 
 extern void             platform_main(uintptr_t handle, int argc, char**argv);
 extern void             platform_tick(void * userdata); 
+extern void             platform_destroy(void * userdata); 
 
 int                     platform_get_monitors(monitor_info_t * infos);
 rect_t                  platform_get_window_size(uintptr_t handle);

@@ -266,7 +266,6 @@ void debug::breakpoint()
 
 void debug::callstack(uintptr_t* frames, uint32_t count)
 {
-
 #ifdef _WIN32
     static bool lazyinit = false;
     if (!lazyinit) {
@@ -291,7 +290,7 @@ void debug::callstack(uintptr_t* frames, uint32_t count)
         // SymGetLineFromAddr64(hprocess, adress, &ldsp, &line);
         SymFromAddr(hprocess, frames[i], 0, symbol);
 
-        debug::log("\n  %s", symbol->Name);
+        debug::log("%s", symbol->Name);
     //    printf("\n\t%s", symbol->Name);
     }
 #endif
@@ -383,6 +382,7 @@ namespace quantinizer
             unsigned short sign : 1;
         }_float;
     }_float16;
+
     typedef union float32
     {
         float _f;
