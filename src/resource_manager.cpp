@@ -20,138 +20,6 @@ size_t filesize(FILE* file)
     return size;
 }
 
-struct stream_impl
-{
-    stream_impl(FILE * file) : m_file(file)
-    {
-        m_write_buffer_size = 1024*4;
-        m_write_buffer = new char [m_write_buffer_size]();
-
-        m_read_buffer_size = m_write_buffer_size;
-        m_read_buffer = new char[m_write_buffer_size]();
-
-        refill_buffer();
-    }
-
-    size_t read(uint32_t size, char* data)
-    {
-        size_t bytes_read = 0;
-        while (bytes_read < size) {
-            if (m_read_pos == m_read_buffer_size) {
-                refill_buffer();
-                if (m_read_pos == m_read_buffer_size) {
-                    break; // End of file
-                }
-            }
-            data[bytes_read++] = m_read_buffer[m_read_pos++];
-        }
-        return bytes_read;
-    }
-
-    size_t write(uint32_t size, const char * data)
-    {
-        size_t bytes_written = 0;
-        while (bytes_written < size) {
-            if (m_write_pos == m_write_buffer_size) {
-                write_buffer();
-            }
-            m_write_buffer[m_write_pos++] = data[bytes_written++];
-        }
-        return bytes_written;
-    }
-
-    size_t seek(size_t offset, int whence) 
-    {
-        flush(); // Flush the write buffer before seeking
-
-        int result = fseek(m_file, (long)offset, whence);
-
-        m_file_pos = result;
-        m_read_pos = m_read_buffer_size; // Invalidate the read buffer
-
-        return result;
-    }
-
-    void flush()
-    {
-        write_buffer();
-    }
-
-private:
-    void refill_buffer()
-    {
-        size_t result = fread(m_read_buffer, 1, m_read_buffer_size, m_file);
-        m_read_pos = 0;
-        m_file_pos += result;
-    }
-
-    void write_buffer()
-    {
-        size_t result = fwrite(m_write_buffer, 1, m_write_pos, m_file);
-        fflush(m_file);
-        m_write_pos = 0;
-        m_file_pos += result;
-    }
-
-private:
-    FILE *      m_file = nullptr;
-    size_t      m_file_pos = 0;
-
-    char *      m_read_buffer = nullptr;
-    size_t      m_read_buffer_size = 0;
-    size_t      m_read_pos = 0;
-
-    char *      m_write_buffer = nullptr;
-    size_t      m_write_buffer_size = 0;
-    size_t      m_write_pos = 0;
-};
-
-
-
-filestream* filestream::open(const char* path, const char* mode)
-{
-    FILE* file = fopen(path, mode);
-    if (file == nullptr)
-        return nullptr;
-
-    filestream * fstream = new filestream();
-    fstream->m_impl = new stream_impl(file);
-
-    return fstream;
-}
-
-filestream* filestream::open_rb(const char* path)
-{
-    return filestream::open(path, "rb");
-}
-
-filestream* filestream::open_wb(const char* path)
-{
-    return filestream::open(path, "wb+");
-}
-
-
-
-uint32_t  filestream::read(uint32_t size, void* out_data)
-{
-    return (uint32_t)m_impl->read(size, (char*)out_data);
-}
-
-uint32_t  filestream::write(uint32_t size, const void* in_data)
-{
-    return (uint32_t)m_impl->write(size, (char*)in_data);
-}
-
-void filestream::flush()
-{
-    m_impl->flush();
-}
-
-void filestream::seek(uint32_t offset, int whence)
-{
-    m_impl->seek(offset, whence);
-}
-
 
 
 texture::texture(interned_string guid, interned_string name, gfx_texture_t* tex)
@@ -491,7 +359,7 @@ gfx_material_instance_t* resource_manager::load_material_instance(const std::str
 
     char *data = nullptr;
     size_t size = read_file_data(path.c_str(), &data);
-    auto descriptor = json::from_json_string<material_descriptor>(data);
+    auto descriptor = json::from_json_string<material_descriptor>(data, size);
     free(data);
 
     auto material = std::make_shared<gfx_material_instance_t>();
@@ -595,23 +463,23 @@ size_t read_file_data(const char* path, char** data_out)
     return (uint32_t)size;
 }
 
+
 void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, gfx_mesh_pool_t* pool)
 {
- //   pool->vertex_allocator = offset_alocator_create(vertex_buffer_size);
- //   pool->index_allocator = offset_alocator_create(index_buffer_size);
-
+    //   pool->vertex_allocator = offset_alocator_create(vertex_buffer_size);
+    //   pool->index_allocator = offset_alocator_create(index_buffer_size);
     gfx_buffer_desc_t vb = {};
-        vb.data = nullptr;
-        vb.mapped = false;
-        vb.size = vertex_buffer_size;
-        vb.usage = gfx_buffer_usage_vertex;
+        vb.data     = nullptr;
+        vb.mapped   = false;
+        vb.size     = vertex_buffer_size;
+        vb.usage    = gfx_buffer_usage_vertex;
     pool->vertex_buffer = gfx_create_buffer2(ctx, &vb);
 
     gfx_buffer_desc_t ib = {};
-        vb.data = nullptr;
-        vb.mapped = false;
-        vb.size = index_buffer_size;
-        vb.usage = gfx_buffer_usage_index;
+        vb.data     = nullptr;
+        vb.mapped   = false;
+        vb.size     = index_buffer_size;
+        vb.usage    = gfx_buffer_usage_index;
     pool->index_buffer = gfx_create_buffer2(ctx, &ib);
 }
 
@@ -648,8 +516,8 @@ void create_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, cons
 
     int* submeshes = (int*)curent_ptr;
 
-    uint32_t vertex_buffer_size = header->vertex_stride * header->vertex_count;
-    uint32_t index_buffer_size = header->index_stride * header->index_count;
+    int32_t vertex_buffer_size = header->vertex_stride * header->vertex_count;
+    int32_t index_buffer_size = header->index_stride * header->index_count;
 
     gfx_buffer_t* vertex_buffer = nullptr;
     gfx_buffer_t* index_buffer = nullptr;
@@ -657,8 +525,8 @@ void create_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, cons
     bool ispooled = false;
     if(pool != nullptr)
     {
-        int vertex_left = pool->vertex_buffer_size - pool->vertex_buffer_offset;
-        int index_left = pool->index_buffer_size - pool->index_buffer_offset;
+        int32_t vertex_left = pool->vertex_buffer_size - pool->vertex_buffer_offset;
+        int32_t index_left = pool->index_buffer_size - pool->index_buffer_offset;
 
         if (vertex_left > vertex_buffer_size && index_left > index_buffer_size)
         {
@@ -903,22 +771,22 @@ void create_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size
             //https://registry.khronos.org/OpenGL/extensions/KHR/KHR_texture_compression_astc_hdr.txt
             switch (header->glInternalFormat)
             {
-                case 0x93D0: srgb = true;
+                case 0x93D0: srgb = true; [[fallthrough]];
                 case 0x93B0: desc.format = gfx_pixel_format_astc4x4;        break;  //COMPRESSED_RGBA_ASTC_4x4_KH
                     
-                case 0x93D2: srgb = true;
+                case 0x93D2: srgb = true; [[fallthrough]];
                 case 0x93B2: desc.format = gfx_pixel_format_astc5x5;        break;  //COMPRESSED_RGBA_ASTC_4x4_KH
                     
-                case 0x93D4: srgb = true;
+                case 0x93D4: srgb = true; [[fallthrough]];
                 case 0x93B4: desc.format = gfx_pixel_format_astc6x6;        break;  //COMPRESSED_RGBA_ASTC_6x6_KHR
                     
-                case 0x93D7: srgb = true;
+                case 0x93D7: srgb = true; [[fallthrough]];
                 case 0x93B7: desc.format = gfx_pixel_format_astc8x8;        break;  //COMPRESSED_RGBA_ASTC_8x8_KHR
                     
-                case 0x93DB: srgb = true;
+                case 0x93DB: srgb = true; [[fallthrough]];
                 case 0x93BB: desc.format = gfx_pixel_format_astc10x10;      break;  //COMPRESSED_RGBA_ASTC_10x10_KHR
                     
-                case 0x93DD: srgb = true;
+                case 0x93DD: srgb = true; [[fallthrough]];
                 case 0x93BD: desc.format = gfx_pixel_format_astc12x12;      break;  //COMPRESSED_RGBA_ASTC_12x12_KHR
 
                 case 0x9274: desc.format = gfx_pixel_format_etc1;           break;

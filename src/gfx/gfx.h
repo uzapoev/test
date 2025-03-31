@@ -664,6 +664,25 @@ gfx_api void                    gfx_cmd_dispatch_compute    (gfx_command_buffer_
 gfx_api void                    gfx_cmd_end(gfx_command_buffer_t* cmd);
 gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
+
+// https://www.khronos.org/blog/understanding-vulkan-synchronization
+// https://github.com/khronosgroup/vulkan-docs/wiki/synchronization-examples
+typedef enum gfx_barrier {
+    gfx_barrier_compute_compute,
+    gfx_barrier_compute_graphics,
+    gfx_barrier_graphics_compute,
+    gfx_barrier_graphics_graphics,
+    gfx_barrier_transfer,
+} gfx_barrier;
+
+typedef struct gfx_barrier_desc_t {
+    gfx_buffer_t  * buffer;
+    gfx_texture_t * texture;
+} gfx_barrier_desc_t;
+
+
+gfx_api void gfx_cmd_barrier(gfx_command_buffer_t* cmd, gfx_barrier barrier, gfx_barrier_desc_t * desc);
+
 // WIP: occlusion query, timestamp, mipmap, raytracing
 // 
 // typedef struct gfx_rt_acceleration_struct {

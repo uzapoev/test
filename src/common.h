@@ -69,8 +69,8 @@ public:
     inline const char *    c_str()  const                   { return m_str.data(); }
     inline bool            empty()  const                   { return m_str.length() == 0; }
 
-    inline void operator = (const std::string & str)        { m_str = make_intern(str); }
-    inline void operator = (const std::string_view & str)   { m_str = make_intern(str.data()); }
+ //   inline void operator = (const std::string & str)        { m_str = make_intern(str); }
+ //   inline void operator = (const std::string_view & str)   { m_str = make_intern(str.data()); }
 
     inline friend bool operator == (const interned_string& b1, const interned_string& b2) { return b1.m_str == b2.m_str; }
     inline friend bool operator <  (const interned_string& b1, const interned_string& b2) { return b1.m_str < b2.m_str; }
@@ -99,7 +99,55 @@ template <> struct std::hash<interned_string>
     inline std::size_t operator() (const interned_string& s) const 
     { 
         return std::hash<const char*> {} (s.c_str());
-    } 
+    }
+};
+
+
+struct filestream
+{
+    static filestream* open(const char* path, const char* mode);
+    static filestream* open_rb(const char* path);   // binary read only 
+    static filestream* open_wb(const char* path);   // binary write
+
+    ~filestream();
+
+    uint32_t    read(uint32_t size, void* out_data);
+    uint32_t    write(uint32_t size, const void* in_data);
+    void        seek(uint32_t offset, int whence);
+    void        flush();
+
+    template<class T>
+    inline T    read() { T res = {}; read(sizeof(T), &res); return res; }
+
+    inline char* read_string(char* data) {
+        data[0] = '\0';
+        uint16_t len = read<uint16_t>();
+        read(len, data);
+        return data;
+    }
+
+    template<class T>
+    inline void write(T v) { write(sizeof(T), &v); }
+
+    inline void write_chunk_info(uint16_t type, uint16_t size) {
+        write(type);
+        write(size);
+    }
+
+    inline void write_chunk(uint16_t type, uint16_t size, const char* data) {
+        write(type);
+        write(size);
+        write(size, data);
+    }
+
+    inline void write_string(uint16_t size, const char* data) {
+        write(size);
+        write(size, data);
+    }
+
+private:
+    filestream(struct stream_impl*);
+    struct stream_impl* m_impl;
 };
 
 

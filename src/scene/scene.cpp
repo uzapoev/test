@@ -1,5 +1,5 @@
 #include "scene.h"
-//#include "../assets/asset_unity.h"
+#include "scene_json.h"
 
 
 void camera::update()
@@ -17,6 +17,13 @@ void camera::update()
     m_view_proj = math::mul(proj, view);
 }
 
+scene scene::create_from_file(const std::string& path)
+{
+    scene result;
+    if(path.empty())
+        return result;
+}
+
 
 scene scene::create_from_json_file(const std::string& path)
 {
@@ -32,10 +39,7 @@ scene scene::create_from_json_file(const std::string& path)
     }
     else
     {
-        auto data = resource_manager::file_data(path);
-        std::string tmp(data.begin(), data.end());
-
-        auto result = json::from_json_string<scene>(tmp);
+        auto result = scene_reader_json::create_form_file(path);
         result.init();
         result.save(bin_path);
     }
@@ -133,7 +137,7 @@ scene scene::create_from_json_file(const std::string& path)
             gfx_uniform_set_sampler(set, sampler_location, sampler);
     }
     
-    return std::move(result);
+    return result;
 }
 
 
@@ -280,6 +284,19 @@ void scene::init()
     m_visibles.reserve(m_meshes.size());
 }
 
+void scene::clear()
+{
+    m_renderers.clear();
+    m_visibles.clear();
+    m_instances.clear();
+
+    m_nodes.clear();
+    m_nodes_flat_list.clear();
+
+    m_meshes.clear();
+    m_materials.clear();
+}
+
 void scene::update()
 {
 }
@@ -322,7 +339,7 @@ void scene::traverse(node & n, std::function<void(node&)> &cb)
 
 const std::vector<renderer_t*>& scene::cull(const mat4& vp)
 {
-  //  PROFILE_SAMPLE("\nscene::cull");
+    PROFILE_SAMPLE("\nscene::cull");
 
     m_visibles.clear();
     frustum fr = frustum::from_view_proj(vp);
@@ -336,6 +353,8 @@ const std::vector<renderer_t*>& scene::cull(const mat4& vp)
 
         m_visibles.push_back(&renderer);
     }
+
+    make_instances(m_visibles);
 
     return m_visibles;
 
@@ -384,7 +403,20 @@ const std::vector<renderer_t*>& scene::cull(const mat4& vp)
     return m_visibles;
 }
 
-std::vector<pass> scene::sort_by_passes(const std::vector<renderer_t>&)
+void scene::make_instances(const std::vector<renderer_t*> & renderers)
+{
+    PROFILE_SAMPLE("\n  scene::instances");
+    m_instances.clear();
+
+    for (int i = 0; i < renderers.size(); ++i)
+    {
+        // renderers[i]->mesh
+        m_instances[renderers[i]->mesh]++;
+    }
+    
+}
+
+std::vector<pass> scene::sort_by_passes(const std::vector<renderer_t> &)
 {
     return {};
 }

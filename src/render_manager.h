@@ -62,11 +62,11 @@ typedef struct gfx_mesh_pool_t {
     offset_allocator*       vertex_allocator;
     offset_allocator*       index_allocator;
 
-    uint32_t                vertex_buffer_size;
-    uint32_t                index_buffer_size;
+    int32_t                 vertex_buffer_size;
+    int32_t                 index_buffer_size;
 
-    uint32_t                vertex_buffer_offset;
-    uint32_t                index_buffer_offset;
+    int32_t                 vertex_buffer_offset;
+    int32_t                 index_buffer_offset;
 
     gfx_buffer_t*           vertex_buffer;
     gfx_buffer_t*           index_buffer;
@@ -94,17 +94,14 @@ typedef struct renderer_t
 
 struct pass
 {
-    struct instance_batch
-    {
+    struct batch_info {
+        gfx_pipeline_t *    pipeline;
         gfx_mesh_t *        mesh;
-        uint32_t            count;
+        uint32_t            mesh_count;
     };
 
-    struct pass_batch
-    {
-        gfx_pipeline_t * pipeline;
-        instance_batch * intsances;
-    };
+    uint32_t        batch_count;
+    batch_info*     bathces;
 };
 
 

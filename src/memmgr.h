@@ -29,6 +29,24 @@
 #include <mutex>
 #include <unordered_map>
 
+// https://github.com/suVrik/allocator_benchmark
+class iallocator
+{
+public:
+    virtual void *  allocate(size_t size, size_t alignment) = 0;
+    virtual void    deallocate(void* memory) = 0;
+
+    template <typename T>
+    T* allocate(size_t count) {
+        return static_cast<T*>(allocate(sizeof(T) * count, alignof(T)));
+    }
+};
+
+class buddy_allocator : iallocator
+{
+};
+
+
 ////////////////////////
 //
 typedef void    (*allocationCallback)(size_t sz, void* ptr, void* data);

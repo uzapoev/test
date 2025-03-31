@@ -230,6 +230,11 @@ size_t Utf8::utf8_to_wchar(const uint8_t* s, size_t size, wchar_t* w)
     return q - q0;
 }
 
+
+//
+// debug
+//
+
 #define arg_vprintf(msg)    va_list arglist;        \
                             va_start(arglist, msg); \
                             vprintf(msg, arglist);  \
@@ -296,6 +301,159 @@ void debug::callstack(uintptr_t* frames, uint32_t count)
 #endif
 }
 
+
+
+//
+// stream_impl
+//
+struct stream_impl
+{
+    stream_impl(FILE* file, uint32_t buffer_size = 4 * 1024) : m_file(file)
+    {
+        m_write_buffer_size = buffer_size;
+        m_write_buffer = new char[m_write_buffer_size]();
+
+        m_read_buffer_size = buffer_size;
+        m_read_buffer = new char[m_write_buffer_size]();
+
+        refill_buffer();
+    }
+
+    ~stream_impl()
+    {
+        if (m_read_buffer) delete m_read_buffer;
+        if (m_write_buffer) delete m_write_buffer;
+    }
+
+    size_t read(uint32_t size, char* data)
+    {
+        size_t bytes_read = 0;
+        while (bytes_read < size) {
+            if (m_read_pos == m_read_buffer_size) {
+                refill_buffer();
+                if (m_read_pos == m_read_buffer_size) {
+                    break; // End of file
+                }
+            }
+            data[bytes_read++] = m_read_buffer[m_read_pos++];
+        }
+        return bytes_read;
+    }
+
+    size_t write(uint32_t size, const char* data)
+    {
+        size_t bytes_written = 0;
+        while (bytes_written < size) {
+            if (m_write_pos == m_write_buffer_size) {
+                write_buffer();
+            }
+            m_write_buffer[m_write_pos++] = data[bytes_written++];
+        }
+        return bytes_written;
+    }
+
+    size_t seek(size_t offset, int whence)
+    {
+        flush(); // Flush the write buffer before seeking
+
+        int result = fseek(m_file, (long)offset, whence);
+
+        m_file_pos = result;
+        m_read_pos = m_read_buffer_size; // Invalidate the read buffer
+
+        return result;
+    }
+
+    void flush()
+    {
+        write_buffer();
+    }
+
+private:
+    void refill_buffer()
+    {
+        size_t result = fread(m_read_buffer, 1, m_read_buffer_size, m_file);
+        m_read_pos = 0;
+        m_file_pos += result;
+    }
+
+    void write_buffer()
+    {
+        size_t result = fwrite(m_write_buffer, 1, m_write_pos, m_file);
+        fflush(m_file);
+        m_write_pos = 0;
+        m_file_pos += result;
+    }
+
+private:
+    FILE* m_file = nullptr;
+    size_t      m_file_pos = 0;
+
+    char* m_read_buffer = nullptr;
+    size_t      m_read_buffer_size = 0;
+    size_t      m_read_pos = 0;
+
+    char* m_write_buffer = nullptr;
+    size_t      m_write_buffer_size = 0;
+    size_t      m_write_pos = 0;
+};
+
+
+
+filestream* filestream::open(const char* path, const char* mode)
+{
+    FILE* file = fopen(path, mode);
+    if (file == nullptr)
+        return nullptr;
+
+    stream_impl* impl = new stream_impl(file);
+    filestream* fstream = new filestream(impl);
+
+    return fstream;
+}
+
+filestream* filestream::open_rb(const char* path)
+{
+    return filestream::open(path, "rb");
+}
+
+filestream* filestream::open_wb(const char* path)
+{
+    return filestream::open(path, "wb+");
+}
+
+
+filestream::filestream(stream_impl* imp)
+    :m_impl(imp)
+{
+}
+
+filestream::~filestream()
+{
+    delete m_impl;
+}
+
+
+
+uint32_t  filestream::read(uint32_t size, void* out_data)
+{
+    return (uint32_t)m_impl->read(size, (char*)out_data);
+}
+
+uint32_t  filestream::write(uint32_t size, const void* in_data)
+{
+    return (uint32_t)m_impl->write(size, (char*)in_data);
+}
+
+void filestream::flush()
+{
+    m_impl->flush();
+}
+
+void filestream::seek(uint32_t offset, int whence)
+{
+    m_impl->seek(offset, whence);
+}
 
 
 static const char _guid_digits[] = "0123456789abcdef";

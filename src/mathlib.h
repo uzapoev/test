@@ -235,15 +235,36 @@ namespace math
         template<unsigned N> inline uint16_t  encode_snorm(float    x)  { return (x < 0) | (encode_unorm<N - 1>(x < 0 ? -x : x) << 1); }
         template<unsigned N> inline float     decode_snorm(uint16_t x)  { return decode_unorm<N - 1>(x >> 1) * (x & 1 ? -1 : 1); }
 
-        inline uint8_t   encode8_unorm(float    x)                      { return uint8_t(int(x * 255.f + 0.5f)); }
-        inline float     decode8_unorm(uint8_t  x)                      { return x / 255.f; }
-        inline uint8_t   encode8_snorm(float    x)                      { return uint8_t(int(x * 127.f + (x > 0 ? 0.5f : -0.5f))); }
-        inline float     decode8_snorm(uint8_t  x)                      { float f = x / 127.f; return f <= -1 ? -1.f : (f >= 1 ? 1.f : f); }
+        inline uint8_t  encode8_unorm(float    x)                       { return uint8_t(int(x * 255.f + 0.5f)); }
+        inline float    decode8_unorm(uint8_t  x)                       { return x / 255.f; }
+        inline uint8_t  encode8_snorm(float    x)                       { return uint8_t(int(x * 127.f + (x > 0 ? 0.5f : -0.5f))); }
+        inline float    decode8_snorm(uint8_t  x)                       { float f = x / 127.f; return f <= -1 ? -1.f : (f >= 1 ? 1.f : f); }
 
-        inline uint16_t  encode16_unorm(float    x)                     { return encode_unorm<16>(x); }
-        inline float     decode16_unorm(uint16_t x)                     { return decode_unorm<16>(x); }
-        inline uint16_t  encode16_snorm(float    x)                     { return encode_snorm<16>(x); }
-        inline float     decode16_snorm(uint16_t x)                     { return decode_snorm<16>(x); }
+        inline uint16_t encode16_unorm(float    x)                      { return encode_unorm<16>(x); }
+        inline float    decode16_unorm(uint16_t x)                      { return decode_unorm<16>(x); }
+        inline uint16_t encode16_snorm(float    x)                      { return encode_snorm<16>(x); }
+        inline float    decode16_snorm(uint16_t x)                      { return decode_snorm<16>(x); }
+
+
+        // encode each float in 10 bit
+        static uint32_t encode_float3_snorm(float3 v)
+        {
+            int x = (v.x + 1.0f) * 512;
+            int y = (v.y + 1.0f) * 512;
+            int z = (v.z + 1.0f) * 512;
+            return (x & 0x3FF) | ((y & 0x3FF) << 10) | ((z & 0x3FF) << 20);
+        }
+
+        static float3   decode_float3_snorm(uint32_t v)
+        {
+            float x = ((v >> 0) & 0x3FF) / 1024.0f;
+            float y = ((v >> 10) & 0x3FF) / 1024.0f;
+            float z = ((v >> 20) & 0x3FF) / 1024.0f;
+
+            return { x * 2.0f - 1.0f,
+                     y * 2.0f - 1.0f,
+                     z * 2.0f - 1.0f };
+        }
 
   //      void            encode_quat(uint32_t& out, float x, float y, float z, float w);
   //      void            decode_quat(float& x, float& y, float& z, float& w, uint32_t in);
@@ -648,22 +669,22 @@ struct bbox
 
         bbox result;
 
-        result.points[0] = math::make_vec4(bmin.x, bmax.y, bmax.z, 1.0f);
-        result.points[1] = math::make_vec4(bmax.x, bmax.y, bmax.z, 1.0f);
-        result.points[2] = math::make_vec4(bmin.x, bmin.y, bmax.z, 1.0f);
-        result.points[3] = math::make_vec4(bmax.x, bmin.y, bmax.z, 1.0f);
-        result.points[4] = math::make_vec4(bmin.x, bmax.y, bmin.z, 1.0f);
-        result.points[5] = math::make_vec4(bmax.x, bmax.y, bmin.z, 1.0f);
-        result.points[6] = math::make_vec4(bmin.x, bmin.y, bmin.z, 1.0f);
-        result.points[7] = math::make_vec4(bmax.x, bmin.y, bmin.z, 1.0f);
+        result.corners[0] = math::make_vec4(bmin.x, bmax.y, bmax.z, 1.0f);
+        result.corners[1] = math::make_vec4(bmax.x, bmax.y, bmax.z, 1.0f);
+        result.corners[2] = math::make_vec4(bmin.x, bmin.y, bmax.z, 1.0f);
+        result.corners[3] = math::make_vec4(bmax.x, bmin.y, bmax.z, 1.0f);
+        result.corners[4] = math::make_vec4(bmin.x, bmax.y, bmin.z, 1.0f);
+        result.corners[5] = math::make_vec4(bmax.x, bmax.y, bmin.z, 1.0f);
+        result.corners[6] = math::make_vec4(bmin.x, bmin.y, bmin.z, 1.0f);
+        result.corners[7] = math::make_vec4(bmax.x, bmin.y, bmin.z, 1.0f);
 
         for (int i = 0; i < 8; ++i)
-            result.points[i] = mat4::mul(transform, result.points[i]);
+            result.corners[i] = mat4::mul(transform, result.corners[i]);
 
         return result;
     }
 
-    vec4 points[8];
+    vec4 corners[8];
 };
 
 
@@ -743,14 +764,14 @@ struct frustum
         {
             const plane& p = f.planes[i];
             int out = 0;
-            out += ((p.dot(bbox.points[0]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.points[1]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.points[2]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.points[3]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.points[4]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.points[5]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.points[6]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.points[7]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[0]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[1]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[2]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[3]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[4]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[5]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[6]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bbox.corners[7]) < 0.0) ? 1 : 0);
             if (out == 8)
                 return false;
             total += out;
@@ -1032,5 +1053,3 @@ void toTangentFrame(const vec4 &q, out highp vec3 n, out highp vec3 t) {
 }*/
 
 #endif  // __MATHLIB_H__
-
- 

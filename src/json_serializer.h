@@ -284,6 +284,19 @@ namespace json
     }*/
 
     template<class T>
+    inline T from_json_string(char* ptr, size_t size)
+    {
+        T object;
+
+        JsonAllocator allocator;
+        JsonValue value;
+        char* endptr = nullptr;
+        auto r = jsonParse(ptr, &endptr, &value, allocator);
+        deserialize2(object, value);
+        return std::move(object);
+    }
+
+    template<class T>
     inline T from_json_string(const std::string& jstr)
     {
         T object;

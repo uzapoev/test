@@ -40,48 +40,7 @@ class bundle
 };
 */
 
-struct filestream
-{
-    static filestream* open(const char* path, const char* mode);
-    static filestream* open_rb(const char* path);   // binary read only 
-    static filestream* open_wb(const char* path);   // binary write
 
-    uint32_t    read(uint32_t size, void * out_data);
-    uint32_t    write(uint32_t size, const void * in_data);
-    void        seek(uint32_t offset, int whence);
-    void        flush();
-
-    template<class T> 
-    inline T    read()        { T res = {}; read(sizeof(T), &res); return res;   }
-
-    inline char* read_string(char* data) {
-        data[0] = '\0';
-        uint16_t len = read<uint16_t>();
-        read(len, data);
-        return data;
-    }
-
-    template<class T> 
-    inline void write(T v)    { write(sizeof(T), &v);    }
-
-    inline void write_chunk_info(uint16_t type, uint16_t size) { 
-        write(type);
-        write(size);
-    }
-
-    inline void write_chunk(uint16_t type, uint16_t size, const char * data) { 
-        write(type);
-        write(size);
-        write(size, data);
-    }
-
-    inline void write_string(uint16_t size, const char* data) {
-        write(size);
-        write(size, data);
-    }
-
-    struct stream_impl * m_impl;
-};
 
 
 class resource
@@ -231,7 +190,7 @@ private:
     gfx_shader_t*                                                   m_default_shader = nullptr;
     gfx_pipeline_t *                                                m_default_pipeline = nullptr;
 
-    gfx_mesh_pool_t                                                 m_mesh_pool;
+    gfx_mesh_pool_t                                                 m_mesh_pool = {};
 
     std::unordered_set<interned_string>                             m_dirs;
     std::unordered_map<interned_string, std::filesystem::path>      m_guid_2_path;
@@ -252,16 +211,29 @@ struct vertex
     vec4    normal;
     vec4    tangent;
     vec4    uv;
+
 };
+
+// 
+// packUnorm2x16:
+
+// int    packSnorm3x10(float3 v);  // 10 bit per each component   clamp(f / 1023.0, -1.0, 1.0)
+// int    packSnorm2x16(float2 v);  // 16 bit per each component,  clamp(f / 32727.0, -1.0, 1.0)
+// 
+// float3 unpackNormal(int);
+
+// vertex.pos_tbn.xy = encode_float3_int(float3)
+// vertex.pos_tbn.z = packNormal(v.normal);
+// vertex.pos_tbn.w = packNormal(v.tangent);
 
 struct vertex_compressed
 {
-    int64_t position;   // 16+16+16 - pos, 16 - color?
+    int64_t position;   // 16+16+16 - pos, 16 - ?
     int64_t uv01;       // 8
-    int64_t tbn;        // 8 quaternion
-    int64_t payload;    // 8
+    int64_t tbn;        // 8 quaternion or int32_t norm, tangent(10bit per component, 2 bit not used)
+    int64_t payload;    // 8+8+8+8 - indexes, 8+8+8+8 - weights
 
-    //int4  pos_tbn;    128bit:  16+16+16 - pos, 16 - color, 16+16+16+16 - tbn quat
+    //int4  pos_tbn;    128bit:  xy - pos, zw - normal tangent
     //int4  uv_payload; 128bit:  16+16 - uv0, 16+16 - uv1, 32+32 - payload
                                 //  8+8+8+8 = bone indexes
                                 //  8+8+8+8 = bone weights
@@ -270,9 +242,11 @@ struct vertex_compressed
 extern size_t   read_file_data(const char* path, char** data);
 extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vsize, uint32_t isize, gfx_mesh_pool_t* pool);
 
+//extern bool   read_mesh_meta(char* data, size_t size, int *vertex_size, int * index_size);
 extern bool     create_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t* pool, const char* path, gfx_mesh_t* out_mesh);
 extern void     create_mesh_from_file_data(gfx_context_t* ctx, gfx_mesh_pool_t* pool, const char* name, char* data, size_t size, gfx_mesh_t* out_mesh);
 
+//extern bool   read_texture_meta(char* data, size_t size, int * w, int * h, int * d, int * mips, gfx_pizel_format * format);
 extern void     create_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_texture_t** out_texture);
 extern void     create_texture_from_file_data(gfx_context_t* ctx, char* data, size_t size, gfx_texture_t** out_texture);
 

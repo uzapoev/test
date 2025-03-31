@@ -10,7 +10,6 @@
 #include "../mathlib.h"
 #include "../render_manager.h"
 #include "../resource_manager.h"
-#include "../json_serializer.h"
 
 
 enum component_type : uint16_t
@@ -21,7 +20,7 @@ enum component_type : uint16_t
     component_node_end,
 
     component_transform,    // 
-    component_renderer,     // mesh, materials, lightmap, renderparams(cast shadow, etc)
+    component_renderer,     // mesh, materials, lightmap, renderparams(cast shadow, etc), occluder
     component_lodgroup,     // level of details
     component_streaming,    // streaming data
     component_collider,     // box, sphere, capsule, mesh
@@ -34,6 +33,8 @@ enum component_type : uint16_t
     component_custom,       // user data component
 };
 
+
+// https://github.com/suVrik/acceleration_structure_benchmark
 struct itree{};
 struct kdtree   : itree {};
 struct octree   : itree {};
@@ -64,7 +65,8 @@ struct camera
     float m_aspect      = 4.0f / 3.0f;
     float m_near        = 0.1f;
     float m_far         = 50.0f;
-    vec4 _fanf          = { 45.0f , 4.0f / 3.0f ,0.1f , 50.0f };// Fow,Aspect,Near,Far
+
+    vec4 _fanf          = { 45.0f , 4.0f / 3.0f ,0.1f , 50.0f };// fow, aspect, near, far
     quat _rot           = quat::identity();
     vec3 _pos           = math::Zero; 
     vec3 _target        = math::Backward;
@@ -89,11 +91,16 @@ namespace components
 
     struct renderer : icomponent
     {
-        interned_string         mesh_guid;       // mesh guid
-        interned_string         material_guid;   // material guid
-        interned_string         lightmap_guid;   // lightmap guid
+        interned_string         mesh_guid;          // mesh guid
+        interned_string         material_guid;      // material guid
+        interned_string         lightmap_guid;      // lightmap guid
         vec4                    lightmap_scale_offset;
+
+        bool                    is_in_lodgroup;    //
+        interned_string         occulder_guid;
     };
+
+    struct occluder : icomponent        { };
 
     struct lodgroup : icomponent
     {
@@ -136,42 +143,6 @@ namespace handlers
 };
 
 
-JsonSerializeExternal(vec2, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y));
-
-JsonSerializeExternal(vec3, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y), 
-    SerializeFieldWithKey("z", z));
-
-JsonSerializeExternal(vec4, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y), 
-    SerializeFieldWithKey("z", z),
-    SerializeFieldWithKey("w", w));
-
-JsonSerializeExternal(quat, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y), 
-    SerializeFieldWithKey("z", z), 
-    SerializeFieldWithKey("w", w));
-
-JsonSerializeExternal(components::lodgroup,
-    SerializeFieldWithKey("mesh", renderers));
-
-JsonSerializeExternal(components::renderer,
-    SerializeFieldWithKey("mesh", mesh_guid),
-    SerializeFieldWithKey("material", material_guid),
-    SerializeFieldWithKey("lightmap", lightmap_guid),
-    SerializeFieldWithKey("lightmapScaleOffset", lightmap_scale_offset));
-
-JsonSerializeExternal(components::transform,
-    SerializeFieldWithKey("position", position),
-    SerializeFieldWithKey("scale", scale),
-    SerializeFieldWithKey("rotation", rotation)
-);
-
 struct node
 {
     interned_string         name;
@@ -184,31 +155,24 @@ struct node
 
   //  std::vector<components::icomponent*> m_components;
     std::vector<node>       childs;
-
-
-    JsonSerialize(node,
-        SerializeFieldWithKey("name", name),
-        SerializeFieldWithKey("tag", tag),
-        SerializeFieldWithKey("transform", transform),
-        SerializeFieldWithKey("renderer", renderer),
-        SerializeFieldWithKey("childs", childs)
-    );
 };
 
 
 class scene
 {
-    friend class scene_reader_json;
-    friend class scene_reader_xml;
+    friend struct scene_reader_json;
+    friend struct scene_reader_xml;
 public:
     static scene                            create_from_json_file(const std::string& path);
     static scene                            create_from_xml_file(const std::string& path);
+    static scene                            create_from_file(const std::string& path);
 
 public:
     void                                    load(const std::string& path);
     void                                    save(const std::string& path);
 
     void                                    init();
+    void                                    clear();
     void                                    update();
     void                                    draw(camera & cam);
 
@@ -218,12 +182,14 @@ public:
     void                                    traverse(node &root, std::function<void(node&)> &cb);
 
     const std::vector<renderer_t*> &        cull(const mat4& mv);
+    void                                    make_instances(const std::vector<renderer_t*>&);
     std::vector<pass>                       sort_by_passes(const std::vector<renderer_t> &);
 
 public:
     itree *                                 m_tree;
     std::vector<renderer_t>                 m_renderers;
     std::vector<renderer_t*>                m_visibles;
+    std::unordered_map<gfx_mesh_t*, int>    m_instances;
 
     std::vector<node>                       m_nodes;
     std::vector<node*>                      m_nodes_flat_list;
@@ -231,12 +197,6 @@ public:
     //scene resources
     std::unordered_set<interned_string>     m_meshes;
     std::unordered_set<interned_string>     m_materials;
-
-private:
-    JsonSerialize(scene,    SerializeFieldWithKey("childs",     m_nodes),
-                            SerializeFieldWithKey("meshes",     m_meshes),
-                            SerializeFieldWithKey("materials",  m_materials)
-    );
 };
 
 #endif
