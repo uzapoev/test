@@ -4,6 +4,46 @@
 #include <string>
 #include <vector>
 
+static constexpr char* shader_target_spirv          = "spirv";
+static constexpr char* shader_target_metal          = "metal";
+static constexpr char* shader_target_wsl            = "wgsl";
+static constexpr char* shader_target_glsl           = "glsl";
+static constexpr char* shader_target_dxil           = "dxil";
+
+//generic
+static constexpr char* pragma_vertex_name           = "vertex";
+static constexpr char* pragma_fragment_name         = "fragment";
+static constexpr char* pragma_compute_name          = "compute";
+
+// exotique                                                   
+static constexpr char* pragma_hull_name             = "hull";
+static constexpr char* pragma_domain_name           = "domain";
+static constexpr char* pragma_geometry_name         = "geometry";
+
+// ray tracing 
+static constexpr char* pragma_ray_gen_name          = "ray_gen";
+static constexpr char* pragma_ray_intersect_name    = "ray_intersect";
+static constexpr char* pragma_ray_anyhit_name       = "ray_anyhit";
+static constexpr char* pragma_ray_closesthit_name   = "ray_closesthit";
+static constexpr char* pragma_ray_miss_name         = "ray_miss";
+static constexpr char* pragma_ray_callable_name     = "ray_callable";
+
+// mesh shaders
+static constexpr char* pragma_mesh_name             = "mesh";
+static constexpr char* pragma_amplification_name    = "amplification";
+
+
+typedef struct shader_blob_t {
+    int*            sizes;
+    char**          blobs;
+    const char**    stages;
+} shader_blob_t;
+
+extern int  asset_shader_compile(const char* name, const char* data, uint32_t size, const char* target, char** out_blobs, int* out_sizes, const char** out_stages);
+extern void asset_shader_blob_free(shader_blob_t * blob);
+extern void save_sader_asset(const char * path, shader_blob_t* stages, uint32_t count);
+
+
 class AssetShader
 {
 public:
@@ -34,25 +74,15 @@ public:
         fvk_invert_y
     };
 
-    struct ShaderEntry
-    {
-        ShaderStage stage;
-        std::string entry;
-        std::string blob;
-        std::string error;
-    };
-
 public:
     AssetShader();
 
-    static const char* find_pragma_entry(const char* data, const char* stage_name, char* entry_buffer = nullptr, size_t buffer_size = 0);
     static void export_shader(const std::string& path, const std::string& dst_path);
 
 public:
    // static bool compile_shader(const void *data, size_t size, ShaderStage stage, char * entry, std::string *blob, std::string * error);
     static bool compile_shader(const std::string &path, ShaderStage stage, const std::string & entry, std::string *blob, std::string * error);
     static bool compile_shader_form_data(const char *data, size_t size, const std::wstring & include_path, ShaderStage stage, const std::string &entry, std::string *blob, std::string * error);
- //   static bool compile_shader2(const std::string &path, std::vector<ShaderEntry> &shaders);
 };
 
 #endif

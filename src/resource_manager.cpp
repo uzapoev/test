@@ -1,18 +1,20 @@
 #include "resource_manager.h"
 
-#include <algorithm>
-#include <set>
+//#include <algorithm>
+//#include <set>
 
 #include "render_manager.h"
 #include "json_serializer.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb/stb_image.h"
+
+#include "resource_loader.h"
+//#define STB_IMAGE_IMPLEMENTATION
+//#include "stb/stb_image.h"
 
 
 static const std::filesystem::path mesh_extension(".mesh");
 
-size_t filesize(FILE* file)
+static size_t filesize(FILE* file)
 {
     fseek(file, 0, SEEK_END);
     size_t size = ftell(file);
@@ -21,8 +23,7 @@ size_t filesize(FILE* file)
 }
 
 
-
-texture::texture(interned_string guid, interned_string name, gfx_texture_t* tex)
+texture::texture( gfx_texture_t* tex, interned_string guid, interned_string name)
     : resource(guid, name)
     , m_texture(tex)
 {   
@@ -35,6 +36,7 @@ rendermesh::rendermesh(interned_string guid, interned_string name, gfx_mesh_t me
 }
 
 
+/*
 
 size_t filedata2(const char* path, char** buff)
 {
@@ -57,6 +59,84 @@ size_t filedata2(const char* path, char** buff)
     }
     *buff = (char*)g_ptr;
     return size;
+}*/
+
+texture_manager_prototype::texture_manager_prototype(gfx_context_t * ctx, class resource_manager* rm)
+:m_ctx(ctx), m_filesystem(rm)
+{
+}
+
+texture * texture_manager_prototype::load(const char* guid, bool async, texture_load_desc_t* desc)
+{
+    if(guid == nullptr) {
+        debug::log_error("texture guid or path is null");
+        return m_default_texture;
+    }
+
+    auto it = m_textures.find(guid);
+    if(it != m_textures.end()) {
+        return it->second;
+    }
+
+    auto path = m_filesystem->find(guid);
+    if(path.empty()) {
+        debug::log_error("texture_manager::load(%s) - file not find", guid);
+        return m_default_texture;
+    }
+
+    texture* result = new texture(nullptr, guid, path);
+    m_textures.emplace(guid, result);
+
+    auto load_func = [&, result] {
+        gfx_texture_t* handle = nullptr;
+        load_texture_from_file_path(m_ctx, path.c_str(), &handle);
+        result->update_handle(handle);
+    };
+    load_func();
+
+ /*   if(!async)
+        load_func();
+    else
+        //thread_pool->dispatch(load_func).on_finish(call_thread, []{upload()});*/
+    return result;
+}
+
+void texture_manager_prototype::set_memory_limit(uint32_t target_memory)
+{
+}
+
+void texture_manager_prototype::clear()
+{
+    m_mutex.lock();
+    m_erase_list.clear();
+    m_load_queue.clear();
+    for(auto it = m_textures.begin(); it != m_textures.end(); ++it)
+    {
+        texture * tex = it->second;
+        if(tex->refcount() > 0)
+        {
+            debug::log_error("texture_manager::clear() try to unload used texture %s  %s", tex->name().data(), tex->guid().data());
+        }
+        gfx_destroy_texture(m_ctx, tex->texture_handle());
+        delete tex;
+    }
+    m_textures.clear();
+    m_mutex.unlock();
+}
+
+void texture_manager_prototype::purge()
+{
+    m_erase_list.clear();
+    for(auto it = m_textures.begin(); it != m_textures.end(); ++it)
+    {
+        if(it->second->refcount() <= 0)
+            m_erase_list.push_back(it->second);
+    }
+
+    for(auto it = m_erase_list.begin(); it != m_erase_list.end(); ++it)
+    {
+        m_erase_list.erase(it);
+    }
 }
 
 
@@ -84,34 +164,12 @@ static bool has_guid_in_name(const std::filesystem::path & filename, std::string
 }
 
 
-gfx_mesh_pool_t create_mesh_pool(gfx_context_t * ctx, uint32_t vb_size, uint32_t ib_size)
-{
-    gfx_mesh_pool_t result = {};
-
-    result.index_buffer_size = 16 * 1024 * 1024;
-
-    gfx_buffer_desc_t vb_desc = {};
-        vb_desc.label = "mesh_pool_vertex_buffer";
-        vb_desc.usage = gfx_buffer_usage_vertex;
-        vb_desc.size = vb_size;
-    result.vertex_buffer = gfx_create_buffer2(ctx, &vb_desc);
-    result.vertex_buffer_size = vb_size;
-
-    gfx_buffer_desc_t ib_desc = {};
-        ib_desc.label = "mesh_pool_index_buffer";
-        ib_desc.usage = gfx_buffer_usage_index;
-        ib_desc.size = ib_size;
-    result.index_buffer = gfx_create_buffer2(ctx, &ib_desc);
-    result.index_buffer_size = ib_size;
-    //result.index_allocator = 
-    return result;
-}
-
 void resource_manager::init()
 {
-    create_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
+    load_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
 
-    m_mesh_pool = create_mesh_pool(m_ctx, 256*1024*1024, 16*1024*1024);
+    create_mesh_pool(m_ctx, (256 + 128)*1024*1024, (16 + 8)*1024*1024, &m_mesh_pool);
+  //  create_mesh_pool(m_ctx, 256*1024*1024, 16*1024*1024, &m_mesh_pool1);
 
     gfx_vertex_attribute attributes[] = {
         { 0, 0, gfx_vertex_format_float4,   0                   },
@@ -137,8 +195,8 @@ void resource_manager::init()
         piplene_desc.render_states.blend.color_dst = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
     m_default_pipeline = gfx_create_pipeline2(m_ctx, &piplene_desc);
 
-    m_meshes.reserve(65536);
-    m_textures.reserve(65536);
+    m_meshes.reserve(1024);
+    m_textures.reserve(1024);
 }
 
 void resource_manager::mount(const std::string & dir)
@@ -244,23 +302,7 @@ std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * nam
 
 texture* resource_manager::load_texture(const char* name)
 {
-    auto it = m_textures.find(name);
-    if (it != m_textures.end())
-    {
-        return it->second;
-    }
-
-    auto path = find(name);
-    if (!path.empty())
-    {
-        gfx_texture_t* handle = nullptr;
-        create_texture_from_file_path(m_ctx, path.c_str(), &handle);
-
-        texture * result = new texture(name, path, handle);
-        m_textures.emplace(name, result);
-        return result;
-    }
-    return nullptr;
+    return m_texture_manager.load(name, false, nullptr);
 }
 
 rendermesh* resource_manager::load_mesh(const char* name)
@@ -279,7 +321,7 @@ rendermesh* resource_manager::load_mesh(const char* name)
     {
         gfx_mesh_t handle = {};
 
-        if (!create_mesh_from_file_path(m_ctx, &m_mesh_pool, path.data(), &handle))
+        if (!load_mesh_from_file_path(m_ctx, &m_mesh_pool, path.data(), &handle))
             return nullptr;
 
         rendermesh * mesh = new rendermesh(name, path, handle);
@@ -288,34 +330,7 @@ rendermesh* resource_manager::load_mesh(const char* name)
     }
     return nullptr;
 }
-/*
-std::shared_ptr<gfx_texture_t> resource_manager::load_texture(const char * name)
-{
-    auto it = m_textures.find(name);
-    if(it != m_textures.end())
-    {
-        return it->second;
-    }
 
-    auto path = find(name);
-    if (!path.empty())
-    {
-        gfx_texture_t * texture = nullptr;
-        create_texture_from_file_path(m_ctx, path.c_str(), &texture);
-        if(texture == nullptr)
-        {
-            printf("\nerror while textureloading %s", name);
-            return nullptr;
-        }
-
-        std::shared_ptr<gfx_texture_t> result(texture);
-        m_textures.emplace(name, result);
-
-        return result;
-    }
-
-    return nullptr;
-}*/
 
 void resource_manager::load_shader(const char* path)
 {
@@ -323,17 +338,17 @@ void resource_manager::load_shader(const char* path)
 
 struct material_descriptor
 {
-    interned_string                               shader;
-    std::vector< shader_slot<interned_string>>    textures;
+    interned_string                             shader;
+    std::vector< shader_slot<interned_string>>  textures;
     std::vector< shader_slot<vec4>  >           vectors;
     std::vector< shader_slot<float> >           scalars;
     
-        JsonSerialize(material_descriptor,
-            SerializeFieldWithKey("shader", shader),
-            SerializeFieldWithKey("textures", textures),
-            SerializeFieldWithKey("vectors", vectors),
-            SerializeFieldWithKey("scalars", scalars)
-        );
+    JsonSerialize(material_descriptor,
+        SerializeFieldWithKey("shader", shader),
+        SerializeFieldWithKey("textures", textures),
+        SerializeFieldWithKey("vectors", vectors),
+        SerializeFieldWithKey("scalars", scalars)
+    );
 };
 
 JsonSerializeExternal(shader_slot<vec4>, SerializeFieldWithKey("key", key), SerializeFieldWithKey("value", value));
@@ -374,8 +389,9 @@ gfx_material_instance_t* resource_manager::load_material_instance(const std::str
     {
         auto tex = load_texture(descriptor.textures[i].value.c_str());
         material->textures[i].key = descriptor.textures[i].key;
-        material->textures[i].value = tex  ? tex->texture_() : nullptr;
-    }
+        material->textures[i].guid = descriptor.textures[i].value;
+        material->textures[i].value = tex  ? tex->texture_handle() : nullptr;
+    }/**/
 
     for (size_t i = 0; i < descriptor.vectors.size(); ++i)
     {
@@ -397,11 +413,13 @@ void resource_manager::directory_changed(std::filesystem::path &path)
 {
 }
 
-
+#if 0
 /*
 texture.b5a0953624bca8644be523fa1c4cada7.png
 mesh.a59f1c021a3d7e942ad5eeddb30a16c7.fbx
 */
+
+/*
 #pragma pack(push, 1)
 struct mesh_header_t
 {
@@ -463,7 +481,6 @@ size_t read_file_data(const char* path, char** data_out)
     return (uint32_t)size;
 }
 
-
 void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, gfx_mesh_pool_t* pool)
 {
     //   pool->vertex_allocator = offset_alocator_create(vertex_buffer_size);
@@ -474,13 +491,15 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
         vb.size     = vertex_buffer_size;
         vb.usage    = gfx_buffer_usage_vertex;
     pool->vertex_buffer = gfx_create_buffer2(ctx, &vb);
+    pool->vertex_buffer_size = vertex_buffer_size;
 
     gfx_buffer_desc_t ib = {};
-        vb.data     = nullptr;
-        vb.mapped   = false;
-        vb.size     = index_buffer_size;
-        vb.usage    = gfx_buffer_usage_index;
+        ib.data     = nullptr;
+        ib.mapped   = false;
+        ib.size     = index_buffer_size;
+        ib.usage    = gfx_buffer_usage_index;
     pool->index_buffer = gfx_create_buffer2(ctx, &ib);
+    pool->index_buffer_size = index_buffer_size;
 }
 
 bool create_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t * pool, const char * path, gfx_mesh_t* out_mesh)
@@ -584,7 +603,7 @@ void create_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, cons
 
 #ifndef MAKEFOURCC
 #define MAKEFOURCC(ch0, ch1, ch2, ch3) ((uint32_t)(ch0) | ((uint32_t)(ch1) << 8) | ((uint32_t)(ch2) << 16) | ((uint32_t)(ch3) << 24 ))
-#endif /* defined(MAKEFOURCC) */
+#endif
 
 static const uint32_t dds_magic  = 542327876;   // MAKEFOURCC('D', 'D', 'S', ' ');
 static const uint32_t astc_magic = 0x5CA1AB13;
@@ -680,7 +699,7 @@ void create_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_tex
     size_t size = read_file_data(path, &data);
 
     if (size != 0)
-        create_texture_from_file_data(ctx, data, size, out_texture);
+        load_texture_from_file_data(ctx, data, size, out_texture);
 
     free(data);
 
@@ -692,7 +711,7 @@ void create_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size
 {
     uint32_t magik = *(uint32_t*)data;
 
-    bool stbi = false;
+    bool free_stbi_buffer = false;
     gfx_texture_desc_t desc = {};
     switch (magik)
     {
@@ -805,7 +824,7 @@ void create_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size
                 memmove(layer_ptr, data_ptr, layersize);
                 layer_ptr += layersize;
                 offset += layersize + 4;
-            } /**/
+            } 
 
             desc.width      = header->width;
             desc.height     = header->height;
@@ -815,21 +834,33 @@ void create_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size
 
         default: {
             int channels_in_file = 0;
-            desc.depth      = 1;
-            desc.mip_levels = 1;
-            desc.format     = gfx_pixel_format_rgba8;
-            desc.data       = stbi_load_from_memory((stbi_uc*)data, (int)size, (int*)&desc.width, (int*)&desc.height, &channels_in_file, 4);
-            stbi = desc.data != nullptr;
+            desc.depth       = 1;
+            desc.mip_levels  = 1;
+            desc.format      = gfx_pixel_format_rgba8;
+            desc.data        = stbi_load_from_memory((stbi_uc*)data, (int)size, (int*)&desc.width, (int*)&desc.height, &channels_in_file, 4);
+            free_stbi_buffer = desc.data != nullptr;
         };
     }
-    if(desc.data != nullptr)
+
+    if(desc.data != nullptr && desc.mip_levels > 1)
     {
+        int target_width = 256;
+        int offset = 0;
+        while (desc.width > target_width)
+        {
+            offset += gfx_utils_image_layer_size(desc.width, desc.height, desc.depth, desc.format);
+            desc.width = desc.width >> 1;
+            desc.height = desc.height >> 1;
+            desc.mip_levels--;
+        }
+        desc.data = (char*)desc.data + offset;
+
         desc.type = gfx_texture2d;
         gfx_texture_t* texture = gfx_create_texture2(ctx, &desc);
         *out_texture = texture;
     }
 
-    if(stbi)
+    if(free_stbi_buffer)
         stbi_image_free(desc.data);
 }
 
@@ -893,7 +924,7 @@ void create_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shad
     free(data);
 
     if (*out_shader == nullptr)
-        printf("failed to create: %s shader", path);
+        debug::log_error("failed to create: %s shader", path);
 }
 
 const char* vs = R"( 
@@ -955,7 +986,7 @@ void create_shader_from_file_data(gfx_context_t* ctx, const char * name, char* d
 
     /**/
     uint32_t uniform_count = 0;
-    gfx_uniform_t uniforms[128] = {};
+    gfx_uniform_t uniforms[64] = {};
 
     gfx_shader_reflection(vs_blob.c_str(), (uint32_t)vs_blob.size(), uniforms, &uniform_count);
     gfx_shader_reflection(ps_blob.c_str(), (uint32_t)ps_blob.size(), &uniforms[uniform_count], &uniform_count);
@@ -972,7 +1003,7 @@ void create_shader_from_file_data(gfx_context_t* ctx, const char * name, char* d
     };
 
     gfx_shader_desc_t shader_desc = {};
-        shader_desc.label = "name";
+        shader_desc.label = name? name: "name";
         shader_desc.stages = sdata;
         shader_desc.stages_count = _countof(sdata);
 
@@ -999,3 +1030,5 @@ void create_material_from_file_data(gfx_context_t* ctx, char* data, size_t size,
   //  std::string jstr(data, size);
   //  json::from_json<gfx_material_instance_t>(jstr);
 }
+
+#endif

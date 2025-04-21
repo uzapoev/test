@@ -35,12 +35,14 @@ def makedirs_silent(root):
 if __name__ == "__main__":
 
     build_dir = resolve_path("./build")
-    rmtree_silent(build_dir)
-    makedirs_silent(build_dir)
+#    rmtree_silent(build_dir)
+#    makedirs_silent(build_dir)
     os.chdir(build_dir)
+    
+    print(os.path.expandvars("-DCMAKE_TOOLCHAIN_FILE=$EMSCRIPTEN/cmake/Modules/Platform/Emscripten.cmake"))
 
     check_call([
-     "cmake",
+     "cmake ",
      os.path.expandvars("-DCMAKE_TOOLCHAIN_FILE=$EMSCRIPTEN/cmake/Modules/Platform/Emscripten.cmake"),
      "-DCMAKE_BUILD_TYPE=Release",
      "-DCMAKE_MAKE_PROGRAM=mingw32-make",
@@ -48,4 +50,5 @@ if __name__ == "__main__":
      ".."
     ])
 
-    check_call(["mingw32-make"])
+#    check_call(["cmake --build ."])
+#    check_call(["mingw32-make"])
