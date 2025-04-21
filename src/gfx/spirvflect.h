@@ -12,6 +12,15 @@
 #define SPV_MAX_DATA_TYPES          (256)
 #define SPV_MAX_UNIFORM_FIELDS      (32)
 
+/*
+*   typedef enum spirvflect_uniform_type {
+*       spirvflect_buffer,
+*       spirvflect_texture,
+*       spirvflect_sampler,
+*       spirvflect_storage,
+* } spirvflect_uniform_type;
+* */
+
 
 typedef struct spirvflect_uniform_t
 {
@@ -24,11 +33,17 @@ typedef struct spirvflect_uniform_t
     int16_t                 size;
     int16_t                 field_count;
 
-    struct{
+    int16_t                 is_storage;
+
+    struct {
         SpvDim              dimension;
         SpvImageFormat      format;
         SpvAccessQualifier  access;
-    }image_info;
+    } image_info;
+
+    struct {
+        SpvAccessQualifier  access;
+    } storage;
 
     struct {
         const char *        name;
@@ -230,6 +245,51 @@ static void parse_struct(sprivflect_info_t * ctx, spirvflect_type_t* type)
     }
 }
 
+// return size of struct
+// slang save float4x4 matrix as struct of 4 * float4
+static int parse_substruct(sprivflect_info_t* ctx, spirvflect_type_t* type)
+{
+    uint32_t substruct_type_id = type->spvarray.type_id;
+    uint32_t struct_size = 0;
+    int field_count = type->count - 2;
+    for(int i = 0; i < field_count; ++i)
+    {
+        uint32_t field_id = type->spvstruct.field_ids[i];
+        spirvflect_type_t* field_type = _find_type(ctx, field_id);
+
+        if(field_type->type == SpvOpTypeArray)
+        {
+            auto constv = _find_const(ctx, field_type->spvarray.constant_id);
+            int array_length = constv->value.ui;
+            auto array_field_type = _find_type(ctx, field_type->spvarray.type_id);
+
+            if(array_field_type->type == SpvOpTypeVector)
+            {
+                auto array_element_type = _find_type(ctx, array_field_type->vector.type_id);
+                
+                switch(array_element_type->type)
+                {
+                    case SpvOpTypeInt:
+                    case SpvOpTypeFloat:
+                        struct_size += (sizeof(float) * array_field_type->count) * array_length;
+                        break;
+                }
+            }
+            else
+            {
+                assert(false);
+            }
+        }
+        else if (field_type->type == SpvOpTypeRuntimeArray) {
+            auto array_field_type = _find_type(ctx, field_type->spvarray.type_id);
+            printf("");
+        }else{
+            assert(false);
+        }
+    }
+    return struct_size;
+}
+
 static int spirvflect_create(const uint32_t* data, uint32_t size, spirvflect_t** spvflect)
 {
     if (data && *data != SpvMagicNumber)
@@ -292,6 +352,34 @@ static int spirvflect_create(const uint32_t* data, uint32_t size, spirvflect_t**
             switch (var->storage)
             {
                 default: break;
+                case SpvStorageClassStorageBuffer: {
+
+                    auto binding  = _find_with_decor(&ctx, var->decor_id, SpvDecorationBinding);
+                    auto set      = _find_with_decor(&ctx, var->decor_id, SpvDecorationDescriptorSet);
+                    auto nowritable = _find_with_decor(&ctx, var->decor_id, SpvDecorationNonWritable);
+                    auto noreadable = _find_with_decor(&ctx, var->decor_id, SpvDecorationNonReadable);
+
+                    uint32_t base_type_id = var_type->pointer.type_id;
+                    spirvflect_type_t* base_type = _find_type(&ctx, base_type_id);
+
+                    spirvflect_uniform_t* uniform = &spvreflect->uniforms[spvreflect->uniform_count];
+                    uniform->is_storage = 1;
+                    uniform->name = (char*)var_name->name;
+                    uniform->type = (SpvOp)base_type->type;
+                    uniform->stage_mask = (SpvExecutionModel)(1 << spvreflect->stage);
+                    uniform->binding = binding ? binding->value : 0xFFFFFFFF;
+                    uniform->descriptor_set = set ? set->value : 0xFFFFFFFF;
+
+                    if(nowritable)
+                        uniform->storage.access = SpvAccessQualifierReadOnly;
+                    else
+                        uniform->storage.access = SpvAccessQualifierReadWrite;
+
+                    parse_substruct(&ctx, base_type);
+
+                    spvreflect->uniform_count++;
+                } break;
+
                 case SpvStorageClassInput:
                 {
                     uint32_t base_type_id = var_type->pointer.type_id;
@@ -321,9 +409,6 @@ static int spirvflect_create(const uint32_t* data, uint32_t size, spirvflect_t**
 
                         auto db = _find_with_decor(&ctx, var->decor_id, SpvDecorationBinding);
                         auto ds = _find_with_decor(&ctx, var->decor_id, SpvDecorationDescriptorSet);
-
-                        auto is_not_structured_buffer = _find_with_decor(&ctx, base_type->id, SpvDecorationBlock);
-                        auto is_structured__buffer = _find_with_decor(&ctx, base_type->id, SpvDecorationBufferBlock);
 
                         spirvflect_uniform_t * uniform = &spvreflect->uniforms[spvreflect->uniform_count];
                         uniform->name           = (char*)var_name->name;
@@ -387,7 +472,6 @@ static int spirvflect_create(const uint32_t* data, uint32_t size, spirvflect_t**
                                     if (array_element_type_name && array_element_type->type == SpvOpTypeStruct)
                                     {
                                         parse_struct(&ctx, array_element_type);
-                                        printf("");
                                     }
                                 }
                                 if(orig_type->type == SpvOpTypeArray)
@@ -420,7 +504,11 @@ static int spirvflect_create(const uint32_t* data, uint32_t size, spirvflect_t**
                                         field_size = col * row * 4;
                                     }
                                 } 
-                                
+                                if (orig_type->type == SpvOpTypeStruct)
+                                {
+                                    field_size = parse_substruct(&ctx, orig_type);
+                                }
+                                assert(field_size);
                                 uniform->size += field_size;//uniform->fields[i].offset - prev_offset;
                                 uniform->fields[i].size = field_size;
                                 prev_offset = uniform->fields[i].offset;

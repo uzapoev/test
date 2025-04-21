@@ -65,14 +65,16 @@ typedef struct vk_context_t
 
     VkSemaphore                         frame_timeline_semaphore;
 
-    gfx_callback                        dbg_log             = nullptr;
+    gfx_callback                        dbg_log                 = nullptr;
 
-    gfx_sampler_t*                      default_sampler     = nullptr;
-    vk_texture_t*                       default_texture     = nullptr;
+    vk_buffer_t*                        staging_buffer          = nullptr;
+    gfx_sampler_t*                      default_sampler         = nullptr;
+    vk_texture_t*                       default_texture         = nullptr;
+    gfx_texture_t*                      default_storage_texture = nullptr;
+    gfx_buffer_t*                       default_storage_buffer  = nullptr;
 
-    VkRenderPass                        default_renderpass  = nullptr;
+    VkRenderPass                        default_renderpass      = nullptr;
 
-    vk_buffer_t *                       staging_buffer;
 
  #ifdef AMD_VULKAN_MEMORY_ALLOCATOR_H
     VmaAllocator                        vma_allocator;
@@ -130,12 +132,13 @@ typedef struct vk_shader_t {
     gfx_shader_t                        handle;
 
     vk_context_t *                      ctx;
+    const char*                         lable = nullptr;
     uint32_t                            stages_count;
     VkPipelineShaderStageCreateInfo     stages[gfx_shader_count];
 
     uint16_t                            hash;
     uint32_t                            uniform_count;
-    gfx_uniform_t                       uniforms[16];
+    gfx_uniform_t *                     uniforms;
     VkDescriptorSetLayoutBinding*       bindings;
 
     VkDescriptorSetLayout               layout;
@@ -237,6 +240,7 @@ gfx_api void     vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, g
 gfx_api void     vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
 gfx_api void     vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
 gfx_api void     vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api void     vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
 gfx_api void     vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
 gfx_api void     vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
 gfx_api void     vk_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);

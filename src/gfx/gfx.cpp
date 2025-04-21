@@ -22,15 +22,21 @@
 #define WEBGPU_AVAILABLE
 #endif
 
+
+static gfx_allocator_t* gfx_default_allocator()
+{
+    static gfx_allocator_t s_allocator = {};
+
+    if(s_allocator.gfx_alloc == nullptr)
+        s_allocator.gfx_alloc = [](size_t size, void * userdata)    { return malloc(size);  };
+        
+    if (s_allocator.gfx_free == nullptr)
+        s_allocator.gfx_free = [](void* ptr, void* userdata)        { free(ptr);            };
+
+    return &s_allocator;
+}
+
 #pragma region handle pool
-
-#define HANDLEMASK 0xFFFF
-
-#define HANDLE_INDEX(_handle_)      ( ((uint64_t)_handle_)       & HANDLEMASK )
-#define HANDLE_GENERATION(_handle_) ( ((uint64_t)_handle_ >> 16) & HANDLEMASK )
-#define HANDLE_MASK(_handle_)       ( ((uint64_t)_handle_ >> 32) & HANDLEMASK )
-#define HANDLE_HASH(_handle_)       ( ((uint64_t)_handle_ >> 48) & HANDLEMASK )
-
 
 typedef struct gfx_handle_t {
     uint16_t            index;
@@ -81,19 +87,24 @@ static uint16_t hash16(const char* str, size_t len)
 
 void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t* allocator)
 {
-    gfx_handle_pool_t*pool = (gfx_handle_pool_t*)calloc(1, sizeof(gfx_handle_pool_t));
-    if(pool == nullptr)
+    if(allocator == nullptr)
+        allocator = gfx_default_allocator();
+
+    gfx_handle_pool_t * pool = (gfx_handle_pool_t*)allocator->gfx_alloc(sizeof(gfx_handle_pool_t), allocator->user_data);
+
+    if(pool == nullptr || allocator == nullptr)
         return;
 
+    pool->allocator             = allocator;
     pool->size                  = stride * capacity;
     pool->stride                = stride;
     pool->capacity              = capacity;
     pool->used_chunks           = 0;
     pool->hash                  = hash16((char*)pool, sizeof(intptr_t));
-    pool->data                  = calloc(capacity, stride);
-    pool->handles               = (gfx_handle_t*)calloc(capacity, sizeof(gfx_handle_t));
-    pool->free_list             = (uint32_t*)calloc(capacity, sizeof(uint32_t));
-    pool->generation_counters   = (uint32_t*)calloc(capacity, sizeof(uint32_t));
+    pool->data                  = allocator->gfx_alloc(capacity * stride, allocator->user_data);
+    pool->handles               = (gfx_handle_t*)allocator->gfx_alloc(capacity * sizeof(gfx_handle_t), allocator->user_data);
+    pool->free_list             = (uint32_t*)allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
+    pool->generation_counters   = (uint32_t*)allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
 
     if (!pool->data || !pool->handles || !pool->free_list || !pool->generation_counters) {
         gfx_pool_destroy(pool);
@@ -113,11 +124,16 @@ void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_poo
 
 void gfx_pool_destroy(gfx_handle_pool_t* pool)
 {
-    free(pool->data);
-    free(pool->handles);
-    free(pool->free_list);
-    free(pool->generation_counters);
-    free(pool);
+    if(pool == nullptr)
+        return;
+
+    gfx_allocator_t* allocator = pool->allocator;
+    pool->allocator = nullptr;
+    allocator->gfx_free(pool->data, allocator->user_data);
+    allocator->gfx_free(pool->handles, allocator->user_data);
+    allocator->gfx_free(pool->free_list, allocator->user_data);
+    allocator->gfx_free(pool->generation_counters, allocator->user_data);
+    allocator->gfx_free(pool, allocator->user_data);
 }
 
 uint64_t gfx_pool_alloc(gfx_handle_pool_t* pool)
@@ -138,8 +154,11 @@ void gfx_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 {
     gfx_handle_t handle = uint64_2_handle(_handle);
 
-    if (pool->used_chunks == 0 || handle.index >= pool->capacity) return;
-    if (pool->generation_counters[handle.index] != handle.generation) return; // Handle is invalid
+    if (pool->used_chunks == 0 || handle.index >= pool->capacity)
+        return;
+
+    if (pool->generation_counters[handle.index] != handle.generation) 
+        return; // Handle is invalid
 
     pool->free_list[--pool->used_chunks] = handle.index;
     pool->generation_counters[handle.index]++;
@@ -151,8 +170,11 @@ void * gfx_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
     if(handle.hash != pool->hash)
         return nullptr;
 
-    if (handle.index >= pool->capacity) return nullptr;
-    if (pool->generation_counters[handle.index] != handle.generation) return nullptr; // Handle is invalid
+    if (handle.index >= pool->capacity) 
+        return nullptr;
+
+    if (pool->generation_counters[handle.index] != handle.generation) 
+        return nullptr; // Handle is invalid
 
     return (char*)pool->data + (handle.index * pool->stride);
 };
@@ -169,34 +191,12 @@ size_t gfx_pool_get_size(gfx_handle_pool_t* pool) {
     return (pool != nullptr) ? pool->used_chunks : 0;
 }
 
+ size_t gfx_pool_get_capacity(gfx_handle_pool_t* pool) {
+     return (pool != nullptr) ? pool->capacity : 0;
+ }
+
 size_t gfx_pool_has_free(gfx_handle_pool_t* pool) {
     return (pool != nullptr) ? (pool->used_chunks < pool->capacity) : 0;
-}
-
-
-typedef struct teststruct {
-    size_t data;
-} teststruct;
-
-void test_pool()
-{
-    gfx_handle_pool_t * pool = nullptr;
-    gfx_pool_create(sizeof(teststruct), 256, &pool, nullptr);
-
-    uint64_t handles[16] = {0};
-    for(size_t i = 0; i < 16; ++i) {
-        handles[i] = gfx_pool_alloc(pool);
-        teststruct* ptr = (teststruct*)gfx_pool_map(pool, handles[i]);
-        ptr->data = i;
-    }
-
-    teststruct *ptr1 = (teststruct*)gfx_pool_map(pool, handles[2]);
-    gfx_pool_free(pool, handles[2]);
-    teststruct *ptr2 = (teststruct*)gfx_pool_map(pool, handles[2]);
-    uint64_t replaced = gfx_pool_alloc(pool);
-    teststruct *ptr3 = (teststruct*)gfx_pool_map(pool, replaced);
-
-    gfx_pool_destroy(pool);
 }
 
 #pragma endregion
@@ -218,6 +218,7 @@ typedef struct gfx_api_pfn
     void     (*pfn_create_sampler) (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
     void     (*pfn_create_texture) (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
     void     (*pfn_create_pipeline) (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** texture);
+    void     (*pfn_create_compute_pipeline) (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
     void     (*pfn_create_render_target) (gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
     void     (*pfn_create_descriptor_set) (gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
     void     (*pfn_create_cmd) (gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);
@@ -263,6 +264,8 @@ extern void gfx_init_webgpu(gfx_api_pfn* func_table);
 extern void gfx_init_vulkan(gfx_api_pfn* func_table);
 extern void gfx_init_metal(gfx_api_pfn* func_table);
 extern void gfx_init_dx12(gfx_api_pfn* func_table);
+
+
 
 
 gfx_api gfx_backend  gfx_detect_bakend(gfx_backend* backends, uint32_t size)
@@ -343,20 +346,35 @@ void gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t id
 
 // 
 #pragma region create
-void gfx_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer)                  { g_tbl->pfn_create_buffer(ctx, desc, buffer);}
+void gfx_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer) { 
+    g_tbl->pfn_create_buffer(ctx, desc, buffer);
+}
 
-void gfx_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc,  gfx_shader_t** shader)                 { g_tbl->pfn_create_shader(ctx, desc, shader);}
+void gfx_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc,  gfx_shader_t** shader) {
+    g_tbl->pfn_create_shader(ctx, desc, shader);
+}
 
-void gfx_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler)              { g_tbl->pfn_create_sampler(ctx, desc, sampler);}
+void gfx_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler) { 
+    g_tbl->pfn_create_sampler(ctx, desc, sampler);
+}
 
-void gfx_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture)              { g_tbl->pfn_create_texture(ctx, desc, texture);}
+void gfx_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture) { 
+    g_tbl->pfn_create_texture(ctx, desc, texture);
+}
 
-void gfx_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline)          { g_tbl->pfn_create_pipeline(ctx, desc, pipeline);}
+void gfx_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline) { 
+    g_tbl->pfn_create_pipeline(ctx, desc, pipeline);
+}
 
-void gfx_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** t)  { g_tbl->pfn_create_render_target(ctx, desc, t);}
+void gfx_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline) { 
+    g_tbl->pfn_create_compute_pipeline(ctx, desc, pipeline);
+ }
 
-void gfx_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor) 
-{
+void gfx_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** t) {
+    g_tbl->pfn_create_render_target(ctx, desc, t);
+}
+
+void gfx_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor) {
     g_tbl->pfn_create_descriptor_set(ctx, shader, descriptor);
 }
 
@@ -400,6 +418,13 @@ gfx_api gfx_pipeline_t* gfx_create_pipeline2(gfx_context_t* ctx, gfx_pipeline_de
     gfx_pipeline_t* result = nullptr;
     g_tbl->pfn_create_pipeline(ctx, desc, &result);
     return result;
+}
+
+gfx_api gfx_pipeline_compute_t* gfx_create_compute_pipeline2(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc)
+{
+    gfx_pipeline_compute_t * pipeline = nullptr;
+    g_tbl->pfn_create_compute_pipeline(ctx, desc, &pipeline);
+    return pipeline;
 }
 
 gfx_api gfx_render_target_t* gfx_create_render_target2(gfx_context_t* ctx, gfx_render_target_desc_t* desc)
@@ -825,6 +850,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_create_sampler          = vk_create_sampler;
     func_table->pfn_create_texture          = vk_create_texture;
     func_table->pfn_create_pipeline         = vk_create_pipeline;
+    func_table->pfn_create_compute_pipeline = vk_create_compute_pipeline;
     func_table->pfn_create_render_target    = vk_create_render_target;
     func_table->pfn_create_descriptor_set   = vk_create_descriptor_set;
     func_table->pfn_create_cmd              = vk_create_cmd;

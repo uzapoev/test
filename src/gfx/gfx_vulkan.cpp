@@ -1,21 +1,14 @@
 #include "gfx_vulkan.h"
-#ifdef VULKAN_AVAILABLE
 
+#ifdef VULKAN_AVAILABLE
 
 #if __has_include(<vma/vk_mem_alloc.h>)
     #define VMA_IMPLEMENTATION
     #include <vma/vk_mem_alloc.h>
-   // #define VMA_IMPLEMENTATION
 #endif
 
 #ifdef _WIN32
     #pragma comment(lib, "../lib/vulkan-1.lib")
-
-   // #ifdef max
-  //  #undef max
-   // #endif
-
-
 #endif
 
 
@@ -138,8 +131,8 @@ VkFrontFace gfx_face_2_vk(gfx_face face)
     return VK_FRONT_FACE_COUNTER_CLOCKWISE;
 }
 
-#define vctx_alloc(ctx, _size)  ((vk_context_t*)(ctx))->allocator.allocate_pfn(_size)
-#define vctx_free(ctx, _ptr)    ((vk_context_t*)(ctx))->allocator.free_pfn(_ptr)
+#define vctx_alloc(ctx, _size)  ((vk_context_t*)(ctx))->allocator.gfx_alloc(_size, nullptr)
+#define vctx_free(ctx, _ptr)    ((vk_context_t*)(ctx))->allocator.gfx_free(_ptr, nullptr)
 
 
 VkIndexType          vk_index[]   = { VK_INDEX_TYPE_UINT16,           VK_INDEX_TYPE_UINT32 };
@@ -287,7 +280,7 @@ typedef struct vk_copy_info_t
 }vk_copy_info_t;
 
 
-static auto g_defaultlogfunc = [](gfx_msg type, const char * msg, ...)
+static void gfx_default_log(gfx_msg type, const char * msg, ...)
 {
     va_list args;
     va_start(args, msg);
@@ -302,7 +295,39 @@ static vk_context_t* from_ctx(gfx_context_t* ctx)
     return (vk_context_t*)ctx;
 }
 
-#define LOG_ERROR(msg, ...) g_defaultlogfunc(gfx_msg_error, msg, __VA_ARGS__)
+
+VkAllocationCallbacks *vk_default_allocation_callbacks()
+{
+    static VkAllocationCallbacks cb;
+    if(cb.pfnAllocation == nullptr)
+        cb.pfnAllocation = [](void* pUserData, size_t size, size_t alignment, VkSystemAllocationScope allocationScope) {
+            return malloc(size);
+        };
+
+    if (cb.pfnReallocation == nullptr)
+        cb.pfnReallocation = [](void* pUserData, void* pOriginal, size_t size, size_t alignment, VkSystemAllocationScope allocationScope) {
+            return realloc(pOriginal, size);
+        };
+
+    if (cb.pfnFree == nullptr)
+        cb.pfnFree = [](void* pUserData, void* ptr) {
+            free(ptr);
+        };
+
+    if (cb.pfnInternalAllocation == nullptr)
+        cb.pfnInternalAllocation = [] (void*  pUserData, size_t size, VkInternalAllocationType allocationType, VkSystemAllocationScope allocationScope) {
+            printf("\npInternalAllocation(%zd)", size);
+        };
+
+    if (cb.pfnInternalFree == nullptr)
+        cb.pfnInternalFree = [](void* pUserData, size_t size, VkInternalAllocationType allocationType, VkSystemAllocationScope allocationScope) {
+            printf("\npInternalFree(%zd)", size);
+         };
+
+    return &cb;
+}
+
+#define LOG_ERROR(msg, ...) gfx_default_log(gfx_msg_error, msg, __VA_ARGS__)
 
 
 // The callback returns a VkBool32 that indicates to the calling layer if the Vulkan call should be aborted or not. 
@@ -335,14 +360,13 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vkDebugCallback(VkDebugReportFlagsEXT flag
 }
 
 
-static uint32_t _vk_pad_buffer_aligment(vk_context_t* ctx, uint32_t buffer_size)
+static uint32_t _vk_pad_buffer_aligment(vk_context_t* ctx, uint32_t size)
 {
-    uint32_t minUboAlignment = (uint32_t)ctx->device_properties.limits.minUniformBufferOffsetAlignment;
-    uint32_t alignedSize = buffer_size;
-    if (minUboAlignment > 0) {
-        alignedSize = (alignedSize + minUboAlignment - 1) & ~(minUboAlignment - 1);
+    uint32_t alignment = (uint32_t)ctx->device_properties.limits.minUniformBufferOffsetAlignment;
+    if (alignment > 0) {
+        size = (size + alignment - 1) & ~(alignment - 1);
     }
-    return alignedSize;
+    return size;
 }
 
 static VkFormat _vk_find_supported_format(vk_context_t* ctx, VkFormat* candidates, uint32_t count, VkImageTiling tiling, VkFormatFeatureFlags features)
@@ -580,8 +604,11 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     const char* device_validation_layers[] = { "VK_LAYER_LUNARG_mem_tracker", "VK_LAYER_GOOGLE_unique_objects" };
 
     VkPhysicalDeviceFeatures features = {};
-    features.sampleRateShading = VK_TRUE;
-    features.samplerAnisotropy = VK_TRUE;
+   // features.sampleRateShading = VK_TRUE;
+   // features.samplerAnisotropy = VK_TRUE;
+   // features.textureCompressionASTC_LDR = VK_TRUE;
+
+    vkGetPhysicalDeviceFeatures(physdevice, &features);
 
     VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     {
@@ -622,6 +649,42 @@ static VkSemaphore _vk_create_semaphore(VkDevice device, bool istimeline = false
     return semaphore;
 }
 
+static VkDeviceMemory _vk_allocate_and_bind_memory(vk_context_t* ctx, VkMemoryPropertyFlags memflag, uint32_t *size, VkImage image, VkBuffer buffer)
+{
+   // bool failed = image != nullptr && buffer != nullptr;
+    assert(!(image != nullptr && buffer != nullptr)); // only one should be active
+
+    VkMemoryRequirements requirements = {};
+
+    if(image != VK_NULL_HANDLE)
+        vkGetImageMemoryRequirements(ctx->device, image, &requirements);
+
+    if(buffer != VK_NULL_HANDLE)
+        vkGetBufferMemoryRequirements(ctx->device, buffer, &requirements);
+
+    if(size != nullptr)
+        *size = requirements.size;
+
+    VkMemoryAllocateInfo alloc_info = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    alloc_info.allocationSize = requirements.size;
+    alloc_info.memoryTypeIndex = _vk_find_memory_type(ctx->memory_properties, requirements.memoryTypeBits, memflag);
+
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (auto result = vkAllocateMemory(ctx->device, &alloc_info, nullptr, &memory)) {
+        auto err_str = string_VkResult(result);
+        ctx->dbg_log(gfx_msg_error, "failed to allocate memory!(%s)", err_str);
+        return nullptr;
+    }
+
+    if (image != VK_NULL_HANDLE)
+        vkBindImageMemory(ctx->device, image, memory, 0);
+
+    if (buffer != VK_NULL_HANDLE)
+        vkBindBufferMemory(ctx->device, buffer, memory, 0);
+
+    return memory;
+}
+
 static void _vk_create_buffer(vk_context_t* ctx, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memflag, vk_buffer_t* buffer)
 {
     VkBufferCreateInfo buffer_info = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -646,22 +709,9 @@ static void _vk_create_buffer(vk_context_t* ctx, VkDeviceSize size, VkBufferUsag
         ctx->dbg_log(gfx_msg_error, "failed to create buffer! (%s)", err_str);
         return;
     }
-
-    VkMemoryRequirements requirements = {};
-    vkGetBufferMemoryRequirements(ctx->device, buffer->buffer, &requirements);
-
-    VkMemoryAllocateInfo alloc_info = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        alloc_info.allocationSize = requirements.size;
-        alloc_info.memoryTypeIndex = _vk_find_memory_type(ctx->memory_properties, requirements.memoryTypeBits, memflag);
-    if (auto result = vkAllocateMemory(ctx->device, &alloc_info, nullptr, &buffer->memory))
-    {
-        auto err_str = string_VkResult(result);
-        ctx->dbg_log(gfx_msg_error, "failed to allocate buffer memory!(s)", err_str);
-        return;
-    }
-
-    buffer->buffer_size = (uint32_t)alloc_info.allocationSize;
-    vkBindBufferMemory(ctx->device, buffer->buffer, buffer->memory, 0);
+    uint32_t allocated_size = 0;
+    buffer->memory = _vk_allocate_and_bind_memory(ctx, memflag, &allocated_size, nullptr, buffer->buffer);
+    buffer->buffer_size = allocated_size;
 }
 
 static VkImage _vk_create_image(vk_context_t* ctx, VkImageType type, VkExtent3D extend, uint32_t mips, VkFormat format, VkImageTiling tiling,
@@ -686,40 +736,31 @@ static VkImage _vk_create_image(vk_context_t* ctx, VkImageType type, VkExtent3D 
         return nullptr;
     }
 
-    VkMemoryRequirements memRequirements = {};
-    vkGetImageMemoryRequirements(ctx->device, image, &memRequirements);
-
-    VkMemoryAllocateInfo alloc_info  = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        alloc_info.allocationSize    = memRequirements.size;
-        alloc_info.memoryTypeIndex   = _vk_find_memory_type(ctx->memory_properties, memRequirements.memoryTypeBits, properties);
-    if (auto result = vkAllocateMemory(ctx->device, &alloc_info, nullptr, imageMemory)) {
-        auto err_str = string_VkResult(result);
-        ctx->dbg_log(gfx_msg_error, "failed to allocate image memory!(%s)", err_str);
-        return nullptr;
-    } 
-
-    vkBindImageMemory(ctx->device, image, *imageMemory, 0);
+    uint32_t allocated_size = 0;
+    *imageMemory = _vk_allocate_and_bind_memory(ctx, properties, &allocated_size, image, nullptr);
+    
     return image;
 }
 
 static VkImageView _vk_create_image_view(vk_context_t* ctx, VkImageViewType type, VkImage image, VkFormat format, uint32_t mipLevels)
 {
-    VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    viewInfo.image      = image;
-    viewInfo.viewType   = type;
-    viewInfo.format     = format;
-    viewInfo.subresourceRange.aspectMask        = determine_aspect_mask(format);
-    viewInfo.subresourceRange.baseMipLevel      = 0;
-    viewInfo.subresourceRange.levelCount        = mipLevels;
-    viewInfo.subresourceRange.baseArrayLayer    = 0;
-    viewInfo.subresourceRange.layerCount        = 1;
+    VkImageViewCreateInfo create_info = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    create_info.image      = image;
+    create_info.viewType   = type;
+    create_info.format     = format;
+    create_info.subresourceRange.aspectMask        = determine_aspect_mask(format);
+    create_info.subresourceRange.baseMipLevel      = 0;
+    create_info.subresourceRange.levelCount        = mipLevels;
+    create_info.subresourceRange.baseArrayLayer    = 0;
+    create_info.subresourceRange.layerCount        = 1;
 
-    VkImageView imageView = VK_NULL_HANDLE;
-    if (vkCreateImageView(ctx->device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
-        LOG_ERROR("failed to create texture image view!");
+    VkImageView image_view = VK_NULL_HANDLE;
+    if (vkCreateImageView(ctx->device, &create_info, nullptr, &image_view) != VK_SUCCESS) {
+
+        ctx->dbg_log(gfx_msg_error, "failed to create texture image view!");
         return nullptr;
     }
-    return imageView;
+    return image_view;
 }
 
 
@@ -810,6 +851,75 @@ static void _vk_copy_buffer_to(vk_context_t* ctx, VkBuffer src, vk_copy_info_t *
     gfx_destroy_cmd(&ctx->handle, cmd);
 }
 
+static void _vk_copy_buffer_to_image(vk_context_t* ctx, VkBuffer src, VkImage image, uint32_t mips, gfx_pixel_format format, VkExtent3D extend)
+{
+    gfx_command_buffer_t* cmd = nullptr;
+    vk_create_cmd(&ctx->handle, 1, &cmd);
+    vk_cmd_begin(cmd);
+
+    VkBufferImageCopy regions[16] = {};
+    uint32_t offset = 0;
+    for (uint8_t i = 0; i < mips; i++)
+    {
+        uint32_t width  = max(extend.width  >> i, 1);
+        uint32_t height = max(extend.height >> i, 1);
+        uint32_t depth  = max(extend.depth  >> i, 1);
+        
+        regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        regions[i].imageSubresource.baseArrayLayer = 0;
+        regions[i].imageSubresource.layerCount = 1;
+        regions[i].imageSubresource.mipLevel = i;
+        
+        regions[i].imageOffset = { 0, 0, 0 };
+        regions[i].imageExtent = { width, height, depth };
+        regions[i].bufferOffset = offset;
+
+        offset += gfx_utils_image_layer_size(width, height, depth, format);
+    }
+
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vkCmdCopyBufferToImage(vk_cmd->cmd, src, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mips, regions);
+
+    gfx_cmd_end(cmd);
+    gfx_submit_cmd(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    gfx_destroy_cmd(&ctx->handle, cmd);
+
+}
+
+uint32_t gfx_gpu_ram_usage(gfx_context_t* ctx)
+{
+    auto vkctx = from_ctx(ctx);
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT physical_device_memory_budget_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT };
+    VkPhysicalDeviceMemoryProperties2 device_memory_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 };
+    device_memory_properties.pNext = &physical_device_memory_budget_properties;
+    vkGetPhysicalDeviceMemoryProperties2(vkctx->physicaldevice, &device_memory_properties);
+    uint32_t device_memory_heap_count = device_memory_properties.memoryProperties.memoryHeapCount;
+    uint32_t device_memory_total_usage = 0;
+    for (uint32_t i = 0; i < device_memory_heap_count; i++)
+    {
+        device_memory_total_usage += (uint32_t)physical_device_memory_budget_properties.heapUsage[i];
+    }
+    return device_memory_total_usage;
+}
+
+static void vk_gpu_memstatus(gfx_context_t * ctx)
+{
+    auto vkctx = from_ctx(ctx);
+
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT physical_device_memory_budget_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT };
+    VkPhysicalDeviceMemoryProperties2 device_memory_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 };
+    device_memory_properties.pNext = &physical_device_memory_budget_properties;
+    vkGetPhysicalDeviceMemoryProperties2(vkctx->physicaldevice, &device_memory_properties);
+    uint32_t device_memory_heap_count = device_memory_properties.memoryProperties.memoryHeapCount;
+    uint32_t device_memory_total_usage = 0;
+    uint32_t device_memory_total_budget = 0;
+    for (uint32_t i = 0; i < device_memory_heap_count; i++)
+    {
+        device_memory_total_usage += (uint32_t)physical_device_memory_budget_properties.heapUsage[i];
+        device_memory_total_budget += (uint32_t)physical_device_memory_budget_properties.heapBudget[i];
+    }/**/
+    vkctx->dbg_log(gfx_msg_info, "gpu memory usage: %10d Kb  budget: %10ul Kb", device_memory_total_usage/1024, device_memory_total_budget/1024);
+}
 
 // vulkan
 void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
@@ -820,11 +930,8 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     if (vctx == nullptr)
         return;
 
-  //  memcpy(&vctx->settings, cfg, sizeof(gfx_settings_t));
-
-    vctx->allocator.allocate_pfn = cfg->allocator.allocate_pfn;
-    vctx->allocator.realloc_pfn = cfg->allocator.realloc_pfn;
-    vctx->allocator.free_pfn = cfg->allocator.free_pfn;
+    if( cfg->allocator != nullptr )
+        vctx->allocator = *cfg->allocator;
 
     uint32_t gfamily = 0; // graphic family
     uint32_t pfamily = 0; // present family
@@ -847,7 +954,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vctx->device           = device;
     vctx->graphics_queue   = { gfamily, gqueue };
     vctx->present_queue    = { pfamily, pqueue };
-    vctx->dbg_log          = cfg->dbglog ? cfg->dbglog : g_defaultlogfunc;
+    vctx->dbg_log          = cfg->dbglog ? cfg->dbglog : gfx_default_log;
     vctx->msaa_samples     = VK_SAMPLE_COUNT_1_BIT;
 
     vkGetPhysicalDeviceFeatures(physdevice, &vctx->device_features);
@@ -872,25 +979,9 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     }
 
     gfx_pool_create(sizeof(vk_sampler_t), 128,  &vctx->sampler_pool, &vctx->allocator);
-
     gfx_pool_create(sizeof(vk_texture_t), cfg->limits.textures_pool_capacity, &vctx->texture_pool, &vctx->allocator);
-    gfx_pool_create(sizeof(vk_shader_t), cfg->limits.shaders_pool_capacity, &vctx->shaders_pool, &vctx->allocator);
-    gfx_pool_create(sizeof(vk_buffer_t), cfg->limits.buffer_pool_capacity, &vctx->buffers_pool, &vctx->allocator);
-
-
-    VkPhysicalDeviceMemoryBudgetPropertiesEXT physical_device_memory_budget_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT };
-    VkPhysicalDeviceMemoryProperties2 device_memory_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 };
-    device_memory_properties.pNext = &physical_device_memory_budget_properties;
-    vkGetPhysicalDeviceMemoryProperties2(physdevice, &device_memory_properties);
-   /*device_memory_heap_count = device_memory_properties.memoryProperties.memoryHeapCount;
-    device_memory_total_usage = 0;
-    device_memory_total_budget = 0;
-    for (uint32_t i = 0; i < device_memory_heap_count; i++)
-    {
-        device_memory_total_usage += physical_device_memory_budget_properties.heapUsage[i];
-        device_memory_total_budget += physical_device_memory_budget_properties.heapBudget[i];
-    }*/
-
+    gfx_pool_create(sizeof(vk_shader_t),  cfg->limits.shaders_pool_capacity,  &vctx->shaders_pool, &vctx->allocator);
+    gfx_pool_create(sizeof(vk_buffer_t),  cfg->limits.buffer_pool_capacity,   &vctx->buffers_pool, &vctx->allocator);
 
 
     uint32_t _colors [] = { 0xFFFFFFFF, 0xFF808080, 0xFFFFFFFF, 0xFF808080,
@@ -902,35 +993,54 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
                             0xFF00FFFF
     };
 
-    gfx_sampler_desc_t sampler = {};
-        sampler.anisotropy = 1;
-        sampler.minmag = gfx_filter_point;
-        sampler.mipmap = gfx_filter_point;
-        sampler.mode = gfx_address_mode_repeat;
-    vk_create_sampler(&vctx->handle, &sampler, &vctx->default_sampler);
+    //staging buffer
+    {
+        gfx_buffer_t* staging = nullptr;
+        gfx_buffer_desc_t descriptor = {};
+            descriptor.label    = "staging";
+            descriptor.mapped   = true;
+            descriptor.size     = cfg->limits.staging_buffer_size;
+            descriptor.usage    = gfx_buffer_usage_staging;
+        vk_create_buffer(&vctx->handle, &descriptor, &staging);
+        vctx->staging_buffer = (vk_buffer_t*)staging;
+    }
+
+    // default sampler
+    {
+        gfx_sampler_desc_t descriptor = {};
+            descriptor.anisotropy = 1;
+            descriptor.minmag     = gfx_filter_point;
+            descriptor.mipmap     = gfx_filter_point;
+            descriptor.mode       = gfx_address_mode_repeat;
+        vk_create_sampler(&vctx->handle, &descriptor, &vctx->default_sampler);
+    }
     
-    gfx_texture_desc_t image = { 0 };
-        image.label = "default_4x4";
-        image.width = 4;
-        image.height = 4;
-        image.depth = 1;
-        image.format = gfx_pixel_format_rgba8;
-        image.mip_levels = 3;
-        image.data = (uint8_t*)_colors;
+    // default texture
+    {
+        gfx_texture_t* default_texture = nullptr;
+        gfx_texture_desc_t descriptor = { 0 };
+            descriptor.label        = "_default_texture";
+            descriptor.width        = 4;
+            descriptor.height       = 4;
+            descriptor.depth        = 1;
+            descriptor.format       = gfx_pixel_format_rgba8;
+            descriptor.mip_levels   = 3;
+            descriptor.data         = &_colors[0];
+        vk_create_texture(&vctx->handle, &descriptor, &default_texture);
+        vctx->default_texture = (vk_texture_t*)default_texture;
+    }
 
-    gfx_texture_t * default_texture = nullptr;
-    vk_create_texture(&vctx->handle, &image, &default_texture);
-    vctx->default_texture = (vk_texture_t*)default_texture;
-
-    uint32_t sbuffer_size = 8 * 1024 * 1024; // 8mb
-    vctx->staging_buffer = (vk_buffer_t*)vctx_alloc(vctx, sizeof(vk_buffer_t));
-
-    _vk_create_buffer(vctx, sbuffer_size,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vctx->staging_buffer);
-
-    vk_debug_set_buffer_name(vctx, vctx->staging_buffer, "staging_buffer");
-  //  vk_debug_set_texture_name(vctx, vctx->default_texture, "_default_texture");
+    // default texture storage
+    {
+        gfx_texture_desc_t descriptor = { 0 };
+            descriptor.label    = "_default_texture_storage";
+            descriptor.width    = 4;
+            descriptor.height   = 4;
+            descriptor.depth    = 1;
+            descriptor.format   = gfx_pixel_format_rgba8;
+            descriptor.storage  = 1;
+        vk_create_texture(&vctx->handle, &descriptor, &vctx->default_storage_texture);
+    }
     
     *out_ctx = &vctx->handle;
 }
@@ -1018,7 +1128,6 @@ static vk_texture_t _vk_create_target_texture(vk_context_t* ctx, VkExtent3D exte
 }
 
 
-
 void vk_recreate_swapchain(gfx_context_t* ctx, vk_swapchain_t* swapchain)
 {
     vk_context_t* vctx = from_ctx(ctx);
@@ -1055,6 +1164,8 @@ void vk_recreate_swapchain(gfx_context_t* ctx, vk_swapchain_t* swapchain)
         info.preTransform           = capabilities.currentTransform; //VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
         info.compositeAlpha         = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         info.presentMode            = VK_PRESENT_MODE_FIFO_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
+        info.presentMode            = VK_PRESENT_MODE_MAILBOX_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
+        info.presentMode            = VK_PRESENT_MODE_IMMEDIATE_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
         info.clipped                = VK_TRUE;
         info.oldSwapchain           = prev_swapchain;
     VkResult result = vkCreateSwapchainKHR(vctx->device, &info, NULL, &swapchain->swapchain);
@@ -1236,6 +1347,11 @@ void vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
     VkBufferUsageFlags usage_flag = 0;
     switch(desc->usage)
     {
+        case gfx_buffer_usage_staging:
+            mapped = true;
+            usage_flag = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+            break;
+
         case gfx_buffer_usage_uniform: 
             mapped = true;
             usage_flag = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
@@ -1283,6 +1399,7 @@ void vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
     vk_update_buffer_data(ctx, &buffer->handle, desc->data, desc->size, 0);
 
     *out_buffer = &buffer->handle;
+    vk_gpu_memstatus(ctx);
 }
 
 void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t capacity, vk_descriptor_pool_t** out_pool)
@@ -1371,9 +1488,13 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
         sets[i].dirty = true;
         sets[i].shader = shader;
         sets[i].pool = pool;
-        sets[i].uboptr = (uint8_t*)ubo_buffer->data_ptr + aligned_size * i;
+
         sets[i].writes = pool->writes + i * shader->uniform_count;
         sets[i].write_infos =  pool->write_infos + i * shader->uniform_count;
+
+        if(ubo_buffer_size > 0 && ubo_buffer != nullptr) {
+            sets[i].uboptr = (uint8_t*)ubo_buffer->data_ptr + aligned_size * i;
+        }
 
         for(uint32_t j = 0;  j < shader->uniform_count; ++j)
         {
@@ -1396,12 +1517,18 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
                     break;
 
                 case VK_DESCRIPTOR_TYPE_SAMPLER:
+                case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
                 case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
                     sets[i].write_infos[j].image_info.sampler = ((vk_sampler_t*)ctx->default_sampler)->sampler;
                     sets[i].write_infos[j].image_info.imageView = ((vk_texture_t*)ctx->default_texture)->view;
                     sets[i].write_infos[j].image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
                     sets[i].writes[j].pImageInfo = &sets[i].write_infos[j].image_info;
+                    break;
+
+                case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+                    //sets[i].write_infos[j].buffer_info.buffer = ;
+                    assert(false);
                     break;
 
                 default: assert(false); break;
@@ -1417,11 +1544,18 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
         auto err_str = string_VkResult(result);
         ctx->dbg_log(gfx_msg_error, "failed to create descriptor pool (%s)", err_str);
     }
+    vk_gpu_memstatus(&ctx->handle);
 }
+
 
 void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader)
 {
     vk_context_t* vctx = from_ctx(ctx);
+
+    if(desc->stages_count == 0)
+    {
+        vctx->dbg_log(gfx_msg_error, "error in shader (stages_count == 0)");
+    }
 
     VkPipelineShaderStageCreateInfo stages[gfx_shader_count] = {};
 
@@ -1457,11 +1591,19 @@ void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
         hash ^= gfx_utils_hash_16((const char*)desc->stages[i].data, desc->stages[i].size);
     }
 
-    vk_shader_t* vk_shader = (vk_shader_t*)vctx_alloc(ctx, sizeof(vk_shader_t));
-    if (vk_shader == NULL)
+    auto handle = gfx_pool_alloc(vctx->shaders_pool);
+    vk_shader_t* vk_shader = (vk_shader_t*)gfx_pool_map(vctx->shaders_pool, handle);
+    if (vk_shader == NULL) {
+        size_t pool_capacity = gfx_pool_get_capacity(vctx->shaders_pool);
+        size_t pool_size = gfx_pool_get_size(vctx->shaders_pool);
+        vctx->dbg_log(gfx_msg_error, "failed to allocate shader %s (pool capacity %d, used %d)", desc->label, 
+                                                                                                 pool_capacity, 
+                                                                                                 pool_size );
         return;
+    }
 
     *out_shader = &vk_shader->handle;
+    vk_shader->lable = strdup(desc->label? desc->label:"shader");
     vk_shader->ctx = vctx;
     vk_shader->hash = hash;
     vk_shader->stages_count = desc->stages_count;
@@ -1469,6 +1611,7 @@ void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
     memcpy(vk_shader->stages, stages, sizeof(VkPipelineShaderStageCreateInfo) * vk_shader->stages_count);
 
     vk_shader->uniform_count = desc->uniform_count;
+    vk_shader->uniforms = (gfx_uniform_t*)vctx_alloc(ctx, desc->uniform_count * sizeof(gfx_uniform_t));
     vk_shader->bindings = (VkDescriptorSetLayoutBinding*)vctx_alloc(ctx, desc->uniform_count * sizeof(VkDescriptorSetLayoutBinding));
 
     uint32_t ubo_size = 0;
@@ -1499,9 +1642,12 @@ void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
 
             case gfx_uniform_texture2d:
             case gfx_uniform_texture3d:
-            case gfx_uniform_texture2d_cube:
-                vk_shader->bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; 
-                break;
+            case gfx_uniform_texture2d_cube: {
+                if(stage_mask == VK_SHADER_STAGE_COMPUTE_BIT)
+                    vk_shader->bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                 else
+                    vk_shader->bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            } break;
 
             case gfx_uniform_ubo:
                 vk_shader->bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; 
@@ -1619,6 +1765,7 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
 {
     if(out_texture == nullptr)
         return;
+
     *out_texture = nullptr;
 
     vk_context_t* vctx = from_ctx(ctx);
@@ -1632,62 +1779,73 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
     VkFormat format = gfx_pixel_format_2_vk(desc->format);
     VkFormatProperties properties;
     vkGetPhysicalDeviceFormatProperties(vctx->physicaldevice, format, &properties);
-    bool support_format = (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
-    if(!support_format) {
+    if((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
         vctx->dbg_log(gfx_msg_error, "not supported pixel format %s", gfx_to_string(desc->format));
-     //   *out_texture = vctx->default_texture;
         return;
     }
 
-    auto memprop = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    _vk_create_buffer(vctx, mem_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, memprop, &staging);
+    auto snap0 = gfx_gpu_ram_usage(ctx);
 
-    void* dataptr = nullptr;
-    vkMapMemory(vctx->device, staging.memory, 0, mem_size, 0, &dataptr);
-    memcpy(dataptr, desc->data, mem_size);
-    vkUnmapMemory(vctx->device, staging.memory);
+    bool use_default_staging = mem_size < vctx->staging_buffer->buffer_size;
 
-    bool host_visible = true;
+    if(use_default_staging)
+    {
+        staging = *vctx->staging_buffer;
+        if((staging.data_ptr != nullptr) && (desc->data != nullptr))
+            memcpy(staging.data_ptr, desc->data, mem_size);
+    }
+    else
+    {
+        auto memprop = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        _vk_create_buffer(vctx, mem_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, memprop, &staging);
+
+        auto snap1 = gfx_gpu_ram_usage(ctx) - snap0;
+
+        void* dataptr = nullptr;
+        vkMapMemory(vctx->device, staging.memory, 0, mem_size, 0, &dataptr);
+        memcpy(dataptr, desc->data, mem_size);
+        vkUnmapMemory(vctx->device, staging.memory);
+    }
+
+    bool host_visible = false;
     auto tiling = (host_visible) ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
 
-    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkExtent3D extend = {};
+    extend.width  = desc->width;
+    extend.height = desc->height;
+    extend.depth  = desc->depth;
 
-    // auto format = _vk_find_supported_format(ctx, {image->format}, tiling, VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
-    // format = format | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-
-    VkExtent3D extend { desc->width, desc->height, desc->depth };
+    auto snap2 = gfx_gpu_ram_usage(ctx) - snap0;
    
-    VkImage vkimg = _vk_create_image(vctx, VK_IMAGE_TYPE_2D, extend, desc->mip_levels, 
-        format,
-        VK_IMAGE_TILING_OPTIMAL, 
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memory);
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VkDeviceMemory memory   = VK_NULL_HANDLE;
+    VkImage image = _vk_create_image(vctx, VK_IMAGE_TYPE_2D, extend, desc->mip_levels, format, tiling, usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memory);
 
-    vk_copy_info_t info = { };
-        info.dst_image = vkimg;
-        info.dst_image_mips = desc->mip_levels;
-        info.dst_image_format = desc->format;
-        info.dst_image_extend = extend;
+    _vk_image_transition(vctx, image, desc->mip_levels, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    _vk_copy_buffer_to_image(vctx, staging.buffer, image, desc->mip_levels, desc->format, extend);
+    _vk_image_transition(vctx, image, desc->mip_levels, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    _vk_image_transition(vctx, vkimg, desc->mip_levels, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    _vk_copy_buffer_to(vctx, staging.buffer, &info);
-    _vk_image_transition(vctx, vkimg, desc->mip_levels, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if(!use_default_staging)
+    {
+        vkDestroyBuffer(vctx->device, staging.buffer, nullptr);
+        vkFreeMemory(vctx->device, staging.memory, nullptr);
+    }
 
-    vkDestroyBuffer(vctx->device, staging.buffer, nullptr);
-    vkFreeMemory(vctx->device, staging.memory, nullptr);
+    VkImageView image_view = _vk_create_image_view(vctx, VK_IMAGE_VIEW_TYPE_2D, image, format, desc->mip_levels);
 
-    VkImageView imageView = _vk_create_image_view(vctx, VK_IMAGE_VIEW_TYPE_2D, vkimg, format, desc->mip_levels);
+    auto snap3 = gfx_gpu_ram_usage(ctx) - snap0;
 
     uint64_t handle = gfx_pool_alloc(vctx->texture_pool);
     vk_texture_t* texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, handle);
     if (texture != nullptr)
     {
-        texture->view = imageView;
-        texture->image = vkimg;
+        texture->view = image_view;
+        texture->image = image;
         texture->memory = memory;
         texture->memory_size = mem_size;
         *out_texture = &texture->handle;
     }
+    vk_gpu_memstatus(ctx);
 }
 
 void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline)
@@ -1810,6 +1968,54 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     vkCreateGraphicsPipelines(vctx->device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vkpipeline->pipeline);
 
     *out_pipeline = &vkpipeline->handle;
+}
+
+void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline)
+{
+    assert(ctx);
+    vk_context_t* vctx = (vk_context_t*)ctx;
+    vk_shader_t* vkshader = (vk_shader_t*)desc->shader;
+
+    if (vkshader == nullptr) {
+        vctx->dbg_log(gfx_msg_error, "failed to create pipeline: shader is NULL");
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo * compute_stage = nullptr;
+    for(uint32_t i = 0; i < vkshader->stages_count; ++i) {
+        if (vkshader->stages[i].stage == VK_SHADER_STAGE_COMPUTE_BIT) {
+            compute_stage = &vkshader->stages[i];
+        }
+    }
+
+    if(compute_stage == nullptr) {
+        vctx->dbg_log(gfx_msg_error, "shader(%s) doesn't have compute stage", vkshader->lable);
+        return;
+    }
+
+    // Pipeline layout
+ /*   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+    {
+        VkPipelineLayoutCreateInfo  create_info  = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+        create_info.pNext = nullptr;
+        create_info.flags = 0;
+        create_info.setLayoutCount = 1;//(NULL != p_descriptor_set) ? 1 : 0;
+        create_info.pSetLayouts = &vkshader->layout;//(NULL != p_descriptor_set) ? &(p_descriptor_set->vk_descriptor_set_layout) : NULL;
+        create_info.pushConstantRangeCount = 0;
+        create_info.pPushConstantRanges = NULL;
+        VkResult vk_res = vkCreatePipelineLayout(vctx->device, &create_info, NULL, &pipeline_layout);
+        assert(VK_SUCCESS == vk_res);
+    }*/
+
+    // Pipeline
+    VkPipeline  pipeline = VK_NULL_HANDLE;
+    {
+        VkComputePipelineCreateInfo create_info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+        create_info.stage = *compute_stage;
+        create_info.layout = vkshader->pipeline_layout;
+        VkResult vk_res = vkCreateComputePipelines(vctx->device, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline);
+        assert(VK_SUCCESS == vk_res);
+    }
 }
 
 void vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target)

@@ -14,6 +14,8 @@
 #include <functional>
 #include <unordered_set>
 
+//#include "threads.h"
+
 #define PROFILE_SAMPLE(SAMPLE_NAME) measure ms(SAMPLE_NAME);
 
 struct Time
@@ -61,16 +63,14 @@ struct interned_string
 public:
     interned_string()                                       {}
     interned_string(const char * str)                       { m_str = make_intern(str); }
-    interned_string(const std::string & str)                { m_str = make_intern(str); }
+    interned_string(const std::string & str)                { m_str = make_intern(str.data()); }
     interned_string(const std::string_view & str)           { m_str = make_intern(str.data()); }
 
-    inline size_t          length() const                   { return m_str.length(); }
-    inline const char *    data()   const                   { return m_str.data(); }
-    inline const char *    c_str()  const                   { return m_str.data(); }
-    inline bool            empty()  const                   { return m_str.length() == 0; }
-
- //   inline void operator = (const std::string & str)        { m_str = make_intern(str); }
- //   inline void operator = (const std::string_view & str)   { m_str = make_intern(str.data()); }
+    void                clear()                             { m_str = ""; }
+    inline size_t       length() const                      { return m_str.length(); }
+    inline const char * data()   const                      { return m_str.data(); }
+    inline const char * c_str()  const                      { return m_str.data(); }
+    inline bool         empty()  const                      { return m_str.length() == 0; }
 
     inline friend bool operator == (const interned_string& b1, const interned_string& b2) { return b1.m_str == b2.m_str; }
     inline friend bool operator <  (const interned_string& b1, const interned_string& b2) { return b1.m_str < b2.m_str; }
@@ -89,6 +89,10 @@ private:
     {
         return s_interned.insert(value).first->c_str();
     }
+    /*static const char* make_intern(const char * value)
+    {
+        return s_interned.insert(value).first->c_str();
+    }*/
 
     std::string_view  m_str;
 };
@@ -115,10 +119,10 @@ struct filestream
     uint32_t    write(uint32_t size, const void* in_data);
     void        seek(uint32_t offset, int whence);
     void        flush();
-
+   
     template<class T>
     inline T    read() { T res = {}; read(sizeof(T), &res); return res; }
-
+ 
     inline char* read_string(char* data) {
         data[0] = '\0';
         uint16_t len = read<uint16_t>();
@@ -143,7 +147,7 @@ struct filestream
     inline void write_string(uint16_t size, const char* data) {
         write(size);
         write(size, data);
-    }
+    }/**/
 
 private:
     filestream(struct stream_impl*);
@@ -204,25 +208,5 @@ private:
     std::chrono::high_resolution_clock::time_point m_end;
 };
 
-
-
-
-
-// [refs]
-// - https://gist.github.com/rygorous/2156668
-// - http://zeuxcg.org/2010/12/14/quantizing-floats/
-// - http://en.wikipedia.org/wiki/Fast_inverse_square_root
-// - http://bitsquid.blogspot.com.es/2009/11/bitsquid-low-level-animation-system.html 
-namespace quantinizer
-{
-    uint16_t    encode16f(float value);
-    float       decode16f(uint16_t value);
-
-    void        encode101010_quat(uint32_t &out, float x, float y, float z, float w);
-    void        decode101010_quat(float &x, float &y, float &z, float &w, uint32_t in);
-
-    void        encode555_vec(uint16_t &out, float x, float y, float z);   // position or scale to 16-bit integer (struct version)
-    void        decode555_vec(float &x, float &y, float &z, uint16_t in);  // 16-bit integer to position or scale (struct version)
-}
 
 #endif

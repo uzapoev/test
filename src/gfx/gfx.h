@@ -21,6 +21,8 @@
 #include <stdbool.h>
 #include <stdint.h> // uintXX_t 
 #include <stdlib.h> // uintXX_t 
+#include <stdio.h> // uintXX_t 
+
 
 #if defined(__cplusplus)
 #define gfx_api extern "C"
@@ -92,12 +94,20 @@ typedef enum gfx_backend {
 
 
 typedef enum gfx_buffer_usage {
-    gfx_buffer_usage_index,
-    gfx_buffer_usage_vertex,
-    gfx_buffer_usage_uniform,
+    gfx_buffer_usage_staging,       // cpu mapped
+    gfx_buffer_usage_index,         // gpu
+    gfx_buffer_usage_vertex,        // gpu 
+    gfx_buffer_usage_uniform,       // cpu mapped
     gfx_buffer_usage_storage,
     gfx_buffer_usage_indirect,
 } gfx_buffer_usage;
+
+
+typedef enum gfx_access_type {
+    gfx_access_read,
+    gfx_access_write,
+    gfx_access_rw
+} gfx_access_type;
 
 
 typedef enum gfx_texture_type {
@@ -111,7 +121,8 @@ typedef enum gfx_texture_type {
 typedef enum gfx_uniform_type {
     gfx_uniform_undefined,
     gfx_uniform_ubo,
-    gfx_uniform_storage,
+    gfx_uniform_storage,        // (RW)StructuredBuffer, (RW)ByteAddressBuffer
+    gfx_uniform_storage_image,  // RWTexture2D
     gfx_uniform_sampler,
     gfx_uniform_texture2d,
     gfx_uniform_texture2d_cube,
@@ -320,18 +331,17 @@ typedef enum gfx_shader_stage {
     gfx_shader_geometry,
     gfx_shader_fragment,
 
-    gfx_shader_amplify,         // amplify + mesh + fragment
-    gfx_shader_mesh,            // mesh + fragment 
-
     gfx_shader_compute,
 
     gfx_shader_rt_raygen,      // = 0x0100,
+    gfx_shader_rt_intersect,   // = 0x1000,
     gfx_shader_rt_any_hit,     // = 0x0200,
     gfx_shader_rt_closest_hit, // = 0x0400,
     gfx_shader_rt_miss,        // = 0x0800,
-    gfx_shader_rt_intersect,   // = 0x1000,
     gfx_shader_rt_callable,    // = 0x2000,
-//   //gfx_AllRayTracing,  // = 0x3F00,
+
+    gfx_shader_amplify,         // amplify + mesh + fragment
+    gfx_shader_mesh,            // mesh + fragment 
 
     gfx_shader_count,
 } gfx_shader_stage;
@@ -363,12 +373,11 @@ typedef struct { uint64_t idx; } gfx_command_buffer_t;
 
 // type - info/warning/error
 typedef void (*gfx_callback)(gfx_msg type, const char* msg, ...);
-//typedef void (*gfx_allocation_callback)(gfx_uniform_type type, intptr_t size); // 
 
 typedef struct gfx_allocator_t {
-    void* (*allocate_pfn)  (size_t size);
-    void* (*realloc_pfn)   (void* ptr, size_t size);
-    void  (*free_pfn)      (void* ptr);
+    void*   (*gfx_alloc) (size_t size, void* userdata)  = nullptr;
+    void    (*gfx_free)  (void* ptr, void* userdata)    = nullptr;
+    void    *user_data                                  = nullptr;
 } gfx_allocator_t;
 
 typedef struct gfx_settings_t {
@@ -379,14 +388,13 @@ typedef struct gfx_settings_t {
     intptr_t                handle              = 0;
 
     struct {
-        uint32_t            staging_buffer_size     = 8* 1024 * 1024;
-        uint32_t            buffer_pool_capacity    = 4096*4;
-        uint32_t            shaders_pool_capacity   = 1024;
-        uint32_t            textures_pool_capacity  = 8192;
+        uint32_t            staging_buffer_size     = 16 * 1024 * 1024;
+        uint32_t            buffer_pool_capacity    = 1  * 1024;
+        uint32_t            shaders_pool_capacity   = 1  * 1024;
+        uint32_t            textures_pool_capacity  = 2  * 1024;
     } limits;
 
-    gfx_allocator_t         allocator;
-
+    gfx_allocator_t *       allocator;
     gfx_callback            dbglog;
 } gfx_settings_t;
 
@@ -424,6 +432,8 @@ typedef struct gfx_texture_desc_t {
     uint32_t                depth;      // depth | array slice | cube side(+/-x, +/-y, +/-z) 
     void *                  data;       // cubemap and cube - data[slice, mipmaps], [slice, mipmaps]
     uint32_t                mip_levels;  
+    uint32_t                storage;    // qreater 0 - use as storage
+    
     gfx_texture_type        type;
     gfx_pixel_format        format;
 } gfx_texture_desc_t;
@@ -444,9 +454,9 @@ typedef struct gfx_uniform_t {
     uint16_t                stage_mask;     // fragment|vertex
     uint16_t                binding;
     uint16_t                group;          //
-
-    union
-    {
+    
+ //   union
+  //  {
         struct {
             uint16_t            size;           //
             uint16_t            field_count;    //
@@ -458,33 +468,29 @@ typedef struct gfx_uniform_t {
             } fields[16];
         } buffer;
 
+        struct  {
+            gfx_access_type     access;
+        } storage;
+
         struct {
             gfx_texture_type    dimension;
-        //    gfx_access_type    access;       // read/write/read_wite
+            gfx_access_type     access;       // read/write/read_wite
         } texture;
 
         struct {
             
         } sampler;
-    };
-/*
-    uint16_t                size;           //
-    uint16_t                field_count;    //
-    struct {
-        char                name[32];
-        uint16_t            stride;         // for ubo field
-        uint16_t            offset;         // for ubo field
-    } fields[16];*/
+  //  };
 } gfx_uniform_t;
 
 
-typedef struct gfx_shader_data{
+typedef struct gfx_shader_stage_data{
     gfx_shader_stage        stage;
     void*                   data;
     uint32_t                size;
 
     const char *            entry;
-} gfx_shader_data;
+} gfx_shader_stage_data;
 
 
 typedef struct gfx_shader_desc_t {
@@ -492,7 +498,7 @@ typedef struct gfx_shader_desc_t {
     uint32_t                descriptor_pool_capacity;
 
     uint32_t                stages_count;
-    gfx_shader_data*        stages;
+    gfx_shader_stage_data*  stages;
 
     uint32_t                uniform_count;
     gfx_uniform_t*          uniforms;
@@ -575,13 +581,13 @@ typedef struct gfx_render_states_desc_t {
  
 
 typedef struct gfx_render_target_desc_t {
-    uint16_t            width;
-    uint16_t            height;
-    uint32_t            color_attachement_count;
-    gfx_pixel_format *  color_attachement_formats;
-    gfx_pixel_format    depth_attachement_format;
+    uint16_t                    width;
+    uint16_t                    height;
+    uint32_t                    color_attachement_count;
+    gfx_pixel_format *          color_attachement_formats;
+    gfx_pixel_format            depth_attachement_format;
 
-    gfx_antialiasing    antialiasing;
+    gfx_antialiasing            antialiasing;
 } gfx_render_target_desc_t;
 
 
@@ -593,15 +599,20 @@ typedef struct gfx_pipeline_desc_t {
 } gfx_pipeline_desc_t;
 
 
+typedef struct gfx_compute_pipeline_desc_t {
+    gfx_shader_t* shader;
+} gfx_compute_pipeline_desc_t;
+
+
 typedef struct gfx_render_pass_desc_t {
-    uint32_t clear_color;
-    uint32_t clear_depth;
+    uint32_t                    clear_color;
+    uint32_t                    clear_depth;
 } gfx_render_pass_desc_t;
 
 
 typedef struct gfx_device_info_t {
-    gfx_gpu_type    type;           // discrete/embbed
-    char            name[64];       // 
+    gfx_gpu_type                type;           // discrete/embbed
+    char                        name[64];       // 
 } gfx_device_info_t;
 
 gfx_api int32_t                 gfx_enumerate_devices(gfx_device_info_t * infos, int32_t capacity);
@@ -620,6 +631,7 @@ gfx_api gfx_shader_t *          gfx_create_shader2(gfx_context_t* ctx, gfx_shade
 gfx_api gfx_sampler_t *         gfx_create_sampler2(gfx_context_t* ctx, gfx_sampler_desc_t* desc);
 gfx_api gfx_texture_t *         gfx_create_texture2(gfx_context_t* ctx, gfx_texture_desc_t* desc);
 gfx_api gfx_pipeline_t *        gfx_create_pipeline2(gfx_context_t* ctx, gfx_pipeline_desc_t* desc);
+gfx_api gfx_pipeline_compute_t* gfx_create_compute_pipeline2(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc);
 gfx_api gfx_render_target_t *   gfx_create_render_target2(gfx_context_t* ctx, gfx_render_target_desc_t* desc);
 gfx_api gfx_descriptor_set_t *  gfx_create_descriptor_set2(gfx_context_t* ctx, gfx_shader_t* shader);
 gfx_api gfx_command_buffer_t *  gfx_create_cmd2(gfx_context_t* ctx);
@@ -682,6 +694,10 @@ typedef struct gfx_barrier_desc_t {
 
 
 gfx_api void gfx_cmd_barrier(gfx_command_buffer_t* cmd, gfx_barrier barrier, gfx_barrier_desc_t * desc);
+
+
+gfx_api void gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t * buffer, int src, int dst); // 
+gfx_api void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd,  gfx_texture_t* texture, int src, int dst);
 
 // WIP: occlusion query, timestamp, mipmap, raytracing
 // 
@@ -751,6 +767,7 @@ gfx_api void*       gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api void*       gfx_pool_get_data(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_stride(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_size(gfx_handle_pool_t* pool);
+gfx_api size_t      gfx_pool_get_capacity(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_has_free(gfx_handle_pool_t* pool);
 
 

@@ -319,9 +319,24 @@ struct stream_impl
         refill_buffer();
     }
 
+    stream_impl(FILE* file, char * buffer, uint32_t buffer_size) : m_file(file)
+    {
+        m_write_buffer_size = 0;
+      //  m_write_buffer = new char[m_write_buffer_size]();
+
+        m_read_buffer_size = buffer_size;
+        m_read_buffer = buffer;
+        m_external_read_buffer = true;
+
+        refill_buffer();
+    }
+
+
     ~stream_impl()
     {
-        if (m_read_buffer) delete m_read_buffer;
+        if (m_read_buffer && !m_external_read_buffer)
+            delete m_read_buffer;
+
         if (m_write_buffer) delete m_write_buffer;
     }
 
@@ -386,14 +401,15 @@ private:
     }
 
 private:
-    FILE* m_file = nullptr;
+    FILE*       m_file = nullptr;
     size_t      m_file_pos = 0;
 
-    char* m_read_buffer = nullptr;
+    char*       m_read_buffer = nullptr;
     size_t      m_read_buffer_size = 0;
     size_t      m_read_pos = 0;
+    bool        m_external_read_buffer = false;  // external buffer, don't dealocate on destroy
 
-    char* m_write_buffer = nullptr;
+    char*       m_write_buffer = nullptr;
     size_t      m_write_buffer_size = 0;
     size_t      m_write_pos = 0;
 };

@@ -36,6 +36,17 @@ typedef struct spirv_variable_t
     uint16_t    storage; //SpvStorageClass
 } spirv_variable_t;
 */
+
+static gfx_access_type spv_2_gfx_access(SpvAccessQualifier  access) {
+    switch (access) {
+        case SpvAccessQualifierReadOnly:    return gfx_access_read;
+        case SpvAccessQualifierWriteOnly:   return gfx_access_write;
+        case SpvAccessQualifierReadWrite:   return gfx_access_rw;
+        default:                            return gfx_access_read;
+    }
+}
+
+
 static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_uniforms, uint32_t* uniforms_count)
 {
     spirvflect_t* spvflect = nullptr;
@@ -52,9 +63,12 @@ static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_un
         {
             default: break;
             case SpvOpTypeStruct: {
-                out_uniforms[i].type = gfx_uniform_ubo; 
 
-                strcpy(out_uniforms[i].name, spvflect->uniforms[i].name);
+                out_uniforms[i].type = spvflect->uniforms[i].is_storage ? gfx_uniform_storage :
+                                                                          gfx_uniform_ubo;
+
+                out_uniforms[i].storage.access = spv_2_gfx_access(spvflect->uniforms[i].storage.access);
+
 
                 out_uniforms[i].buffer.size = spvflect->uniforms[i].size;
                 out_uniforms[i].buffer.field_count = spvflect->uniforms[i].field_count;
@@ -62,7 +76,7 @@ static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_un
                 {
                     strcpy(out_uniforms[i].buffer.fields[j].name, spvflect->uniforms[i].fields[j].name);
                     out_uniforms[i].buffer.fields[j].offset = spvflect->uniforms[i].fields[j].offset;
-                    //   out_uniforms[i].fields[j].stride = spvflect->uniforms[i].fields[j].count;
+                    out_uniforms[i].buffer.fields[j].stride = spvflect->uniforms[i].fields[j].size;
                 }
             } break;
 
@@ -71,15 +85,22 @@ static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_un
             } break;
 
             case SpvOpTypeImage: { 
-                out_uniforms[i].type = gfx_uniform_texture2d; 
+                out_uniforms[i].texture.access = spv_2_gfx_access(spvflect->uniforms[i].image_info.access);
                 switch (spvflect->uniforms[i].image_info.dimension)
                 {
                  // case     SpvDim1D:  out_uniforms[i].type = gfx_uniform_texture1d; break;
-                    case     SpvDim2D:  out_uniforms[i].type = gfx_uniform_texture2d; break;
-                    case     SpvDim3D:  out_uniforms[i].type = gfx_uniform_texture3d; break;
-                    case     SpvDimCube:out_uniforms[i].type = gfx_uniform_texture2d_cube; break;
+                    case     SpvDim2D:  out_uniforms[i].type = gfx_uniform_texture2d; 
+                                        out_uniforms[i].texture.dimension = gfx_texture2d; break;
+
+                    case     SpvDim3D:  out_uniforms[i].type = gfx_uniform_texture3d; 
+                                        out_uniforms[i].texture.dimension = gfx_texture3d; break;
+
+                    case     SpvDimCube:out_uniforms[i].type = gfx_uniform_texture2d_cube;
+                                        out_uniforms[i].texture.dimension = gfx_texture2d_cube; break;
+
                     default: assert(false); break;
                 }
+
             } break;
         }
       }
