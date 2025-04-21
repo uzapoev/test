@@ -7,73 +7,87 @@
 //int size = (length+3)&~3;
 #include <assert.h>
 #include "memmgr.h"
-//#include "debug.h"
+#include <algorithm>
 
 
-#define THREAD_SAFE                 1
 #define TRACE_MEMORY_ALLOCATION     0
 #define USE_CUSTOM_NEW_ALLOCATION   1
 #define USE_ALLOCATION_CALLBACK     1
 
-bool                s_allocatorDeepLogEnable    = true;
-allocationCallback  s_allocationCallback        = nullptr;
-void*               s_allocationCallbackData    = nullptr;
+bool                        s_allocatorDeepLogEnable    = true;
+allocation_callback_pfn     s_allocationCallback        = nullptr;
+void*                       s_allocationCallbackData    = nullptr;
 
+
+#define sys_malloc(x)           ::malloc(x)
+#define sys_free(x)             ::free(x)
 
 #ifdef _WIN32
     #pragma warning(disable: 6387 28183 28196 28251 28252 28253 )
 
-    #define sys_malloc(x)           ::malloc(x)
-    #define sys_free(x)             ::free(x)
     #define sys_msize(x)            ::_msize(x)
+    #define memlog(...)             ::printf(__VA_ARGS__)
 
-    #define memlog(...)             printf(__VA_ARGS__)
 #elif defined (__APPLE__)
-    #define sys_malloc(x)           ::malloc(x)
-    #define sys_free(x)             ::free(x)
     #define sys_msize(x)            ::malloc_size(x)
+    #define memlog(...)             ::printf(__VA_ARGS__)
 
-    #define memlog(...)             printf(__VA_ARGS__)
-    #define mutex_lock( x )         pthread_mutex_lock( x )
-    #define mutex_unlock( x )       pthread_mutex_unlock( x );
-    #define mutex_destroy( x )      pthread_mutex_destroy( x );
 #elif defined (__ANDROID__)
     #include <android/log.h>
-    #define sys_malloc(x)           ::malloc(x)
-    #define sys_free(x)             ::free(x)
-    #define sys_msize(x)            ::malloc_usable_size(x)
 
-    #define msize(x)                0 //malloc_usable_size(x)
+    #define sys_msize(x)            ::malloc_usable_size(x)
     #define memlog(...)             __android_log_print(ANDROID_LOG_INFO, "memory", __VA_ARGS__)
-    #define mutex_lock( x )         pthread_mutex_lock( x )
-    #define mutex_unlock( x )       pthread_mutex_unlock( x );
-    #define mutex_destroy( x )      pthread_mutex_destroy( x );
 
 #elif defined (__NINTENDO__)
-    #define memlog(...)             printf(__VA_ARGS__)
 
-    #define sys_malloc(x)           ::malloc(x)
-    #define sys_free(x)             ::free(x)
     #define sys_msize(x)            (0)
+    #define memlog(...)             ::printf(__VA_ARGS__)
 
-    #define mutex_lock( x )
-    #define mutex_unlock( x )
-    #define mutex_destroy( x )
 #endif
 
-static volatile size_t g_total_allocated_memory = 0;
-static volatile bool g_trace_allocations = 0;
+static volatile size_t  g_total_allocated_memory = 0;
+static volatile bool    g_trace_allocations = 0;
 
-static memory_stats_t mem_total_allocs = { 0, 0x0fffffff, 0, 0 };
-static memory_stats_t mem_frame_allocs;
-static memory_stats_t mem_frame_frees;
+static memory_stats_t   mem_total_allocs = { 0, 0x0fffffff, 0, 0 };
+static memory_stats_t   mem_frame_allocs;
+static memory_stats_t   mem_frame_frees;
 
-void printMemoryStats();
 void Mem_UpdateAllocStats( size_t size );
 void Mem_UpdateFreeStats ( size_t size );
 
 
-static void setAllocationCallback(allocationCallback cb, void* data)
+int clzll(uint64_t x) {
+    if (x == 0) return 64;
+    int n = 0;
+    if ((x >> 32) == 0) { n += 32; x <<= 32; }
+    if ((x >> 48) == 0) { n += 16; x <<= 16; }
+    if ((x >> 56) == 0) { n += 8; x <<= 8; }
+    if ((x >> 60) == 0) { n += 4; x <<= 4; }
+    if ((x >> 62) == 0) { n += 2; x <<= 2; }
+    if ((x >> 63) == 0) { n += 1; }
+    return n;
+}
+
+
+static bool is_pow(size_t x) {
+    return x && !(x & (x - 1));
+}
+
+static size_t nextPowerOfTwo(size_t x) {
+    if (is_pow(x)) return x;
+    return 1ull << (64 - clzll(x));
+}
+
+static size_t alignUp(size_t val, size_t align) {
+    return (val + align - 1) & ~(align - 1);
+}
+
+static int log2(size_t x) {
+    return static_cast<int>(std::log2(x));
+}
+
+
+static void setAllocationCallback(allocation_callback_pfn cb, void* data)
 {
     s_allocationCallback = cb;
     s_allocationCallbackData = data;
@@ -82,37 +96,267 @@ static void setAllocationCallback(allocationCallback cb, void* data)
 MemoryManager * g_pMemoryManager = nullptr;
 static char _reserved[sizeof(MemoryManager)] = {};
 
-void memory_enable_tracking()
+
+void memory::enable_tracking()
 {
     if(g_pMemoryManager == nullptr)
         g_pMemoryManager = new(_reserved) MemoryManager();
 }
 
-void memory_enable_allocation_traking(bool value)
+void memory::enable_allocation_traking(bool value)
 {
     g_trace_allocations = value;
 }
 
-void memory_dump(memory_stats_t* stats)
+void memory::dump(memory_stats_t* stats)
 {
     if(stats != nullptr)
         memcpy(stats, &mem_total_allocs, sizeof(memory_stats_t));
 }
 
-size_t memory_allocated()
+size_t memory::allocated()
 {
     return g_total_allocated_memory;
 }
 
 
+
+struct FreeList 
+{
+    size_t* data = nullptr;
+    int count = 0;
+    int capacity = 0;
+
+    void init(int cap) {
+        capacity = cap;
+        data = new size_t[cap];
+        count = 0;
+    }
+
+    void destroy() {
+        delete[] data;
+        data = nullptr;
+        count = capacity = 0;
+    }
+
+    bool empty() const { return count == 0; }
+
+    void push(size_t offset) {
+        assert(count < capacity);
+        data[count++] = offset;
+    }
+
+    size_t pop() {
+        assert(count > 0);
+        return data[--count];
+    }
+
+    int find(size_t offset) const {
+        for (int i = 0; i < count; ++i) {
+            if (data[i] == offset) return i;
+        }
+        return -1;
+    }
+
+    void remove(int index) {
+        assert(index >= 0 && index < count);
+        data[index] = data[--count];
+    }
+};
+
+
+buddy_allocator::buddy_allocator(void* buffer, size_t totalSize, size_t minBlockSize)
+    : m_buffer(reinterpret_cast<std::uint8_t*>(buffer)),
+    m_totalSize(totalSize),
+    m_minBlockSize(minBlockSize)
+{
+    assert((totalSize & (totalSize - 1)) == 0);
+    assert((minBlockSize & (minBlockSize - 1)) == 0);
+    assert(minBlockSize <= totalSize);
+
+    m_maxLevel = log2(totalSize) - log2(minBlockSize);
+    m_levelCount = m_maxLevel + 1;
+
+    m_freeLists = new FreeList[m_levelCount];
+
+    for (int i = 0; i < m_levelCount; ++i) {
+        m_freeLists[i].init(256);
+    }
+ 
+    m_freeLists[m_maxLevel].push(0);
+}
+
+buddy_allocator::~buddy_allocator() 
+{
+    for (int i = 0; i < m_levelCount; ++i) {
+        m_freeLists[i].destroy();
+    }
+    delete[] m_freeLists;
+}
+
+void* buddy_allocator::allocate(size_t size, size_t aligment) 
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size = alignUp(size, m_minBlockSize);
+    if (!is_pow(size)) 
+        size = nextPowerOfTwo(size);
+    int level = getLevel(size);
+
+    for (int i = level; i <= m_maxLevel; ++i) {
+        if (!m_freeLists[i].empty()) {
+            size_t offset = m_freeLists[i].pop();
+
+            while (i > level) {
+                i--;
+                size_t buddyOffset = offset + block_size(i);
+                m_freeLists[i].push(buddyOffset);
+            }
+
+            return m_buffer + offset;
+        }
+    }
+
+    return nullptr; 
+}
+
+void buddy_allocator::deallocate(void* ptr) 
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t offset = reinterpret_cast<std::uint8_t*>(ptr) - m_buffer - sizeof(size_t);
+    size_t size = *reinterpret_cast<size_t*>(m_buffer + offset);
+
+    int level = getLevel(size);
+
+    while (level < m_maxLevel) {
+        size_t buddy = get_buddy(offset, level);
+        int index = m_freeLists[level].find(buddy);
+        if (index == -1) break;
+
+        m_freeLists[level].remove(index);
+        offset = std::min(offset, buddy);
+        level++;
+    }
+
+    m_freeLists[level].push(offset);
+}
+
+
+
+
+
+
+
+
+
+
+ptrdiff_t offset_allocator::allocate(size_t size, size_t alignment)
+{
+    if (size == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0) {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+
+    for (auto it = m_free_blocks.begin(); it != m_free_blocks.end(); ++it) {
+        size_t block_offset = it->offset;
+        size_t block_size = it->size;
+
+
+        size_t aligned_offset = (block_offset + alignment - 1) & ~(alignment - 1);
+        size_t padding = aligned_offset - block_offset;
+
+
+        if (block_size >= size + padding) {
+
+            m_allocated_blocks.emplace_back(aligned_offset, size);
+
+
+            if (block_size == size + padding) {
+          
+                m_free_blocks.erase(it);
+            }
+            else {
+
+                if (padding > 0) {
+
+                    it->size = padding;
+                    if (size < block_size - padding) {
+                     
+                        m_free_blocks.emplace_back(aligned_offset + size, block_size - size - padding);
+                    }
+                }
+                else {
+
+                    it->offset = aligned_offset + size;
+                    it->size = block_size - size;
+                }
+            }
+        
+            std::sort(m_free_blocks.begin(), m_free_blocks.end(),
+                [](const Block& a, const Block& b) { return a.offset < b.offset; });
+
+            return static_cast<ptrdiff_t>(aligned_offset);
+        }
+    }
+
+    return -1;
+}
+
+void offset_allocator::deallocate(size_t offset)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    for (auto it = m_allocated_blocks.begin(); it != m_allocated_blocks.end(); ++it) {
+        if (it->offset == offset) {
+            m_free_blocks.emplace_back(it->offset, it->size);
+            m_allocated_blocks.erase(it);
+
+            merge_free_blocks();
+            return;
+        }
+    }
+}
+
+void offset_allocator::merge_free_blocks() {
+    if (m_free_blocks.empty()) {
+        return;
+    }
+
+
+    std::sort(m_free_blocks.begin(), m_free_blocks.end(),
+        [](const Block& a, const Block& b) { return a.offset < b.offset; });
+
+    std::vector<Block> merged;
+    merged.push_back(m_free_blocks[0]);
+
+    for (size_t i = 1; i < m_free_blocks.size(); ++i) {
+        Block& last = merged.back();
+        const Block& current = m_free_blocks[i];
+
+        if (last.offset + last.size >= current.offset) {
+            last.size = std::max(last.size, (current.offset + current.size) - last.offset);
+        }
+        else {
+            merged.push_back(current);
+        }
+    }
+
+    m_free_blocks = std::move(merged);
+}
+
+
+
+
+
 MemoryManager::MemoryManager()
 {
-    printMemoryStats();
 #if USE_ALLOCATION_CALLBACK
     setAllocationCallback(MemoryManager::callback, this);
 #endif
 }
-
 
 
 MemoryManager::~MemoryManager()
@@ -121,9 +365,8 @@ MemoryManager::~MemoryManager()
     setAllocationCallback(nullptr, nullptr);
 
     {
-    #if THREAD_SAFE
         std::lock_guard lock(m_mutex);
-    #endif
+
         mem_block_map(m_blocks).swap(m_blocks);//the STL swap trick to trim memory
         memlog("\n----------------------------------------------------------");
         memlog("\nMemoryTrackerReport");
@@ -198,9 +441,7 @@ void MemoryManager::destroy()
 
 void * MemoryManager::alloc(size_t size )
 {
-#if THREAD_SAFE
     std::lock_guard lock(m_mutex);
-#endif
     
     if ( !size )
         return nullptr;
@@ -244,9 +485,8 @@ void * MemoryManager::alloc16(size_t size)
 
 void MemoryManager::free(void *ptr)
 {
-#if THREAD_SAFE
     std::lock_guard lock(m_mutex);
-#endif
+
     if ( !ptr )
         return;
     
@@ -261,9 +501,8 @@ void MemoryManager::free(void *ptr)
 
 void   MemoryManager::free16(void *ptr)
 {
-#if THREAD_SAFE
     std::lock_guard lock(m_mutex);
-#endif
+
     if ( !ptr )
         return;
 
@@ -272,9 +511,7 @@ void   MemoryManager::free16(void *ptr)
 
 void MemoryManager::dump()
 {
-#if THREAD_SAFE
     std::lock_guard lock(m_mutex);
-#endif
     
     size_t totalMemUsage = 0;
     for(auto & it = m_blocks.begin(); it != m_blocks.end(); ++it)
@@ -290,7 +527,6 @@ void MemoryManager::callback(size_t sz, void* ptr, void* data)
     MemoryManager* t = static_cast<MemoryManager*>(data);
     if(sz > 0) 
     {
-        memblock_t memBlock = memblock_t(sz,ptr);
         if(s_allocatorDeepLogEnable)
         {
             //skip next frames:
@@ -300,7 +536,7 @@ void MemoryManager::callback(size_t sz, void* ptr, void* data)
             //  [3] new
          //   Debug::stacktrace_frames(memBlock.frames, sizeof(memBlock.frames)/sizeof(intptr_t), 4);
         }
-        t->m_blocks.emplace(intptr_t(ptr), memBlock);
+        t->m_blocks.emplace(intptr_t(ptr), memblock_t(sz, ptr));
     }
     else 
     {
@@ -314,10 +550,10 @@ void MemoryManager::callback(size_t sz, void* ptr, void* data)
 
 void MemoryManager::Mem_ClearFrameStats( void )
 {
-    mem_frame_allocs.num = mem_frame_frees.num = 0;
-    mem_frame_allocs.minSize = mem_frame_frees.minSize = 0x0fffffff;
-    mem_frame_allocs.maxSize = mem_frame_frees.maxSize = -1;
-    mem_frame_allocs.totalSize = mem_frame_frees.totalSize = 0;
+    mem_frame_allocs.active_allocations = mem_frame_frees.active_allocations = 0;
+    mem_frame_allocs.min_size = mem_frame_frees.min_size = 0x0fffffff;
+    mem_frame_allocs.max_size = mem_frame_frees.max_size = -1;
+    mem_frame_allocs.total_allocated_size = mem_frame_frees.total_allocated_size = 0;
 }
 
 void MemoryManager::Mem_GetFrameStats(memory_stats_t&allocs, memory_stats_t&frees )
@@ -335,13 +571,11 @@ void MemoryManager::Mem_GetStats(memory_stats_t&stats )
 
 void Mem_UpdateStats(memory_stats_t&stats, size_t size )
 {
-    stats.num++;
-    if ( size < stats.minSize )
-        stats.minSize = size;
-    if ( size > stats.maxSize )
-        stats.maxSize = size;
+    stats.active_allocations++;
+    stats.min_size = std::min(size, stats.min_size);
+    stats.max_size = std::min(size, stats.max_size);
 
-    stats.totalSize += size;
+    stats.total_allocated_size += size;
 }
 
 void Mem_UpdateAllocStats( size_t size )
@@ -350,81 +584,15 @@ void Mem_UpdateAllocStats( size_t size )
     Mem_UpdateStats( mem_total_allocs, size );
 }
 
+
 void Mem_UpdateFreeStats( size_t size )
 {
     Mem_UpdateStats( mem_frame_frees, size );
-    mem_total_allocs.num--;
-    mem_total_allocs.totalSize -= size;
+    mem_total_allocs.active_allocations--;
+    mem_total_allocs.total_allocated_size -= size;
 }
 
-/*
-void* Mem_ClearedAlloc( const int size )
-{
-    void *mem = Mem_Alloc( size );
-#ifdef _SIMDMMX
-    SIMDMMXMemset( mem, 0, size );
-#else
-    memset( mem, 0, size );
-#endif
-    return mem;
-}*/
-/*
-void MemoryManager::Mem_AllocDefragBlock( void )
-{
-    mem_heap->AllocDefragBlock();
-}
 
-char* Mem_CopyString( const char *in )
-{
-    char *out;
-
-    out = (char *)Mem_Alloc( strlen(in) + 1 );
-    strcpy( out, in );
-    return out;
-}*/
-
-
-
-
-#define SMALL_HEADER_SIZE    ( (int) ( sizeof( uint8_t ) + sizeof( byte ) ) )
-#define MEDIUM_HEADER_SIZE    ( (int) ( sizeof( mediumHeapEntry_s ) + sizeof( byte ) ) )
-#define LARGE_HEADER_SIZE    ( (int) ( sizeof( uint32_t * ) + sizeof( byte ) ) )
-
-#define ALIGN_SIZE( bytes )    ( ( (bytes) + ALIGN - 1 ) & ~(ALIGN - 1) )
-#define SMALL_ALIGN( bytes ) ( ALIGN_SIZE( (bytes) + SMALL_HEADER_SIZE ) - SMALL_HEADER_SIZE )
-#define MEDIUM_SMALLEST_SIZE ( ALIGN_SIZE( 256 ) + ALIGN_SIZE( MEDIUM_HEADER_SIZE ) )
-
-
-
-void printMemoryStats()
-{
-#ifdef _WIN32
-#elif  defined(__APPLE__) || defined(PLATFORM_APPLE)
-    vm_statistics_data_t info;
-    vm_size_t pagesize = 0;
-    mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
-    kern_return_t success;
-    
-    host_page_size(mach_host_self(), &pagesize);
-    success = host_statistics(mach_host_self(), HOST_VM_INFO, (host_info_t)&info, &count);
-    if (success != KERN_SUCCESS)
-        return ;
-    
-    double total = info.wire_count + info.active_count + info.inactive_count + info.free_count;
-    double wired = info.wire_count / total;
-    double active = info.active_count / total;
-    double inactive = info.inactive_count / total;
-    double free = info.free_count / total;
-    
-    
-    memlog("Total:     %8d pages\n", info.wire_count + info.active_count + info.inactive_count + info.free_count);
-    memlog("\tWired:      %9lu bytes (%0.2f %%)\n", (unsigned long)(info.wire_count * pagesize),    wired * 100.0);
-    memlog("\tActive:     %9lu bytes (%0.2f %%)\n", (unsigned long)(info.active_count * pagesize),  active * 100.0);
-    memlog("\tInactive:   %9lu bytes (%0.2f %%)\n", (unsigned long)(info.inactive_count * pagesize),inactive * 100.0);
-    memlog("\tFree:       %9lu bytes (%0.2f %%)\n", (unsigned long)(info.free_count * pagesize),    free * 100.0);
-    
-#endif
-}
 
 //#define TRACE_MEMORY_ALLOCATION 1
 //volatile const unsigned int memoryUsed = 0;
@@ -461,7 +629,7 @@ void *operator new(size_t size)/* noexcept*/
 void * operator new[](size_t size) /*noexcept*/
 {
     if (g_trace_allocations)
-        memlog("+");
+        memlog("*");
 
     void* ptr = nullptr;
     if(g_pMemoryManager)
@@ -482,7 +650,7 @@ void * operator new[](size_t size) /*noexcept*/
 void operator delete(void *ptr) noexcept
 {
     if (g_trace_allocations)
-        memlog("+");
+        memlog("-");
 
     if(ptr)
     {
@@ -503,7 +671,7 @@ void operator delete(void *ptr) noexcept
 void operator delete[](void * ptr) noexcept
 {
     if (g_trace_allocations)
-        memlog("+");
+        memlog("/");
 
     if(ptr)
     {

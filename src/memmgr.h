@@ -10,19 +10,6 @@
 
 #ifdef _WIN32
     #pragma warning (disable: 4530)// C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
- //   #include <windows.h>
-#elif defined (__APPLE__)
-    #include <stdio.h>
-    #include <stdlib.h>
-    #include <pthread.h>
-    #include <mach/mach.h>
-    #include <malloc/malloc.h>
-#else
-    #include <stdio.h>
-    #include <stdlib.h>
-    #include <pthread.h>
-    #include <malloc.h>
-    #include <string.h>
 #endif
 
 #include <map>
@@ -30,10 +17,10 @@
 #include <unordered_map>
 
 // https://github.com/suVrik/allocator_benchmark
-class iallocator
+struct iallocator
 {
-public:
     virtual void *  allocate(size_t size, size_t alignment) = 0;
+
     virtual void    deallocate(void* memory) = 0;
 
     template <typename T>
@@ -42,30 +29,102 @@ public:
     }
 };
 
+
+class default_allocator : iallocator
+{
+public:
+    virtual void *  allocate(size_t size, size_t alignment);
+
+    virtual void    deallocate(void* memory);
+};
+
+
+
 class buddy_allocator : iallocator
 {
+public:
+    buddy_allocator(void* buffer, size_t totalSize, size_t minBlockSize = 64);
+
+    ~buddy_allocator();
+
+    virtual void *      allocate(size_t size, size_t alignment);
+
+    virtual void        deallocate(void* memory);
+
+    int                 getLevel(size_t size) const                 {        return (int)(log2(size) - log2(m_minBlockSize));    }
+
+    size_t              block_size(int level) const                 {        return m_minBlockSize << level;    }
+
+    size_t              get_buddy(size_t offset, int level) const   {        return offset ^ block_size(level);    }
+
+private:
+
+    default_allocator * m_allocator = nullptr;
+    uint8_t*            m_buffer;
+    size_t              m_totalSize;
+    size_t              m_minBlockSize;
+    int                 m_maxLevel;
+    int                 m_levelCount;
+
+    struct FreeList *   m_freeLists;
+    std::mutex          m_mutex;
+};
+
+
+struct paged_pool_allocator: iallocator
+{
+};
+
+
+struct offset_allocator
+{
+    ptrdiff_t   allocate(size_t size, size_t alignment);
+    void        deallocate(size_t offset);
+
+protected:
+    void        merge_free_blocks();
+
+    size_t      buffer_size() const         {   return m_buffer_size;    }
+
+private:
+    struct Block {
+        size_t offset;
+        size_t size;
+
+        Block(size_t off, size_t sz) : offset(off), size(sz) {}
+    };
+
+    size_t                  m_buffer_size;
+    std::vector<Block>      m_free_blocks;
+    std::vector<Block>      m_allocated_blocks;
+    mutable std::mutex      m_mutex;
+};
+
+
+struct memory
+{
+    static void    enable_tracking();
+    static void    enable_allocation_traking(bool value);
+    static void    dump(struct memory_stats_t* stats);
+    static size_t  allocated();
 };
 
 
 ////////////////////////
 //
-typedef void    (*allocationCallback)(size_t sz, void* ptr, void* data);
-extern bool                 s_allocatorDeepLogEnable;
-extern allocationCallback   s_allocationCallback;
-extern void*                s_allocationCallbackData;
+typedef void    (*allocation_callback_pfn)(size_t sz, void* ptr, void* data);
 
-void    memory_enable_tracking();
-void    memory_enable_allocation_traking(bool value);
-void    memory_dump(struct memory_stats_t* stats);
-size_t  memory_allocated();
+
+ 
 
 
 typedef struct memory_stats_t
 {
-    int num;
-    size_t minSize;
-    size_t maxSize;
-    size_t totalSize;
+    int     active_allocations;
+    size_t  total_allocated_size;
+
+    size_t  min_size;
+    size_t  max_size;
 } memory_stats_t;
 
 
@@ -111,7 +170,7 @@ protected:
         memblock_t(size_t sz, void* p) :ptr(p), size(sz) { memset(frames, 0, sizeof(frames)); }
 
         memblock_t(const memblock_t& src)               { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); }
-        memblock_t& operator = (const memblock_t& src)  { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); return *this; }
+     //   memblock_t& operator = (const memblock_t& src)  { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); return *this; }
 
         bool    operator == (void* ptr) const { return ptr == ptr; }
 
