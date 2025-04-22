@@ -830,15 +830,15 @@ uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
     return ((n + alignment - 1) / alignment) * alignment; 
   //  return (n + alignment - 1) & ~(alignment - 1);
 }
-
 #pragma endregion
+
 
 #ifdef VULKAN_AVAILABLE
 #include "gfx_vulkan.h"
-#endif
+
 void gfx_init_vulkan(gfx_api_pfn* func_table)
 {
-#ifdef VULKAN_AVAILABLE
+    memset(func_table, 0, sizeof(gfx_api_pfn));
     func_table->pfn_init                    = vk_create_renderer;
     func_table->pfn_create_swapchain        = vk_create_swapchain;
 
@@ -888,15 +888,19 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 
     func_table->pfn_cmd_end                 = vk_cmd_end;
     func_table->pfn_submit_cmd              = vk_submit_cmd;
-#endif
 }
+#else
+void gfx_init_vulkan(gfx_api_pfn* func_table) { 
+    memset(func_table, 0, sizeof(gfx_api_pfn)); 
+}
+#endif
+
 
 #ifdef WEBGPU_AVAILABLE
 #include "gfx_webgpu.h"
-#endif
+
 void gfx_init_webgpu(gfx_api_pfn* func_table)
 {
-#ifdef WEBGPU_AVAILABLE
     func_table->pfn_init                    = wgpu_init;
     func_table->pfn_create_swapchain        = wgpu_create_swapchain;
 
@@ -943,5 +947,9 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
 
     func_table->pfn_cmd_end                 = wgpu_cmd_end;
     func_table->pfn_submit_cmd              = wgpu_submit_cmd;
-#endif
 }
+#else 
+void gfx_init_webgpu(gfx_api_pfn* func_table) {
+    memset(func_table, 0, sizeof(gfx_api_pfn));
+}
+#endif

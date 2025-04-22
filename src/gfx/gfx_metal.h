@@ -36,7 +36,7 @@ typedef struct metal_render_target_t {
 
 typedef struct metal_swapchain_t {
     gfx_swapchain_t                 handle;
-    metal_render_target_t* target;
+    metal_render_target_t*          target;
     id<CAMetalDrawable>             drawable;
 
     id<MTLTexture>                  color_texture;
@@ -54,7 +54,7 @@ typedef struct metal_command_buffer_t {
 
 
 
-    metal_descriptor_set_pool_t* active_pool; //
+    metal_descriptor_set_pool_t*    active_pool; //
     MTLIndexType                    index_type;
     id<MTLBuffer>                   index_buffer;
 } metal_command_buffer_t;
@@ -89,14 +89,14 @@ typedef struct metal_pipeline_t {
 
 
 typedef struct metal_writes_t {
-    gfx_uniform_type            type;
-    uint32_t                    stage_mask;
-    uint16_t                    slot;
-    uint16_t                    offset;
-    union {
-        id<MTLBuffer>           buffer;
-        id<MTLTexture>          texture;
-        id<MTLSamplerState>     sampler;
+    gfx_uniform_type                type;
+    uint32_t                        stage_mask;
+    uint16_t                        slot;
+    uint16_t                        offset;
+    union { 
+        id<MTLBuffer>               buffer;
+        id<MTLTexture>              texture;
+        id<MTLSamplerState>         sampler;
     };
 } metal_writes_t;
 
@@ -107,10 +107,10 @@ typedef struct metal_descriptor_set_pool_t {
     uint32_t                        next_free;
 
     uint8_t                         dirty;
-    metal_writes_t* writes;
+    metal_writes_t*                 writes;
     struct metal_descriptor_set_t*  descriptor_sets;
 
-    gfx_buffer_t* ubo;
+    gfx_buffer_t*                   ubo;
     uint32_t                        ubo_buffer_data_size;
     void* ubo_buffer_data_ptr;
 

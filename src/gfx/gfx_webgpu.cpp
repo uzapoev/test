@@ -553,6 +553,7 @@ void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
     wgpuDeviceGetLimits(device, &wctx->limits);
     wgpuAdapterGetProperties(adapter, &wctx->properties);
 
+    // wgpuDevicePoll(device, true, NULL);
 
     auto adaptertype = [](WGPUAdapterType type) -> const char* {
         switch(type) {

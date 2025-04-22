@@ -85,7 +85,7 @@ typedef enum gfx_msg {
 
 
 typedef enum gfx_backend {
-    gfx_backend_auto,   //metal for apple, webgpu - html, vulkan - win/android, dx12 - win
+    gfx_backend_auto,               //metal for apple, webgpu - html, vulkan - win/android, dx12 - win
     gfx_backend_vulkan,
     gfx_backend_d3d12,
     gfx_backend_metal,
@@ -211,14 +211,13 @@ typedef enum gfx_index_format {
 } gfx_index_format;
 
 
-typedef enum gfx_antialiasing {
-    gfx_aa_no,
-    gfx_aa_1x,
-    gfx_aa_2x,
-    gfx_aa_4x,
-    gfx_aa_8x,
-    gfx_aa_16x,
-} gfx_antialiasing;
+typedef enum gfx_sample_count {
+    gfx_sample_1x   = 1,
+    gfx_sample_2x   = 2,
+    gfx_sample_4x   = 4,
+    gfx_sample_8x   = 8,
+    gfx_sample_16x  = 16,
+} gfx_sample_count;
 
 
 typedef enum gfx_topology {
@@ -381,11 +380,10 @@ typedef struct gfx_allocator_t {
 } gfx_allocator_t;
 
 typedef struct gfx_settings_t {
-    const char*             appname             = "gfx";
-    uint32_t                options             = 0;
+    uint32_t                options                 = 0;
 
-    gfx_backend             backend             = gfx_backend_auto;
-    intptr_t                handle              = 0;
+    gfx_backend             backend                 = gfx_backend_auto;
+    intptr_t                handle                  = 0;
 
     struct {
         uint32_t            staging_buffer_size     = 16 * 1024 * 1024;
@@ -399,10 +397,15 @@ typedef struct gfx_settings_t {
 } gfx_settings_t;
 
 
-typedef struct gfx_caps_t {
-    gfx_gpu_type            gpu_type;
-    char                    gpu_name[64];
+typedef struct gfx_device_info_t {
+    gfx_gpu_type            type;               // discrete/embbed
+    char                    name[64];           // 
     char                    gpu_vendor[64];
+} gfx_device_info_t;
+
+
+typedef struct gfx_caps_t {
+    gfx_device_info_t       device_info;    
 
     uint8_t                 support_pvr;        //
     uint8_t                 support_etc;        //
@@ -455,32 +458,29 @@ typedef struct gfx_uniform_t {
     uint16_t                binding;
     uint16_t                group;          //
     
- //   union
-  //  {
+    struct {
+        uint16_t            size;           //
+        uint16_t            field_count;    //
         struct {
-            uint16_t            size;           //
-            uint16_t            field_count;    //
-            struct {
-                char                name[32];
-                uint16_t            stride;     // for ubo field
-                uint16_t            offset;     // for ubo field
-                uint16_t            type;       // for ubo field
-            } fields[16];
-        } buffer;
-
-        struct  {
-            gfx_access_type     access;
-        } storage;
-
-        struct {
-            gfx_texture_type    dimension;
-            gfx_access_type     access;       // read/write/read_wite
-        } texture;
-
-        struct {
-            
-        } sampler;
-  //  };
+            char            name[32];
+            uint16_t        stride;     // for ubo field
+            uint16_t        offset;     // for ubo field
+            uint16_t        type;       // for ubo field
+        } fields[16];
+    } buffer;
+    
+    struct  {
+        gfx_access_type     access;
+    } storage;
+    
+    struct {
+        gfx_texture_type    dimension;
+        gfx_access_type     access;       // read/write/read_wite
+    } texture;
+    
+    struct {
+        
+    } sampler;
 } gfx_uniform_t;
 
 
@@ -534,48 +534,47 @@ typedef struct gfx_vertex_assembly {
 
 
 typedef struct gfx_render_states_desc_t {
-    gfx_topology        topology    = gfx_topology_triangles;
-    gfx_cull            culling     = gfx_cull_none;
-    gfx_face            face        = gfx_face_ccw;
-    uint32_t            states      = gfx_colormask_all | gfx_depth_test | gfx_depth_write;
+    gfx_topology            topology    = gfx_topology_triangles;
+    gfx_cull                culling     = gfx_cull_none;
+    gfx_face                face        = gfx_face_ccw;
+    uint32_t                states      = gfx_colormask_all | gfx_depth_test | gfx_depth_write;
 
     struct {
-        gfx_pixel_format* color;
+        gfx_pixel_format*   color;
     } attacments;
 
     struct {
-        bool            enable      = false;
-        gfx_blend_mode  color_src   = gfx_blend_mode_one;   // srcColor
-        gfx_blend_mode  color_dst   = gfx_blend_mode_one;   // dstColor
-        gfx_blend_op    color_op    = gfx_blend_op_add;     // opColor
+        bool                enable      = false;
+        gfx_blend_mode      color_src   = gfx_blend_mode_one;   // srcColor
+        gfx_blend_mode      color_dst   = gfx_blend_mode_one;   // dstColor
+        gfx_blend_op        color_op    = gfx_blend_op_add;     // opColor
 
-        gfx_blend_mode  alpha_dst   = gfx_blend_mode_one;   // srcAlpha
-        gfx_blend_mode  alpha_src   = gfx_blend_mode_one;   // dstAlpha
-        gfx_blend_op    alpha_op    = gfx_blend_op_add;     // opAlpha
+        gfx_blend_mode      alpha_dst   = gfx_blend_mode_one;   // srcAlpha
+        gfx_blend_mode      alpha_src   = gfx_blend_mode_one;   // dstAlpha
+        gfx_blend_op        alpha_op    = gfx_blend_op_add;     // opAlpha
     } blend;
     
     struct {
-        bool            enable      = true;
-        bool            write       = true;
-        gfx_cmp         mode        = gfx_cmp_lequal;
+        bool                enable      = true;
+        bool                write       = true;
+        gfx_cmp             mode        = gfx_cmp_lequal;
     } depth;
 
     struct {
- 
-        gfx_cmp         func        = gfx_cmp_always;
-        uint8_t         ref         = 0;
-        uint8_t         pass        = 0xFF;
+        gfx_cmp             func        = gfx_cmp_always;
+        uint8_t             ref         = 0;
+        uint8_t             pass        = 0xFF;
 
-        gfx_stencil_op  opPass      = gfx_stencil_op_keep;
-        gfx_stencil_op  opFail      = gfx_stencil_op_keep;
-        gfx_stencil_op  opZFail     = gfx_stencil_op_keep;
+        gfx_stencil_op      opPass      = gfx_stencil_op_keep;
+        gfx_stencil_op      opFail      = gfx_stencil_op_keep;
+        gfx_stencil_op      opZFail     = gfx_stencil_op_keep;
     } stencil;
 
     struct {
-        bool            red         = true;
-        bool            green       = true;
-        bool            blue        = true;
-        bool            alpha       = true; 
+        bool                red         = true;
+        bool                green       = true;
+        bool                blue        = true;
+        bool                alpha       = true; 
     } color_mask;
 } gfx_render_states_desc_t;
  
@@ -587,7 +586,7 @@ typedef struct gfx_render_target_desc_t {
     gfx_pixel_format *          color_attachement_formats;
     gfx_pixel_format            depth_attachement_format;
 
-    gfx_antialiasing            antialiasing;
+    gfx_sample_count            sample_count;
 } gfx_render_target_desc_t;
 
 
@@ -610,15 +609,9 @@ typedef struct gfx_render_pass_desc_t {
 } gfx_render_pass_desc_t;
 
 
-typedef struct gfx_device_info_t {
-    gfx_gpu_type                type;           // discrete/embbed
-    char                        name[64];       // 
-} gfx_device_info_t;
-
 gfx_api int32_t                 gfx_enumerate_devices(gfx_device_info_t * infos, int32_t capacity);
 gfx_api gfx_backend             gfx_detect_bakend(gfx_backend * backends, uint32_t size);
 gfx_api void                    gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
-
 
 gfx_api void                    gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
 gfx_api void                    gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain);
@@ -679,12 +672,14 @@ gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_b
 
 // https://www.khronos.org/blog/understanding-vulkan-synchronization
 // https://github.com/khronosgroup/vulkan-docs/wiki/synchronization-examples
+
 typedef enum gfx_barrier {
-    gfx_barrier_compute_compute,
-    gfx_barrier_compute_graphics,
-    gfx_barrier_graphics_compute,
-    gfx_barrier_graphics_graphics,
-    gfx_barrier_transfer,
+    gfx_barrier_compute_src,
+    gfx_barrier_compute_dst,
+    gfx_barrier_vertex_src,
+    gfx_barrier_vertex_dst,
+    gfx_barrier_fragment_src,
+    gfx_barrier_fragment_dst
 } gfx_barrier;
 
 typedef struct gfx_barrier_desc_t {
@@ -696,8 +691,8 @@ typedef struct gfx_barrier_desc_t {
 gfx_api void gfx_cmd_barrier(gfx_command_buffer_t* cmd, gfx_barrier barrier, gfx_barrier_desc_t * desc);
 
 
-gfx_api void gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t * buffer, int src, int dst); // 
-gfx_api void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd,  gfx_texture_t* texture, int src, int dst);
+gfx_api void gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, gfx_barrier src, gfx_barrier dst); // 
+gfx_api void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t* texture, gfx_barrier src, gfx_barrier dst);
 
 // WIP: occlusion query, timestamp, mipmap, raytracing
 // 
@@ -758,6 +753,7 @@ gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, 
 gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width);
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
 
+// pool 
 gfx_api void        gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** pool, gfx_allocator_t * allocator);
 gfx_api void        gfx_pool_destroy(gfx_handle_pool_t* pool);
 gfx_api uint64_t    gfx_pool_alloc(gfx_handle_pool_t* pool);

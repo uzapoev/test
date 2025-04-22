@@ -462,8 +462,8 @@ void load_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size, 
 
     if(desc.data != nullptr && desc.mip_levels > 1)
     {
-        int target_width = 1024;
-        int offset = 0;
+        uint32_t target_width = 1024;
+        uint32_t offset = 0;
         while (desc.width > target_width)
         {
             offset += gfx_utils_image_layer_size(desc.width, desc.height, desc.depth, desc.format);
