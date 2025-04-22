@@ -107,12 +107,15 @@ set(SOURCES
     src/gfx/gfx_webgpu.cpp
     src/scene/scene.cpp
     src/scene/scene.h
-    src/json.h
+    src/gason.cpp
+    src/gason.h
     src/json_serializer.h
     src/resource_manager.cpp
     src/resource_manager.h
     src/common.cpp
     src/common.h
+    src/memmgr.cpp
+    src/memmgr.h
 )
 
 
