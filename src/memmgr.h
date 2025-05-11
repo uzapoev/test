@@ -78,7 +78,9 @@ struct paged_pool_allocator: iallocator
 
 struct offset_allocator
 {
-    ptrdiff_t   allocate(size_t size, size_t alignment);
+    offset_allocator(size_t size, size_t min_size = 16);
+
+    ptrdiff_t   allocate(size_t size, size_t alignment = 0);
     void        deallocate(size_t offset);
 
 protected:
@@ -88,12 +90,14 @@ protected:
 
 private:
     struct Block {
-        size_t offset;
-        size_t size;
+        size_t offset = 0;
+        size_t size = 0;
 
         Block(size_t off, size_t sz) : offset(off), size(sz) {}
+        Block(){}
     };
 
+    size_t                  m_min_size;
     size_t                  m_buffer_size;
     std::vector<Block>      m_free_blocks;
     std::vector<Block>      m_allocated_blocks;

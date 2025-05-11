@@ -246,12 +246,26 @@ namespace math
         inline float    decode16_snorm(uint16_t x)                      { return decode_snorm<16>(x); }
 
 
+        static uint32_t encode_float2_snorm(float2 uv)
+        {
+            uint16_t x = (uint16_t)((uv.x + 1) * 0.5f * 65536);
+            uint16_t y = (uint16_t)((uv.y + 1) * 0.5f * 65536);
+            return (uint32_t)((x & 0xFFFF) | ((y & 0xFFFF) << 16));
+        }
+
+        static float2 decode_float2_snorm(uint32_t value)
+        {
+            float x = ((value >> 00) & 0xFFFF) / 32767.0f;
+            float y = ((value >> 16) & 0xFFFF) / 32767.0f;
+            return {x, y};
+        }
+
         // encode each float in 10 bit
         static uint32_t encode_float3_snorm(float3 v)
         {
-            int x = (v.x + 1.0f) * 512;
-            int y = (v.y + 1.0f) * 512;
-            int z = (v.z + 1.0f) * 512;
+            int x = (int)(v.x + 1.0f) * 512;
+            int y = (int)(v.y + 1.0f) * 512;
+            int z = (int)(v.z + 1.0f) * 512;
             return (x & 0x3FF) | ((y & 0x3FF) << 10) | ((z & 0x3FF) << 20);
         }
 
@@ -757,21 +771,21 @@ struct frustum
         return 2; // inside
     }
 
-    static MATH_INLINE int check_bbox(const frustum& f, const bbox& bbox)
+    static MATH_INLINE int check_bbox(const frustum& f, const bbox& bounds)
     {
         int total = 0;
         for (int i = 0; i < 6; i++)
         {
             const plane& p = f.planes[i];
             int out = 0;
-            out += ((p.dot(bbox.corners[0]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.corners[1]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.corners[2]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.corners[3]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.corners[4]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.corners[5]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.corners[6]) < 0.0) ? 1 : 0);
-            out += ((p.dot(bbox.corners[7]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[0]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[1]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[2]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[3]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[4]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[5]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[6]) < 0.0) ? 1 : 0);
+            out += ((p.dot(bounds.corners[7]) < 0.0) ? 1 : 0);
             if (out == 8)
                 return false;
             total += out;

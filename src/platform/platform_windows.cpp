@@ -168,19 +168,19 @@ int main(int argc, char ** argv)
                         // new
                         if (!btn_flags)                                 push_input_mouse_event(x, y, dx, dy, input_state_move, none);
                         if (btn_flags & RI_MOUSE_LEFT_BUTTON_DOWN)      push_input_mouse_event(x, y, dx, dy, input_state_down, mouse_btn_left);
-                        if (btn_flags & RI_MOUSE_LEFT_BUTTON_UP)        push_input_mouse_event(x, y, dx, dy, input_state_up, mouse_btn_left);
+                        if (btn_flags & RI_MOUSE_LEFT_BUTTON_UP)        push_input_mouse_event(x, y, dx, dy, input_state_up,   mouse_btn_left);
 
                         if (btn_flags & RI_MOUSE_RIGHT_BUTTON_DOWN)     push_input_mouse_event(x, y, dx, dy, input_state_down, mouse_btn_right);
-                        if (btn_flags & RI_MOUSE_RIGHT_BUTTON_UP)       push_input_mouse_event(x, y, dx, dy, input_state_up, mouse_btn_right);
+                        if (btn_flags & RI_MOUSE_RIGHT_BUTTON_UP)       push_input_mouse_event(x, y, dx, dy, input_state_up,   mouse_btn_right);
 
                         if (btn_flags & RI_MOUSE_MIDDLE_BUTTON_DOWN)    push_input_mouse_event(x, y, dx, dy, input_state_down, mouse_btn_middle);
-                        if (btn_flags & RI_MOUSE_MIDDLE_BUTTON_UP)      push_input_mouse_event(x, y, dx, dy, input_state_up, mouse_btn_middle);
+                        if (btn_flags & RI_MOUSE_MIDDLE_BUTTON_UP)      push_input_mouse_event(x, y, dx, dy, input_state_up,   mouse_btn_middle);
 
                         if (btn_flags & RI_MOUSE_BUTTON_4_DOWN)         push_input_mouse_event(x, y, dx, dy, input_state_down, mouse_btn_extra0);
-                        if (btn_flags & RI_MOUSE_BUTTON_4_UP)           push_input_mouse_event(x, y, dx, dy, input_state_up, mouse_btn_extra0);
+                        if (btn_flags & RI_MOUSE_BUTTON_4_UP)           push_input_mouse_event(x, y, dx, dy, input_state_up,   mouse_btn_extra0);
 
                         if (btn_flags & RI_MOUSE_BUTTON_5_DOWN)         push_input_mouse_event(x, y, dx, dy, input_state_down, mouse_btn_extra1);
-                        if (btn_flags & RI_MOUSE_BUTTON_5_UP)           push_input_mouse_event(x, y, dx, dy, input_state_up, mouse_btn_extra1);
+                        if (btn_flags & RI_MOUSE_BUTTON_5_UP)           push_input_mouse_event(x, y, dx, dy, input_state_up,   mouse_btn_extra1);
                     }
 
                 } break;

@@ -28,8 +28,9 @@ typedef struct wgpu_context_t {
 
     gfx_callback                dbglog;
     
-    gfx_handle_pool_t *         texture_pool;
+
     gfx_handle_pool_t *         sampler_pool;
+    gfx_handle_pool_t *         texture_pool;
     gfx_handle_pool_t *         buffer_pool;
     gfx_handle_pool_t *         shader_pool; 
     gfx_handle_pool_t *         pipeline_pool;
@@ -168,7 +169,6 @@ typedef struct wgpu_swapchain_t {
     WGPUSurface                 surface;
     WGPUSwapChain               swapchain;
 
-
     WGPUTexture                 backbuffer;
     WGPUTextureView             backbuffer_view;
 } wgpu_swapchain_t;
@@ -187,7 +187,7 @@ gfx_api void     wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* des
 gfx_api void     wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
 gfx_api void     wgpu_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
 gfx_api void     wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
-gfx_api void     wgpu_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);
+gfx_api void     wgpu_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
 
 gfx_api void     wgpu_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);
 gfx_api void     wgpu_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);

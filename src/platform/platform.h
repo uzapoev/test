@@ -42,6 +42,17 @@ typedef struct monitor_info_t {
 } monitor_info_t;
 
 
+typedef enum platform_id {
+    platform_unknown,
+    platform_win,
+    platform_mac,
+    platform_ios,
+    platform_steam_deck,
+    platform_android,
+    platform_web
+} platform_id;
+
+
 typedef enum input_device_type {
     input_device_keyboard,
     input_device_mouse,

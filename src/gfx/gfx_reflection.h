@@ -158,7 +158,7 @@ static void reflect_wgsl(const char* data, size_t size, gfx_uniform_t* out_unifo
         const char* last = nullptr;
         const char* var = strstr(buffer, "var");
         if (var && match("var<uniform>", var, &last)) {
-            printf("");
+
         }
         else if (var && match("var <storage, read>", buffer, &last)) {
             out_uniforms[count].type = gfx_uniform_storage;

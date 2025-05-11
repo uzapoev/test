@@ -33,15 +33,16 @@ static constexpr char* pragma_mesh_name             = "mesh";
 static constexpr char* pragma_amplification_name    = "amplification";
 
 
-typedef struct shader_blob_t {
-    int*            sizes;
-    char**          blobs;
-    const char**    stages;
-} shader_blob_t;
+typedef struct stage_blob_t {
+    const char* stage;
+    int         size;
+    char*       blob;
+} stage_blob_t;
 
 extern int  asset_shader_compile(const char* name, const char* data, uint32_t size, const char* target, char** out_blobs, int* out_sizes, const char** out_stages);
-extern void asset_shader_blob_free(shader_blob_t * blob);
-extern void save_sader_asset(const char * path, shader_blob_t* stages, uint32_t count);
+extern int  asset_shader_compile(const char* name, const char* data, uint32_t size, const char* target, stage_blob_t *blobs);
+extern void asset_shader_blob_free(stage_blob_t * blob);
+extern void save_shader_asset(const char * path, stage_blob_t* stages, uint32_t stage_count);
 
 
 class AssetShader

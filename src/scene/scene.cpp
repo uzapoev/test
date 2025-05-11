@@ -39,7 +39,7 @@ scene scene::create_from_json_file(const std::string& path)
     }
     else
     {
-        auto result = scene_reader_json::create_form_file(path);
+        result = scene_reader_json::create_form_file(path);
         result.init();
         result.save(bin_path);
     }
@@ -58,13 +58,15 @@ scene scene::create_from_json_file(const std::string& path)
                 current_vb_size += mesh->mesh()->vertex_count * sizeof(vertex);
                 compressed_vb_size += mesh->mesh()->vertex_count * sizeof(vertex_compressed);
             }
+            else
+                debug::log_error("failed load mesh %s", m.c_str());
         }
     }
     float fi = (float)(current_ib_size) / (1024.0f * 1024.0f);
     float fv = (float)(current_vb_size) / (1024.0f * 1024.0f);
     float fcv = (float)(compressed_vb_size) / 1024.0f / 1024.0f;
     float profit = (fv + fi)/(fcv + fi);
-
+     
     for (size_t i = 0; i < result.m_nodes_flat_list.size(); ++i)
     {
         renderer_t renderer = {};
@@ -73,7 +75,7 @@ scene scene::create_from_json_file(const std::string& path)
                                         node->transform.rotation,
                                         node->transform.scale);
 
-      //  if(strstr(node.name.c_str(), "LOD0"))          continue;
+   //     if(strstr(node->name.c_str(), "LOD0"))          continue;
         if(strstr(node->name.c_str(), "LOD1"))   continue;
         if(strstr(node->name.c_str(), "LOD2"))   continue;
         if(strstr(node->name.c_str(), "LOD3"))   continue;
@@ -85,6 +87,9 @@ scene scene::create_from_json_file(const std::string& path)
         auto lighmap_guid = node->renderer.lightmap_guid;
         auto material_guid = node->renderer.material_guid.c_str();
 
+        if(mesh_guid.empty())
+            continue;
+
         auto mesh = resource_manager::shared()->load_mesh(mesh_guid.c_str());
         if(mesh == nullptr)
             continue;
@@ -93,9 +98,12 @@ scene scene::create_from_json_file(const std::string& path)
         renderer.material = resource_manager::shared()->load_material(material_guid).get();
         renderer.world_bounds = bbox::create(renderer.mesh->bounds, renderer.transform);
 
+        if(renderer.material == nullptr)
+            debug::log_error("failed to load material %s", material_guid);
+
         if(!lighmap_guid.empty())
         {
-            renderer.lightmap.lightmap = resource_manager::shared()->load_texture(lighmap_guid.c_str())->texture_();
+            renderer.lightmap.lightmap = resource_manager::shared()->load_texture(lighmap_guid.c_str())->texture_handle();
             renderer.lightmap.scale_offset = node->renderer.lightmap_scale_offset;
         }
 
@@ -127,7 +135,7 @@ scene scene::create_from_json_file(const std::string& path)
         if(texture_location && renderer.material->instance->textures[0].value)
             gfx_uniform_set_texture(set, texture_location, renderer.material->instance->textures[0].value);
 
-        if(lightmap_scale_offset_location != 0)
+       if(lightmap_scale_offset_location != 0)
             gfx_uniform_set_buffer_data(set, lightmap_scale_offset_location, &result.m_renderers[i].lightmap.scale_offset, sizeof(vec4));
 
         if(lightmap_location != 0)
@@ -143,10 +151,14 @@ scene scene::create_from_json_file(const std::string& path)
 
 void scene::load(const std::string& path)
 {
+    PROFILE_SAMPLE("scene::load")
     filestream * stream = filestream::open_rb(path.c_str());
 
     //scene_header_t header = stream->read<scene_header_t>();
     uint32_t node_count = stream->read<uint32_t>();
+
+    auto p0 = sizeof(node);
+    auto p1 = sizeof(tinynode);
 
     m_nodes.resize(node_count);// = allocator->alloc<node>(nodes_count);
     for (uint32_t i = 0; i < node_count; i++)
@@ -155,6 +167,7 @@ void scene::load(const std::string& path)
 
         while(1)
         {
+            memset(buffer, 0, sizeof(buffer));
             uint16_t id = stream->read<uint16_t>();
             uint16_t size = stream->read<uint16_t>();
 
@@ -164,9 +177,9 @@ void scene::load(const std::string& path)
             switch (id)
             {
                 case component_node_begin:
-                    m_nodes[i].name = stream->read_string(buffer);
-                    m_nodes[i].guid = stream->read_string(buffer);
-                    m_nodes[i].tag = stream->read_string(buffer);
+                    m_nodes[i].name  = stream->read_string(buffer);
+                    m_nodes[i].guid  = stream->read_string(buffer);
+                    m_nodes[i].tag   = stream->read_string(buffer);
                     m_nodes[i].flags = stream->read<uint64_t>();
                 break;
 
@@ -174,42 +187,75 @@ void scene::load(const std::string& path)
                     stream->read(size, &m_nodes[i].transform); 
                 break;
 
-                case component_renderer:
+                case component_renderer: {
+                    auto component = m_world.allocate_component<components::renderer>(this, buffer);
+
                     m_nodes[i].renderer.mesh_guid = stream->read_string(buffer);
                     m_nodes[i].renderer.material_guid = stream->read_string(buffer);
                     m_nodes[i].renderer.lightmap_guid = stream->read_string(buffer);
                     m_nodes[i].renderer.lightmap_scale_offset = stream->read<vec4>();
-                break;
+                } break;
+
+                case component_collider: {
+                   //     auto component = m_world.allocate_component<components::collider>(this, buffer);
+
+                        auto collider_type = stream->read<uint16_t>();
+                        auto trigger_type = stream->read<uint16_t>();   // is trigger
+
+                        // read<float4> center + payload (radius for sphere and capsule), 
+                        // read<float4> payload (extend for box)
+                        // stream->read_string(buffer); // mesh guid
+                        // stream->read_string(buffer); // material guid
+
+                        switch(collider_type)
+                        {
+                            case 0: stream->read<vec4>(); break;                        // sphere:  x,y,z - pos, w - radius
+                            case 1: stream->read<vec4>(); stream->read<vec4>(); break;  // box: center(float4) + extend (float4)
+                            case 2: stream->read<vec4>(); stream->read<float>(); break; // capsule: center_radius(float4) + height(float) 
+                            case 3: stream->read_string(buffer);  break;                // mesh: guid string
+                            default: 
+                                debug::log_warning("(%s) has unknown colider type - %d", m_nodes[i].name, collider_type);
+                            break;
+                        }
+                        auto bbox_min = stream->read<vec3>();
+                } break;
 
                 default: 
-                stream->read(size, &buffer); 
+                    stream->read(size, &buffer); 
                 break;
             }
         }
         
 
-  /*      auto chunk = (chunk*)stream->read(sizeof(chunk));
+  /*    auto chunk = (chunk*)stream->read(sizeof(chunk));
         auto payload = stream->read(chunk.size);
-        switch (chunk.id)
+
+        auti node = nullptr;
+        icompomemt component = nullptr;
+        switch (chunk.type)
         {
-            case component_node: m_nondes[i] = alocate_node<m_nondes>(payload);  break;
+            case component_node:        node      = m_world.allocate_node<m_nondes>(payload);     break;
 
-            case chunk_component:
-                switch (payload.type)
-                {
-                    case component_transform:   auto component = components.allocate<transform>(payload);   break;
-                    case component_renderer:    auto component = components.allocate<renderer>(payload);    break;
-                    case component_collider:    auto component = components.allocate<collider>(payload);    break;
-                    case component_rigidbody:   auto component = components.allocate<rigidbody>(payload);   break;
-                    case component_light:       auto component = components.allocate<light>(payload);       break;
-                    case component_animator:    auto component = components.allocate<animator>(payload);    break;
-                    case component_cinematic:   auto component = components.allocate<light>(payload);       break;
-                    case component_navagent:    auto component = components.allocate<navagent>(payload);    break;
-                    case component_lodgroup:    auto component = components.allocate<lodgroup>(payload);    break;
-                    default:                    auto component = components.allocate<unknown>(payload);     break;
+            case component_transform: {
+                int  id  = stream->read<int32_t>();
+                auto component = m_components.allocate<transform>(payload);
+                m_nodes[id].add_component(component);
+            } break;
 
-                m_nondes[i].add_omponent(component);
-        }*/
+            case component_renderer:    component = m_world.allocate_component<renderer> (this, payload); break;
+            case component_collider:    component = m_world.allocate_component<collider> (this, payload); break;
+            case component_rigidbody:   component = m_world.allocate_component<rigidbody>(this, payload); break;
+            case component_light:       component = m_world.allocate_component<light>    (this, payload); break;
+            case component_animator:    component = m_world.allocate_component<animator> (this, payload); break;
+            case component_cinematic:   component = m_world.allocate_component<light>    (this, payload); break;
+            case component_navagent:    component = m_world.allocate_component<navagent> (this, payload); break;
+            case component_lodgroup:    component = m_world.allocate_component<lodgroup> (this, payload); break;
+            default:                    component = m_world.allocate_component<unknown>  (this, payload); break;
+        }
+        stream->seek(chunk.size, SEEK_CURR);    // anyway rewind to end of chunk
+
+        m_world.allocate_component(scene, node, component);
+        */
     }
 }
 
@@ -255,8 +301,6 @@ void scene::save(const std::string& path)
 
     stream->flush();
    // stream->write(sizeof(),)
-    
-    
     delete stream;
 }
 
@@ -288,7 +332,6 @@ void scene::clear()
 {
     m_renderers.clear();
     m_visibles.clear();
-    m_instances.clear();
 
     m_nodes.clear();
     m_nodes_flat_list.clear();
@@ -301,31 +344,36 @@ void scene::update()
 {
 }
 
-void scene::draw(camera & camera)
+void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
 {
-    auto visible_renderers = cull(camera.m_view_proj); // culling
+    mat4 vp = camera.view_proj();
+    auto visible_renderers = cull(vp); // culling
 
- /*   auto passes = sort_by_passes(visible_renderers); // sort by transparent, by passes
-
-    for(size_t i = 0; passes.size(); ++i)
+    uint64_t  mvp_location = 0;
+    gfx_shader_t * shader = nullptr;
+    for(int i = 0; i < visible_renderers.size(); ++i) 
     {
-        var batches = make_batches(pass, pass.renderers);
-        foreach(var batch in batches)
-        {
-            draw(batch);
+        auto & renderer = visible_renderers[i];
+        if(renderer->material->instance->shader != shader) {
+            shader = renderer->material->instance->shader;
+            mvp_location = gfx_uniform_location(shader, "mvp");
         }
-    }*/
-    /*
-    gfx_cmd_bind_pipeline(cmd, pipeline);
 
-    for (int i = 0; i < m_renderers.size(); ++i)
-    {
-        renderer_t& renderer = m_renderers[i];
-        draw_renderer(cmd, &renderer);
+        mat4 mvp = math::mul(vp, renderer->transform);
+        gfx_uniform_set_buffer_data(renderer->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
     }
 
-    gfx_cmd_end_pass(cmd);*/
-
+    gfx_pipeline_t* pipeline = nullptr;
+    for (int i = 0; i < visible_renderers.size(); ++i)
+    {
+        auto & renderer = visible_renderers[i];
+        if(renderer->material->instance->pipeline != pipeline)
+        {
+            pipeline = renderer->material->instance->pipeline;
+            gfx_cmd_bind_pipeline(cmd, pipeline);
+        }
+        draw_renderer(cmd, renderer);
+    }
 }
 
 void scene::traverse(node & n, std::function<void(node&)> &cb)
@@ -337,9 +385,26 @@ void scene::traverse(node & n, std::function<void(node&)> &cb)
     }
 }
 
+
+struct renderer_sort
+{
+    bool operator()(renderer_t* a, renderer_t* b) const {
+        if (a->material->instance->pipeline == b->material->instance->pipeline) {
+            if (a->material->instance == b->material->instance) {
+                if (a->mesh == b->mesh) {
+                    return a < b;
+                }
+                return a->mesh < b->mesh;
+            }
+            return a->material->instance < b->material->instance;
+        }
+        return a->material->instance->pipeline < b->material->instance->pipeline;
+    }
+};
+
 const std::vector<renderer_t*>& scene::cull(const mat4& vp)
 {
-    PROFILE_SAMPLE("\nscene::cull");
+  //  PROFILE_SAMPLE("\nscene::cull");
 
     m_visibles.clear();
     frustum fr = frustum::from_view_proj(vp);
@@ -347,6 +412,8 @@ const std::vector<renderer_t*>& scene::cull(const mat4& vp)
     for (int i = 0; i < m_renderers.size(); ++i)
     {
         auto & renderer = m_renderers[i];
+        //if(renderer.is_in_lod)
+        //  continue;
 
         if (!frustum::check_bbox(fr, renderer.world_bounds))
             continue;
@@ -354,7 +421,7 @@ const std::vector<renderer_t*>& scene::cull(const mat4& vp)
         m_visibles.push_back(&renderer);
     }
 
-    make_instances(m_visibles);
+    std::sort(m_visibles.begin(), m_visibles.end(), renderer_sort());
 
     return m_visibles;
 
@@ -401,22 +468,4 @@ const std::vector<renderer_t*>& scene::cull(const mat4& vp)
    // } 
 
     return m_visibles;
-}
-
-void scene::make_instances(const std::vector<renderer_t*> & renderers)
-{
-    PROFILE_SAMPLE("\n  scene::instances");
-    m_instances.clear();
-
-    for (int i = 0; i < renderers.size(); ++i)
-    {
-        // renderers[i]->mesh
-        m_instances[renderers[i]->mesh]++;
-    }
-    
-}
-
-std::vector<pass> scene::sort_by_passes(const std::vector<renderer_t> &)
-{
-    return {};
 }

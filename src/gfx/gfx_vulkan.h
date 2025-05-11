@@ -21,7 +21,7 @@ extern "C" {
    // #include <vma/vk_mem_alloc.h>
 #endif
  
-#define   MAX_DESCRIPTOR_POOL_SET_SIZE      (256)
+#define   MAX_DESCRIPTOR_POOL_SET_SIZE      (1024)
 
  
 struct vk_descriptor_pool_t;
@@ -83,10 +83,13 @@ typedef struct vk_context_t
     vk_command_buffer_t*                cmd_buffer_pool[32];
     uint32_t                            cmd_pool_size;
 
+    gfx_handle_pool_t*                  cmd_pool;
     gfx_handle_pool_t*                  sampler_pool;
     gfx_handle_pool_t*                  texture_pool;
     gfx_handle_pool_t*                  buffers_pool;
     gfx_handle_pool_t*                  shaders_pool;
+    gfx_handle_pool_t *                 pipeline_pool;
+    gfx_handle_pool_t *                 compute_pipeline_pool;
 } vk_context_t;
 
 
@@ -98,6 +101,13 @@ typedef struct vk_pipeline_t {
     VkPipelineBindPoint                 bind_point;
     VkPipeline                          pipeline;
 } vk_pipeline_t;
+
+
+typedef struct vk_compute_pipeline_t {
+    gfx_pipeline_compute_t              handle;
+    struct vk_shader_t*                 shader;
+    VkPipeline                          pipeline;
+} vk_compute_pipeline_t;
 
 
 typedef struct vk_sampler_t {
@@ -113,6 +123,8 @@ typedef struct vk_texture_t {
     VkImageView                         view;
     VkDeviceMemory                      memory;
     uint32_t                            memory_size;
+
+    //gfx_linked_list_t*                consumers; // secriptor_sets
 } vk_texture_t;
 
 
@@ -243,7 +255,7 @@ gfx_api void     vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* des
 gfx_api void     vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
 gfx_api void     vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
 gfx_api void     vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
-gfx_api void     vk_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);
+gfx_api void     vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
 
 gfx_api void     vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);
 gfx_api void     vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);
@@ -275,6 +287,9 @@ gfx_api void     vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot,
 gfx_api void     vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
 gfx_api void     vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
 gfx_api void     vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+gfx_api void     vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+gfx_api void     vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
 
 gfx_api void     vk_cmd_end(gfx_command_buffer_t* cmd);
 gfx_api void     vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
@@ -283,7 +298,7 @@ gfx_api void     vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gf
 
 extern void     vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name);
 extern void     vk_debug_begin_region(vk_context_t* ctx, VkCommandBuffer cmd, const char* name, uint32_t color = 0xFFFFFFFF);
-extern void     vk_debug_end_region(vk_context_t* ctx, VkCommandBuffer cmd, const char* name);
+extern void     vk_debug_end_region(vk_context_t* ctx, VkCommandBuffer cmd);
 extern void     vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name);
 extern void     vk_debug_set_buffer_name(vk_context_t* ctx, vk_buffer_t* buffer, const char* name);
 extern void     vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char* name);

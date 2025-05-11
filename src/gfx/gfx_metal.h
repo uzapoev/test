@@ -22,8 +22,8 @@ typedef struct metal_context_t {
     gfx_caps_t                      caps;
     gfx_callback                    dbglog;
 
-    gfx_sampler_t* default_sampler;
-    gfx_texture_t* default_texture;
+    gfx_sampler_t*                  default_sampler;
+    gfx_texture_t*                  default_texture;
 } metal_context_t;
 
 
@@ -175,6 +175,8 @@ gfx_api void     metal_destroy_render_target(gfx_render_target_t* _target);
 gfx_api void     metal_destroy_descriptor_set(gfx_descriptor_set_t* descriptor);
 gfx_api void     metal_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 
+
+#ifdef METAL_IMPLEMENTATION
 
 bool is_compressed_format(gfx_pixel_format format)
 {
@@ -1269,6 +1271,8 @@ inline void gfx_init_metal(gfx_api_pfn* func_table)
     func_table->pfn_cmd_end = metal_cmd_end;
     func_table->pfn_submit_cmd = metal_submit_cmd;
 }
+
+#endif METAL_IMPLEMENTATION
 
 #endif //METAL_AVAILABLE
 

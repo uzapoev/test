@@ -221,7 +221,7 @@ typedef struct gfx_api_pfn
     void     (*pfn_create_compute_pipeline) (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
     void     (*pfn_create_render_target) (gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
     void     (*pfn_create_descriptor_set) (gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
-    void     (*pfn_create_cmd) (gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);
+    void     (*pfn_create_cmd) (gfx_context_t* ctx, gfx_command_buffer_t** cmd);
 
     void     (*pfn_destroy_buffer) (gfx_context_t* ctx, gfx_buffer_t* buffer);
     void     (*pfn_destroy_shader) (gfx_context_t* ctx, gfx_shader_t* buffer);
@@ -253,6 +253,9 @@ typedef struct gfx_api_pfn
     void     (*pfn_cmd_draw) (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
     void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
     void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+
+    void     (*pfn_cmd_buffer_barrier)(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+    void     (*pfn_cmd_texture_barrier)(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
 
     void     (*pfn_cmd_end) (gfx_command_buffer_t* cmd);
     void     (*pfn_submit_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
@@ -320,26 +323,22 @@ void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
 }
 
 
-void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t * caps)
-{
+void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t * caps) {
     g_tbl->pfn_get_caps(ctx, caps);
 }
 
 
-void gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain)
-{
+void gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain) {
     g_tbl->pfn_create_swapchain(ctx, handle, swapchain);
 }
 
 
-int32_t gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target)
-{
+int32_t gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target) {
     return g_tbl->pfn_acquire_img(ctx, swapchain, target);
 }
 
 
-void gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx)
-{ 
+void gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx) { 
     g_tbl->pfn_present_img(ctx, swapchain, idx);
 }
 
@@ -354,19 +353,19 @@ void gfx_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc,  gfx_shader_
     g_tbl->pfn_create_shader(ctx, desc, shader);
 }
 
-void gfx_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler) { 
+void gfx_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler) {
     g_tbl->pfn_create_sampler(ctx, desc, sampler);
 }
 
-void gfx_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture) { 
+void gfx_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture) {
     g_tbl->pfn_create_texture(ctx, desc, texture);
 }
 
-void gfx_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline) { 
+void gfx_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline) {
     g_tbl->pfn_create_pipeline(ctx, desc, pipeline);
 }
 
-void gfx_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline) { 
+void gfx_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline) {
     g_tbl->pfn_create_compute_pipeline(ctx, desc, pipeline);
  }
 
@@ -379,78 +378,67 @@ void gfx_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_des
 }
 
 
-void gfx_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd)                         
-{ 
-    g_tbl->pfn_create_cmd(ctx, count, cmd);
+void gfx_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** cmd) {
+    g_tbl->pfn_create_cmd(ctx, cmd);
 }
 
-
-gfx_api gfx_buffer_t* gfx_create_buffer2(gfx_context_t* ctx, gfx_buffer_desc_t* desc)
-{
+// 2
+gfx_api gfx_buffer_t* gfx_create_buffer2(gfx_context_t* ctx, gfx_buffer_desc_t* desc) {
     gfx_buffer_t * result = nullptr;
     g_tbl->pfn_create_buffer(ctx, desc, &result);
     return result;
 }
 
-gfx_api gfx_shader_t* gfx_create_shader2(gfx_context_t* ctx, gfx_shader_desc_t* desc)
-{
+gfx_api gfx_shader_t* gfx_create_shader2(gfx_context_t* ctx, gfx_shader_desc_t* desc) {
     gfx_shader_t* result = nullptr;
     g_tbl->pfn_create_shader(ctx, desc, &result);
     return result;
 }
 
-gfx_api gfx_sampler_t* gfx_create_sampler2(gfx_context_t* ctx, gfx_sampler_desc_t* desc)
-{
+gfx_api gfx_sampler_t* gfx_create_sampler2(gfx_context_t* ctx, gfx_sampler_desc_t* desc) {
     gfx_sampler_t* result = nullptr;
     g_tbl->pfn_create_sampler(ctx, desc, &result);
     return result;
 }
 
-gfx_api gfx_texture_t* gfx_create_texture2(gfx_context_t* ctx, gfx_texture_desc_t* desc)
-{
+gfx_api gfx_texture_t* gfx_create_texture2(gfx_context_t* ctx, gfx_texture_desc_t* desc) {
     gfx_texture_t* result = nullptr;
     g_tbl->pfn_create_texture(ctx, desc, &result);
     return result;
 }
 
-gfx_api gfx_pipeline_t* gfx_create_pipeline2(gfx_context_t* ctx, gfx_pipeline_desc_t* desc)
-{
+gfx_api gfx_pipeline_t* gfx_create_pipeline2(gfx_context_t* ctx, gfx_pipeline_desc_t* desc) {
     gfx_pipeline_t* result = nullptr;
     g_tbl->pfn_create_pipeline(ctx, desc, &result);
     return result;
 }
 
-gfx_api gfx_pipeline_compute_t* gfx_create_compute_pipeline2(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc)
-{
+gfx_api gfx_pipeline_compute_t* gfx_create_compute_pipeline2(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc) {
     gfx_pipeline_compute_t * pipeline = nullptr;
     g_tbl->pfn_create_compute_pipeline(ctx, desc, &pipeline);
     return pipeline;
 }
 
-gfx_api gfx_render_target_t* gfx_create_render_target2(gfx_context_t* ctx, gfx_render_target_desc_t* desc)
-{
+gfx_api gfx_render_target_t* gfx_create_render_target2(gfx_context_t* ctx, gfx_render_target_desc_t* desc) {
     gfx_render_target_t* result = nullptr;
     g_tbl->pfn_create_render_target(ctx, desc, &result);
     return result;
 }
 
-gfx_api gfx_descriptor_set_t* gfx_create_descriptor_set2(gfx_context_t* ctx, gfx_shader_t* shader)
-{
+gfx_api gfx_descriptor_set_t* gfx_create_descriptor_set2(gfx_context_t* ctx, gfx_shader_t* shader) {
     gfx_descriptor_set_t* result = nullptr;
     g_tbl->pfn_create_descriptor_set(ctx, shader, &result);
     return result;
 }
 
-gfx_api gfx_command_buffer_t* gfx_create_cmd2(gfx_context_t* ctx)
-{
+gfx_api gfx_command_buffer_t* gfx_create_cmd2(gfx_context_t* ctx) {
     gfx_command_buffer_t* result = nullptr;
-    g_tbl->pfn_create_cmd(ctx, 1, &result);
+    g_tbl->pfn_create_cmd(ctx, &result);
     return result;
 }
 
-
-gfx_api void gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
-{
+//
+gfx_api void gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset) {
     g_tbl->pfn_update_buffer_data(ctx, buffer, data, size, offset);
 }
 
@@ -458,109 +446,142 @@ gfx_api void gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, vo
 
 //
 #pragma region destroy
-void gfx_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)                                           { g_tbl->pfn_destroy_buffer(ctx, buffer); }
-void gfx_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer)                                           { g_tbl->pfn_destroy_shader(ctx, buffer); }
-void gfx_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler)                                        { g_tbl->pfn_destroy_sampler(ctx, sampler); }
-void gfx_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture)                                        { g_tbl->pfn_destroy_texture(ctx, texture); }
-void gfx_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)                                     { g_tbl->pfn_destroy_pipeline(ctx, pipeline); }
-void gfx_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* target)                             { g_tbl->pfn_destroy_render_target(ctx, target); }
-void gfx_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)                       { g_tbl->pfn_destroy_descriptor_set(ctx, descriptor); }
-void gfx_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)                                         { g_tbl->pfn_destroy_cmd(ctx, cmd); }
+void gfx_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer) {
+    g_tbl->pfn_destroy_buffer(ctx, buffer); 
+}
+
+void gfx_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer) { 
+    g_tbl->pfn_destroy_shader(ctx, buffer); 
+}
+
+void gfx_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler) {
+    g_tbl->pfn_destroy_sampler(ctx, sampler);
+}
+
+void gfx_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture) {
+    g_tbl->pfn_destroy_texture(ctx, texture);
+}
+
+void gfx_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline) { 
+    g_tbl->pfn_destroy_pipeline(ctx, pipeline);
+}
+
+void gfx_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* target) {
+    g_tbl->pfn_destroy_render_target(ctx, target);
+}
+
+void gfx_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor) {
+    g_tbl->pfn_destroy_descriptor_set(ctx, descriptor); 
+}
+
+void gfx_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd) {
+    g_tbl->pfn_destroy_cmd(ctx, cmd); 
+}
+
 #pragma endregion
 
 //
 #pragma region shader data
-uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, gfx_uniform_t* uniforms)                     { assert(false); return 0; }
-uint64_t gfx_uniform_location(gfx_shader_t* shader, const char* name)                               { return g_tbl->pfn_uniform_location(shader, name);}
-void gfx_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t size){ g_tbl->pfn_uniform_set_buffer(set, handle, buffer, size); }
-void gfx_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) { g_tbl->pfn_uniform_set_buffer_data(set, handle, data, size); }
-void gfx_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)    { g_tbl->pfn_uniform_set_texture(set, handle, texture); }
-void gfx_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)    { g_tbl->pfn_uniform_set_sampler(set, handle, sampler); }
+uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, gfx_uniform_t* uniforms) {
+    assert(false);
+    return 0;
+}
+
+uint64_t gfx_uniform_location(gfx_shader_t* shader, const char* name) {
+    return g_tbl->pfn_uniform_location(shader, name);
+}
+
+void gfx_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t size) {
+    g_tbl->pfn_uniform_set_buffer(set, handle, buffer, size);
+}
+
+void gfx_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) {
+    g_tbl->pfn_uniform_set_buffer_data(set, handle, data, size);
+}
+
+void gfx_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture) {
+    g_tbl->pfn_uniform_set_texture(set, handle, texture);
+}
+
+void gfx_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler) {
+    g_tbl->pfn_uniform_set_sampler(set, handle, sampler);
+}
 #pragma endregion
 
 
 #pragma region commands
 
-void gfx_cmd_begin(gfx_command_buffer_t* cmd)
-{
+void gfx_cmd_begin(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_begin(cmd);
 }
 
 
-void gfx_cmd_begin_pass(gfx_command_buffer_t * cmd, gfx_render_target_t* target)
-{
+void gfx_cmd_begin_pass(gfx_command_buffer_t * cmd, gfx_render_target_t* target) {
     g_tbl->pfn_cmd_begin_pass(cmd, target);
 }
 
 
-void gfx_cmd_end_pass(gfx_command_buffer_t* cmd)
-{
+void gfx_cmd_end_pass(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_end_pass(cmd);
 }
 
 
-void gfx_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
-{
+void gfx_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     g_tbl->pfn_cmd_scissor(cmd, x, y, w, h);
 }
 
-
-void gfx_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
-{
+void gfx_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     g_tbl->pfn_cmd_viewport(cmd, x, y, w, h);
 }
 
-
-void gfx_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline)
-{ 
+void gfx_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline) { 
     g_tbl->pfn_cmd_bind_pipeline(cmd, pipeline);
 }
 
-
-void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor)
-{
+void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor) {
     g_tbl->pfn_cmd_bind_descriptor_set(cmd, descriptor);
 }
 
-
-void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
-{ 
+void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer) { 
     g_tbl->pfn_cmd_bind_buffer_ib(cmd, format, offset, buffer);
 }
 
 
-void gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer)
-{ 
+void gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer) { 
     g_tbl->pfn_cmd_bind_buffer_vb(cmd, slot, offset, buffer);
 }
 
 
-void gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count)
-{
+void gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count) {
     g_tbl->pfn_cmd_draw(cmd, vertex_count, instance_count);
 }
 
 
-void gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count)
-{ 
+void gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count) { 
     g_tbl->pfn_cmd_draw_indexed(cmd, idx_count, first_idx, instance_count);
 }
 
 
-void gfx_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z)
-{
+void gfx_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z) {
     g_tbl->pfn_cmd_dispatch_compute(cmd, x, y, z);
 }
 
 
-void gfx_cmd_end(gfx_command_buffer_t* cmd)
-{
+void gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst) {
+    g_tbl->pfn_cmd_buffer_barrier(cmd, buffers, count, src, dst);
+}
+
+void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst) {
+    g_tbl->pfn_cmd_texture_barrier(cmd, textures, count, src, dst);
+}
+
+
+void gfx_cmd_end(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_end(cmd);
 }
 
 
-void gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options)
-{
+void gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options) {
     g_tbl->pfn_submit_cmd(ctx, cmd, options);
 }
 
@@ -715,14 +736,15 @@ uint16_t gfx_utils_hash_16(const char* data, uint32_t size)
     return hash16(data, size);
 }
 
+
+static uint32_t gfx_max(uint32_t a, uint32_t b)            { return  (a > b ? a : b); }
+static uint32_t gfx_block_count(uint32_t s, uint32_t b)    { return ((s + b - 1) / b); }
+
 uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format)
 {
-    #define GFX_MAX(a, b)       ( a > b ? a : b )
-    #define BLOCK_COUNT(S, B)   ((S + B-1) / B)
-
     uint32_t w = width;
     uint32_t h = height;
-    uint32_t d = (depth>0)?depth:1; // clamp [1..depth]
+    uint32_t d = gfx_max(1, depth);//(depth > 0)?depth:1; // clamp [1..depth]
     switch (format)
     {
         case gfx_pixel_format_rgb5a1:
@@ -742,18 +764,18 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
         case gfx_pixel_format_etc2_rgb8a1:		return (w >> 2) * (h >> 2) * 16;    //! Compresses RGB888 data without Alpha channel
         case gfx_pixel_format_etc2_rgba8:		return (w >> 2) * (h >> 2) * 8;     //! Compresses RGBA8888 data with full alpha support
 
-        case gfx_pixel_format_bc1:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 8;
-        case gfx_pixel_format_bc2:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
-        case gfx_pixel_format_bc3:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
-        case gfx_pixel_format_bc6:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
-        case gfx_pixel_format_bc7:              return GFX_MAX(1, w >> 2) * GFX_MAX(1, h >> 2) * GFX_MAX(1, d >> 2) * 16;
+        case gfx_pixel_format_bc1:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 8;
+        case gfx_pixel_format_bc2:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
+        case gfx_pixel_format_bc3:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
+        case gfx_pixel_format_bc6:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
+        case gfx_pixel_format_bc7:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
 
-        case gfx_pixel_format_astc4x4:          return BLOCK_COUNT(w, 4)  * BLOCK_COUNT(h, 4)  * BLOCK_COUNT(d, 4) * 16;
-        case gfx_pixel_format_astc5x5:          return BLOCK_COUNT(w, 5)  * BLOCK_COUNT(h, 5)  * BLOCK_COUNT(d, 5) * 16;
-        case gfx_pixel_format_astc6x6:          return BLOCK_COUNT(w, 6)  * BLOCK_COUNT(h, 6)  * BLOCK_COUNT(d, 6) * 16;
-        case gfx_pixel_format_astc8x8:          return BLOCK_COUNT(w, 8)  * BLOCK_COUNT(h, 8)  * BLOCK_COUNT(d, 8) * 16;
-        case gfx_pixel_format_astc10x10:        return BLOCK_COUNT(w, 10) * BLOCK_COUNT(h, 10) * BLOCK_COUNT(d, 10) * 16;
-        case gfx_pixel_format_astc12x12:        return BLOCK_COUNT(w, 12) * BLOCK_COUNT(h, 12) * BLOCK_COUNT(d, 12) * 16;
+        case gfx_pixel_format_astc4x4:          return gfx_block_count(w, 4)  * gfx_block_count(h, 4)  * gfx_block_count(d, 4) * 16;
+        case gfx_pixel_format_astc5x5:          return gfx_block_count(w, 5)  * gfx_block_count(h, 5)  * gfx_block_count(d, 5) * 16;
+        case gfx_pixel_format_astc6x6:          return gfx_block_count(w, 6)  * gfx_block_count(h, 6)  * gfx_block_count(d, 6) * 16;
+        case gfx_pixel_format_astc8x8:          return gfx_block_count(w, 8)  * gfx_block_count(h, 8)  * gfx_block_count(d, 8) * 16;
+        case gfx_pixel_format_astc10x10:        return gfx_block_count(w, 10) * gfx_block_count(h, 10) * gfx_block_count(d, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return gfx_block_count(w, 12) * gfx_block_count(h, 12) * gfx_block_count(d, 12) * 16;
 
         case gfx_pixel_format_r16f:             return w * h * d * sizeof(uint16_t);
         case gfx_pixel_format_rg16f:            return w * h * d * sizeof(uint16_t) * 2;
@@ -768,18 +790,12 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
 
         default: assert(0); break;
     }
-
-    #undef BLOCK_COUNT
-    #undef GFX_MAX
-
-    assert(0);
     return 0; 
 }
 
+
 uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width) 
 {
-    #define BLOCK_COUNT(S, B)   ((S + B-1) / B)
-    #define GFX_MAX(a, b)       ( a > b ? a : b )
     switch (fmt) 
     {
         case gfx_pixel_format_a8:               return width * sizeof(uint8_t);
@@ -789,27 +805,27 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
 
         case gfx_pixel_format_rgba8:            return width * sizeof(uint8_t) * 4;
 
-        case gfx_pixel_format_etc1:             return (GFX_MAX(2, (width >> 2)) * 8);
-        case gfx_pixel_format_etc2_rgba8:       return (GFX_MAX(2, (width >> 2)) * 16);
-        case gfx_pixel_format_etc2_rgb8a1:      return (GFX_MAX(2, (width >> 2)) * 8);
+        case gfx_pixel_format_etc1:             return (gfx_max(2, (width >> 2)) * 8);
+        case gfx_pixel_format_etc2_rgba8:       return (gfx_max(2, (width >> 2)) * 16);
+        case gfx_pixel_format_etc2_rgb8a1:      return (gfx_max(2, (width >> 2)) * 8);
 
         case gfx_pixel_format_pvrtc_rgb_2bpp:
-        case gfx_pixel_format_pvrtc_rgba_2bpp:  return (GFX_MAX(2, (width >> 2)) * ((8 * 4) * 4) / 8);//! 2-bit PVRTC-compressed texture: PVRTC2
+        case gfx_pixel_format_pvrtc_rgba_2bpp:  return (gfx_max(2, (width >> 2)) * ((8 * 4) * 4) / 8);//! 2-bit PVRTC-compressed texture: PVRTC2
         case gfx_pixel_format_pvrtc_rgb_4bpp:
-        case gfx_pixel_format_pvrtc_rgba_4bpp:  return (GFX_MAX(2, (width >> 2)) * ((4 * 4) * 4) / 8);//! 4-bit PVRTC-compressed texture: PVRTC4
+        case gfx_pixel_format_pvrtc_rgba_4bpp:  return (gfx_max(2, (width >> 2)) * ((4 * 4) * 4) / 8);//! 4-bit PVRTC-compressed texture: PVRTC4
 
-        case gfx_pixel_format_bc1:              return GFX_MAX(1, width >> 2) * 8;
-        case gfx_pixel_format_bc2:              return GFX_MAX(1, width >> 2) * 16;
-        case gfx_pixel_format_bc3:              return GFX_MAX(1, width >> 2) * 16;
-        case gfx_pixel_format_bc6:              return GFX_MAX(1, width >> 2) * 16;
-        case gfx_pixel_format_bc7:              return GFX_MAX(1, width >> 2) * 16;
+        case gfx_pixel_format_bc1:              return gfx_max(1, width >> 2) * 8;
+        case gfx_pixel_format_bc2:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc3:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc6:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc7:              return gfx_max(1, width >> 2) * 16;
 
-        case gfx_pixel_format_astc4x4:          return BLOCK_COUNT(width, 4)  * 16;
-        case gfx_pixel_format_astc5x5:          return BLOCK_COUNT(width, 5)  * 16;
-        case gfx_pixel_format_astc6x6:          return BLOCK_COUNT(width, 6)  * 16;
-        case gfx_pixel_format_astc8x8:          return BLOCK_COUNT(width, 8)  * 16;
-        case gfx_pixel_format_astc10x10:        return BLOCK_COUNT(width, 10) * 16;
-        case gfx_pixel_format_astc12x12:        return BLOCK_COUNT(width, 12) * 16;
+        case gfx_pixel_format_astc4x4:          return gfx_block_count(width, 4)  * 16;
+        case gfx_pixel_format_astc5x5:          return gfx_block_count(width, 5)  * 16;
+        case gfx_pixel_format_astc6x6:          return gfx_block_count(width, 6)  * 16;
+        case gfx_pixel_format_astc8x8:          return gfx_block_count(width, 8)  * 16;
+        case gfx_pixel_format_astc10x10:        return gfx_block_count(width, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return gfx_block_count(width, 12) * 16;
 
         case gfx_pixel_format_r16f:             return width * sizeof(uint16_t);
         case gfx_pixel_format_rg16f:            return width * sizeof(uint16_t) * 2;
@@ -885,6 +901,9 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_cmd_draw                = vk_cmd_draw;
     func_table->pfn_cmd_draw_indexed        = vk_cmd_draw_indexed;
     func_table->pfn_cmd_dispatch_compute    = vk_cmd_dispatch_compute;
+
+    func_table->pfn_cmd_buffer_barrier      = vk_cmd_buffer_barrier;
+    func_table->pfn_cmd_texture_barrier     = vk_cmd_texture_barrier;
 
     func_table->pfn_cmd_end                 = vk_cmd_end;
     func_table->pfn_submit_cmd              = vk_submit_cmd;

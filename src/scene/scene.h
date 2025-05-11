@@ -8,7 +8,7 @@
 #include <unordered_map>
 
 #include "../mathlib.h"
-#include "../render_manager.h"
+#include "../render_system.h"
 #include "../resource_manager.h"
 
 
@@ -35,7 +35,16 @@ enum component_type : uint16_t
 
 
 // https://github.com/suVrik/acceleration_structure_benchmark
-struct itree{};
+struct itree
+{   
+    struct node{};
+    virtual void add(aabbox box, void * userdata)       = 0;
+    virtual void rem(void* userdata)                    = 0;
+
+    virtual void query(aabbox box, std::vector<node*> /*component_type */)  = 0;
+    virtual void query(frustum fr, std::vector<node*> /*component_type */)  = 0;
+};
+
 struct kdtree   : itree {};
 struct octree   : itree {};
 struct quadtree : itree {};
@@ -75,6 +84,34 @@ struct camera
 };
 
 
+namespace components{struct icomponent;}
+
+template<class T>
+struct component_registrant
+{
+    component_registrant(T * t)
+    {
+//        assert(false);
+        auto name = typeid(T).name();
+        printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
+/*
+    component_registrant(char * name, components::icomponent*(create_fn*)())
+    {
+        
+    }*/
+};
+
+struct component_registrant2
+{
+    component_registrant2()
+    {
+        assert(false);
+        printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
+};  
+
+
 namespace components
 {
     struct icomponent {  };
@@ -87,9 +124,16 @@ namespace components
 
         mat4                    local_transform;
         mat4                    global_transform;
+
+        //REGISTER_COMPONENT(transform);
+      //  static component_registrant<transform> registrant;
+      //  static component_registrant2  registrant1;
+     //   static constexpr component_registrant2  &registrant2 = registrant1;
     };
 
-    struct renderer : icomponent
+
+
+    struct renderer : icomponent //<component_transform>
     {
         interned_string         mesh_guid;          // mesh guid
         interned_string         material_guid;      // material guid
@@ -98,31 +142,46 @@ namespace components
 
         bool                    is_in_lodgroup;    //
         interned_string         occulder_guid;
+
+    public:
+        void clear()
+        {
+            mesh_guid.clear();
+            material_guid.clear();
+            lightmap_guid.clear();
+            occulder_guid.clear();
+
+       //     if(m_material)
+       //         m_material->release();
+        }
+
+        gfx_mesh_t *            m_mesh;
+        material   *            m_material;
     };
 
+    struct light : icomponent { };
     struct occluder : icomponent        { };
 
     struct lodgroup : icomponent
     {
-        float                   distance;
-        std::vector<renderer>   renderers;
+        float                       distance;
+        std::vector<renderer*>      renderers;
     };
      
-    struct iphysic  : icomponent        { };
-    struct physic2d : iphysic           { };
-    struct physic3d : iphysic           { };
-    struct collider : icomponent        { };
-    struct box_collider : collider      { };
-    struct sphere_collider : collider   { };
-    struct capsule_collider : collider  { };
-    struct mesh_collider : collider     { };
+    struct iphysic          : icomponent { };
+    struct collider         : icomponent { };
+    struct box_collider     : collider { };
+    struct sphere_collider  : collider { };
+    struct capsule_collider : collider { };
+    struct mesh_collider    : collider { };
 
-    struct rigidbody: iphysic       { };
+    struct rigidbody        : icomponent { };
 
     struct navagent : icomponent    { };
     struct animator : icomponent    { };
     struct cinematic: icomponent    { };
     struct script:    icomponent    { };
+    struct hierarchy: icomponent    { };
 };
 
 
@@ -143,6 +202,7 @@ namespace handlers
 };
 
 
+
 struct node
 {
     interned_string         name;
@@ -150,13 +210,64 @@ struct node
     interned_string         tag;
     uint64_t                flags; // static, enabled
 
+    uint64_t                id;
+
     components::transform   transform;
     components::renderer    renderer;
 
   //  std::vector<components::icomponent*> m_components;
     std::vector<node>       childs;
+
+private:
+    int                     parent = 0;
+    int                     child_count = 0;
+    int*                    child_indexes = nullptr;
 };
 
+
+struct tinynode
+{
+    interned_string         name;
+    interned_string         guid;
+    interned_string         tag;
+    uint64_t                flags; // static, enabled
+
+    uint64_t                id;
+
+    //components::transform   transform;
+    //components::renderer    renderer;
+
+private:
+    int                     parent = 0;
+    int                     child_count = 0;
+    int*                    child_indexes = nullptr;
+};
+
+
+class world
+{
+public:
+    template<class T> T* allocate_component(class scene* , void* stream) 
+    {
+        return nullptr;
+    };
+
+  /*  template<> components::renderer* allocate_component(class scene*, void* stream) {
+        //auto component = m_renderer->create_renderer();
+        return m_renderer->allocate_renderer();
+    }
+
+    template<> components::collider* allocate_component(class scene*, void* stream) {
+        //auto component = m_physic->create_collider();
+        return nullptr;
+    }*/
+
+    render_manager*             m_renderer      = nullptr;
+    class physic_manager *      m_physics2d     = nullptr;
+    class physic_manager *      m_physics3d     = nullptr;
+    class navigation_manager *  m_navigation    = nullptr;   // recast navmesh
+//  uicanvas *                              m_canvas;       // ui renderer
+};
 
 class scene
 {
@@ -174,7 +285,7 @@ public:
     void                                    init();
     void                                    clear();
     void                                    update();
-    void                                    draw(camera & cam);
+    void                                    draw(gfx_command_buffer_t* cmd, camera & cam);
 
     const std::vector<renderer_t> &         visible() const {return m_renderers;}
 
@@ -182,14 +293,10 @@ public:
     void                                    traverse(node &root, std::function<void(node&)> &cb);
 
     const std::vector<renderer_t*> &        cull(const mat4& mv);
-    void                                    make_instances(const std::vector<renderer_t*>&);
-    std::vector<pass>                       sort_by_passes(const std::vector<renderer_t> &);
-
 public:
     itree *                                 m_tree;
     std::vector<renderer_t>                 m_renderers;
     std::vector<renderer_t*>                m_visibles;
-    std::unordered_map<gfx_mesh_t*, int>    m_instances;
 
     std::vector<node>                       m_nodes;
     std::vector<node*>                      m_nodes_flat_list;
@@ -197,6 +304,9 @@ public:
     //scene resources
     std::unordered_set<interned_string>     m_meshes;
     std::unordered_set<interned_string>     m_materials;
+
+    world                                   m_world;
+//    render_manager *                        m_renderer;
 };
 
 #endif

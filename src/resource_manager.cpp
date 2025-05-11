@@ -3,7 +3,7 @@
 //#include <algorithm>
 //#include <set>
 
-#include "render_manager.h"
+#include "render_system.h"
 #include "json_serializer.h"
 
 
@@ -211,18 +211,27 @@ void resource_manager::mount(const std::string & dir)
     for(; it != std::filesystem::end(it); it++)
     {
         auto &path = it->path();
-        if(std::filesystem::is_directory(path))
+        auto &native = path.native();
+        auto wstr = path.generic_wstring();
+        auto u8str = path.generic_u8string();
+
+        if(!utf8::is_ascii(native.data(), native.length()))
         {
-            m_dirs.insert(path.u8string());
-            continue;
+            debug::log_error("none ascii symbols: %s", u8str.c_str());
         }
 
+        if(std::filesystem::is_directory(path))
+        {
+            m_dirs.insert(u8str);
+            continue;
+        }
+        
         auto filename = path.stem();
 
         std::string guid;
         if (has_guid_in_name(filename, &guid))
         {
-            m_guid_2_path.emplace(&guid[0], path);
+            m_guid_2_path.emplace(&guid[0], wstr);
         }
     }
 }

@@ -21,7 +21,6 @@
 #include <stdbool.h>
 #include <stdint.h> // uintXX_t 
 #include <stdlib.h> // uintXX_t 
-#include <stdio.h> // uintXX_t 
 
 
 #if defined(__cplusplus)
@@ -43,6 +42,7 @@
 #ifdef _WIN32
     #define     GFX_PLATFORM_WIN
     #define     VULKAN_AVAILABLE
+
 #elif defined(__APPLE__)
     #define     GFX_PLATFORM_APPLE
 #elif defined(__ANDROID__)
@@ -174,28 +174,29 @@ typedef enum gfx_pixel_format {
 
     gfx_pixel_format_d24x8,             //! depth buffer
     gfx_pixel_format_d24s8,             //! depth buffer
+    gfx_pixel_format_d32,               //! depth buffer
 } gfx_pixel_format;
 
 
 typedef enum gfx_vertex_format {
-    gfx_vertex_format_float1,       // float
-    gfx_vertex_format_float2,       // vec2f
-    gfx_vertex_format_float4,       // vec4f
+    gfx_vertex_format_float1,           // float
+    gfx_vertex_format_float2,           // vec2f
+    gfx_vertex_format_float4,           // vec4f
 
-    gfx_vertex_format_int2,         // 
-    gfx_vertex_format_int4,         // 
-    gfx_vertex_format_uint2,        // 
-    gfx_vertex_format_uint4,        // 
+    gfx_vertex_format_int2,             // 
+    gfx_vertex_format_int4,             // 
+    gfx_vertex_format_uint2,            // 
+    gfx_vertex_format_uint4,            // 
 
-    gfx_vertex_format_half2,        // Two 16 bit floating value
-    gfx_vertex_format_half4,        // Four 16 bit floating value
+    gfx_vertex_format_half2,            // Two 16 bit floating value
+    gfx_vertex_format_half4,            // Four 16 bit floating value
 
-    gfx_vertex_format_short2,       // 2D signed short normalized (v[0]/32767.0,v[1]/32767.0,0,1)
-    gfx_vertex_format_short4,       // 4D signed short normalized (v[0]/32767.0,v[1]/32767.0,v[2]/32767.0,v[3]/32767.0)
-    gfx_vertex_format_ushort2,      // 2D unsigned short normalized (v[0]/65535.0,v[1]/65535.0,0,1)
-    gfx_vertex_format_ushort4,      // 4D unsigned short normalized (v[0]/65535.0,v[1]/65535.0,v[2]/65535.0,v[3]/65535.0)
+    gfx_vertex_format_short2,           // 2D signed short normalized (v[0]/32767.0,v[1]/32767.0,0,1)
+    gfx_vertex_format_short4,           // 4D signed short normalized (v[0]/32767.0,v[1]/32767.0,v[2]/32767.0,v[3]/32767.0)
+    gfx_vertex_format_ushort2,          // 2D unsigned short normalized (v[0]/65535.0,v[1]/65535.0,0,1)
+    gfx_vertex_format_ushort4,          // 4D unsigned short normalized (v[0]/65535.0,v[1]/65535.0,v[2]/65535.0,v[3]/65535.0)
 
-    gfx_vertex_format_byte4,        // Each of 4 bytes is normalized by dividing to 255.0
+    gfx_vertex_format_byte4,            // Each of 4 bytes is normalized by dividing to 255.0
 } gfx_vertex_format;
 
 
@@ -268,14 +269,14 @@ typedef enum gfx_cmp {
 
 
 typedef enum gfx_stencil_op {
-    gfx_stencil_op_zero,        // D3D10_STENCIL_OP_ZERO         D3DSTENCILOP_ZERO       GL_ZERO
-    gfx_stencil_op_keep,        // D3D10_STENCIL_OP_KEEP         D3DSTENCILOP_KEEP       GL_KEEP
-    gfx_stencil_op_replace,     // D3D10_STENCIL_OP_REPLACE      D3DSTENCILOP_REPLACE    GL_REPLACE
-    gfx_stencil_op_incr,        // D3D10_STENCIL_OP_INCR_SAT     D3DSTENCILOP_INCRSAT    GL_INCR
-    gfx_stencil_op_incr_wrap,   // D3D10_STENCIL_OP_INCR         D3DSTENCILOP_INCR       GL_INCR_WRAP
-    gfx_stencil_op_decr,        // D3D10_STENCIL_OP_DECR_SAT     D3DSTENCILOP_DECRSAT    GL_DECR
-    gfx_stencil_op_decr_wrap,   // D3D10_STENCIL_OP_DECR         D3DSTENCILOP_DECR       GL_DECR_WRAP
-    gfx_stencil_op_invert,      // D3D10_STENCIL_OP_INVERT       D3DSTENCILOP_INVERT     GL_INVERT
+    gfx_stencil_op_zero,                // D3D10_STENCIL_OP_ZERO         D3DSTENCILOP_ZERO       GL_ZERO
+    gfx_stencil_op_keep,                // D3D10_STENCIL_OP_KEEP         D3DSTENCILOP_KEEP       GL_KEEP
+    gfx_stencil_op_replace,             // D3D10_STENCIL_OP_REPLACE      D3DSTENCILOP_REPLACE    GL_REPLACE
+    gfx_stencil_op_incr,                // D3D10_STENCIL_OP_INCR_SAT     D3DSTENCILOP_INCRSAT    GL_INCR
+    gfx_stencil_op_incr_wrap,           // D3D10_STENCIL_OP_INCR         D3DSTENCILOP_INCR       GL_INCR_WRAP
+    gfx_stencil_op_decr,                // D3D10_STENCIL_OP_DECR_SAT     D3DSTENCILOP_DECRSAT    GL_DECR
+    gfx_stencil_op_decr_wrap,           // D3D10_STENCIL_OP_DECR         D3DSTENCILOP_DECR       GL_DECR_WRAP
+    gfx_stencil_op_invert,              // D3D10_STENCIL_OP_INVERT       D3DSTENCILOP_INVERT     GL_INVERT
 } gf_stencil_op;
 
 
@@ -303,15 +304,15 @@ typedef enum gfx_blend_op {
 
 
 typedef enum gfx_pipeline_flags {
-    gfx_colormask_r = 1 << 0,
-    gfx_colormask_g = 1 << 1,
-    gfx_colormask_b = 1 << 2,
-    gfx_colormask_a = 1 << 3,
-    gfx_colormask_all = gfx_colormask_r | gfx_colormask_g | gfx_colormask_b | gfx_colormask_a,
-    gfx_depth_test = 1 << 4,
-    gfx_depth_write = 1 << 5,
-    gfx_blend = 1 << 6,
-    gfx_stencil = 1 << 7,
+    gfx_colormask_r     = 1 << 0,
+    gfx_colormask_g     = 1 << 1,
+    gfx_colormask_b     = 1 << 2,
+    gfx_colormask_a     = 1 << 3,
+    gfx_colormask_rgba  = gfx_colormask_r | gfx_colormask_g | gfx_colormask_b | gfx_colormask_a,
+    gfx_depth_test      = 1 << 4,
+    gfx_depth_write     = 1 << 5,
+    gfx_blend           = 1 << 6,
+    gfx_stencil         = 1 << 7,
 } gfx_pipeline_flags;
 
 
@@ -332,18 +333,26 @@ typedef enum gfx_shader_stage {
 
     gfx_shader_compute,
 
-    gfx_shader_rt_raygen,      // = 0x0100,
-    gfx_shader_rt_intersect,   // = 0x1000,
-    gfx_shader_rt_any_hit,     // = 0x0200,
-    gfx_shader_rt_closest_hit, // = 0x0400,
-    gfx_shader_rt_miss,        // = 0x0800,
-    gfx_shader_rt_callable,    // = 0x2000,
+    gfx_shader_rt_raygen,               // = 0x0100,
+    gfx_shader_rt_intersect,            // = 0x1000,
+    gfx_shader_rt_any_hit,              // = 0x0200,
+    gfx_shader_rt_closest_hit,          // = 0x0400,
+    gfx_shader_rt_miss,                 // = 0x0800,
+    gfx_shader_rt_callable,             // = 0x2000,
 
-    gfx_shader_amplify,         // amplify + mesh + fragment
-    gfx_shader_mesh,            // mesh + fragment 
+    gfx_shader_amplify,                 // amplify + mesh + fragment
+    gfx_shader_mesh,                    // mesh + fragment 
 
     gfx_shader_count,
 } gfx_shader_stage;
+
+
+typedef enum gfx_barrier {
+    gfx_barrier_compute,
+    gfx_barrier_vertex,
+    gfx_barrier_fragment,
+    gfx_barrier_rendertarget
+} gfx_barrier;
 
 
 typedef enum gfx_submit_options {
@@ -379,6 +388,7 @@ typedef struct gfx_allocator_t {
     void    *user_data                                  = nullptr;
 } gfx_allocator_t;
 
+
 typedef struct gfx_settings_t {
     uint32_t                options                 = 0;
 
@@ -386,10 +396,12 @@ typedef struct gfx_settings_t {
     intptr_t                handle                  = 0;
 
     struct {
-        uint32_t            staging_buffer_size     = 16 * 1024 * 1024;
-        uint32_t            buffer_pool_capacity    = 1  * 1024;
-        uint32_t            shaders_pool_capacity   = 1  * 1024;
-        uint32_t            textures_pool_capacity  = 2  * 1024;
+        uint32_t            staging_buffer_size             = 16 * 1024 * 1024;
+        uint32_t            buffer_pool_capacity            = 1  * 1024;
+        uint32_t            shaders_pool_capacity           = 1  * 1024;
+        uint32_t            textures_pool_capacity          = 2  * 1024;
+        uint32_t            pipeline_pool_capacity          = 1  * 1024;
+        uint32_t            compute_pipeline_pool_capacity  = 1  * 1024;
     } limits;
 
     gfx_allocator_t *       allocator;
@@ -437,6 +449,7 @@ typedef struct gfx_texture_desc_t {
     uint32_t                mip_levels;  
     uint32_t                storage;    // qreater 0 - use as storage
     
+    gfx_access_type         access;
     gfx_texture_type        type;
     gfx_pixel_format        format;
 } gfx_texture_desc_t;
@@ -537,7 +550,7 @@ typedef struct gfx_render_states_desc_t {
     gfx_topology            topology    = gfx_topology_triangles;
     gfx_cull                culling     = gfx_cull_none;
     gfx_face                face        = gfx_face_ccw;
-    uint32_t                states      = gfx_colormask_all | gfx_depth_test | gfx_depth_write;
+    uint32_t                states      = gfx_colormask_rgba | gfx_depth_test | gfx_depth_write;
 
     struct {
         gfx_pixel_format*   color;
@@ -619,15 +632,15 @@ gfx_api void                    gfx_create_swapchain(gfx_context_t* ctx, intptr_
 gfx_api int32_t                 gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t * swapchain, gfx_render_target_t** target);
 gfx_api void                    gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t * swapchain, uint32_t idx);
 
-gfx_api gfx_buffer_t *          gfx_create_buffer2(gfx_context_t* ctx, gfx_buffer_desc_t* desc);
-gfx_api gfx_shader_t *          gfx_create_shader2(gfx_context_t* ctx, gfx_shader_desc_t* desc);
-gfx_api gfx_sampler_t *         gfx_create_sampler2(gfx_context_t* ctx, gfx_sampler_desc_t* desc);
+gfx_api gfx_buffer_t*           gfx_create_buffer2(gfx_context_t* ctx, gfx_buffer_desc_t* desc);
+gfx_api gfx_shader_t*           gfx_create_shader2(gfx_context_t* ctx, gfx_shader_desc_t* desc);
+gfx_api gfx_sampler_t*          gfx_create_sampler2(gfx_context_t* ctx, gfx_sampler_desc_t* desc);
 gfx_api gfx_texture_t *         gfx_create_texture2(gfx_context_t* ctx, gfx_texture_desc_t* desc);
-gfx_api gfx_pipeline_t *        gfx_create_pipeline2(gfx_context_t* ctx, gfx_pipeline_desc_t* desc);
+gfx_api gfx_pipeline_t*         gfx_create_pipeline2(gfx_context_t* ctx, gfx_pipeline_desc_t* desc);
 gfx_api gfx_pipeline_compute_t* gfx_create_compute_pipeline2(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc);
-gfx_api gfx_render_target_t *   gfx_create_render_target2(gfx_context_t* ctx, gfx_render_target_desc_t* desc);
-gfx_api gfx_descriptor_set_t *  gfx_create_descriptor_set2(gfx_context_t* ctx, gfx_shader_t* shader);
-gfx_api gfx_command_buffer_t *  gfx_create_cmd2(gfx_context_t* ctx);
+gfx_api gfx_render_target_t*    gfx_create_render_target2(gfx_context_t* ctx, gfx_render_target_desc_t* desc);
+gfx_api gfx_descriptor_set_t*   gfx_create_descriptor_set2(gfx_context_t* ctx, gfx_shader_t* shader);
+gfx_api gfx_command_buffer_t*   gfx_create_cmd2(gfx_context_t* ctx);
 
 gfx_api void                    gfx_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
 
@@ -666,6 +679,9 @@ gfx_api void                    gfx_cmd_draw                (gfx_command_buffer_
 gfx_api void                    gfx_cmd_draw_indexed        (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
 gfx_api void                    gfx_cmd_dispatch_compute    (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
+gfx_api void                    gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+gfx_api void                    gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
 gfx_api void                    gfx_cmd_end(gfx_command_buffer_t* cmd);
 gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
@@ -673,26 +689,6 @@ gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_b
 // https://www.khronos.org/blog/understanding-vulkan-synchronization
 // https://github.com/khronosgroup/vulkan-docs/wiki/synchronization-examples
 
-typedef enum gfx_barrier {
-    gfx_barrier_compute_src,
-    gfx_barrier_compute_dst,
-    gfx_barrier_vertex_src,
-    gfx_barrier_vertex_dst,
-    gfx_barrier_fragment_src,
-    gfx_barrier_fragment_dst
-} gfx_barrier;
-
-typedef struct gfx_barrier_desc_t {
-    gfx_buffer_t  * buffer;
-    gfx_texture_t * texture;
-} gfx_barrier_desc_t;
-
-
-gfx_api void gfx_cmd_barrier(gfx_command_buffer_t* cmd, gfx_barrier barrier, gfx_barrier_desc_t * desc);
-
-
-gfx_api void gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, gfx_barrier src, gfx_barrier dst); // 
-gfx_api void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t* texture, gfx_barrier src, gfx_barrier dst);
 
 // WIP: occlusion query, timestamp, mipmap, raytracing
 // 
@@ -760,11 +756,11 @@ gfx_api uint64_t    gfx_pool_alloc(gfx_handle_pool_t* pool);
 gfx_api void        gfx_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api void*       gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
 
-gfx_api void*       gfx_pool_get_data(gfx_handle_pool_t* pool);
-gfx_api size_t      gfx_pool_get_stride(gfx_handle_pool_t* pool);
+//gfx_api void*       gfx_pool_get_data(gfx_handle_pool_t* pool);
+//gfx_api size_t      gfx_pool_get_stride(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_size(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_capacity(gfx_handle_pool_t* pool);
-gfx_api size_t      gfx_pool_has_free(gfx_handle_pool_t* pool);
+//gfx_api size_t      gfx_pool_has_free(gfx_handle_pool_t* pool);
 
 
 /*

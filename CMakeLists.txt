@@ -110,6 +110,8 @@ set(SOURCES
     src/gason.cpp
     src/gason.h
     src/json_serializer.h
+    src/resource_loader.cpp
+    src/resource_loader.h
     src/resource_manager.cpp
     src/resource_manager.h
     src/common.cpp

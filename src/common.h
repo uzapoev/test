@@ -40,10 +40,15 @@ struct Hash
 };
 
 
-struct Utf8
-{   
-    static size_t   wchar_to_utf8(const wchar_t* data, size_t size, uint8_t* s);
-    static size_t   utf8_to_wchar(const uint8_t* data, size_t size, wchar_t* w);
+struct utf8
+{
+    static bool         is_ascii(const char* data, size_t size);
+    static bool         is_ascii(const wchar_t* data, size_t size);
+
+    static size_t       wchar_to_utf8(const wchar_t* data, size_t size, uint8_t* s);
+    static size_t       utf8_to_wchar(const uint8_t* data, size_t size, wchar_t* w);
+
+    static std::wstring from_utf8(const uint8_t* data, size_t size);
 };
 
 

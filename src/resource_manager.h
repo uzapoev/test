@@ -11,7 +11,7 @@
 #include "mathlib.h"
 #include "common.h"
 
-#include "render_manager.h"
+#include "render_system.h"
 #include "resource_loader.h"
 
 extern size_t   read_file_data(const char* path, char** data);

@@ -187,7 +187,7 @@ uint64_t Hash::murmur64(const void* key, uint32_t len, uint32_t seed)
 size_t Hash::bernstein_ci(const void* data_in, uint32_t size, uint32_t seed)
 {
     const unsigned char * data = (const unsigned char*)data_in;
-    unsigned int    h = seed;
+    unsigned int h = seed;
     while (size > 0) {
         size--;
         h = ((h << 5) + h) ^ (unsigned)tolower(data[size]);
@@ -196,40 +196,79 @@ size_t Hash::bernstein_ci(const void* data_in, uint32_t size, uint32_t seed)
 }
 
 
-size_t Utf8::wchar_to_utf8(const wchar_t* w, size_t size, uint8_t* s)
+bool utf8::is_ascii(const char* data, size_t size)
+{
+    for (size_t i = 0; i < size; i++) {
+        if (data[i] > 0x7F)
+            return false;
+    }
+    return true;
+}
+
+bool utf8::is_ascii(const wchar_t* data, size_t size)
+{
+    for (size_t i = 0; i < size; i++) {
+        if (data[i] > 0x7F)
+            return false;
+    }
+    return true;
+}
+
+size_t utf8::wchar_to_utf8(const wchar_t* w, size_t size, uint8_t* s)
 {
     uint32_t  c;
     short* p = (short*)w;
     uint8_t* q = (uint8_t*)s; uint8_t* q0 = q;
     while (1) {
         c = *p++;
-        if (c == 0) break;
-        if (c < 0x080) *q++ = c; else
-            if (c < 0x800) *q++ = 0xC0 + (c >> 6), *q++ = 0x80 + (c & 63); else
+        if (c == 0)
+            break;
+        if (c < 0x080)
+            *q++ = c;
+        else
+            if (c < 0x800) 
+                *q++ = 0xC0 + (c >> 6), *q++ = 0x80 + (c & 63); 
+            else
                 *q++ = 0xE0 + (c >> 12), *q++ = 0x80 + ((c >> 6) & 63), *q++ = 0x80 + (c & 63);
     }
     *q = 0;
     return q - q0;
 }
 
-size_t Utf8::utf8_to_wchar(const uint8_t* s, size_t size, wchar_t* w)
+size_t utf8::utf8_to_wchar(const uint8_t* s, size_t size, wchar_t* w)
 {
     uint32_t  cache = 0, wait = 0, c = 0;
     uint8_t* p = (uint8_t*)s;
     short* q = (short*)w; short* q0 = q;
     while (1) {
         c = *p++;
-        if (c == 0) break;
-        if (c < 0x80) cache = c, wait = 0; else
-            if ((c >= 0xC0) && (c <= 0xE0)) cache = c & 31, wait = 1; else
-                if ((c >= 0xE0)) cache = c & 15, wait = 2; else
-                    if (wait) (cache <<= 6) += c & 63, wait--;
-        if (wait == 0) *q++ = cache;
+        if (c == 0) 
+            break;
+        if (c < 0x80) 
+            cache = c, wait = 0; 
+        else
+            if ((c >= 0xC0) && (c <= 0xE0)) 
+                cache = c & 31, wait = 1; 
+            else
+                if ((c >= 0xE0)) 
+                    cache = c & 15, wait = 2; 
+                else if (wait) 
+                    (cache <<= 6) += c & 63, wait--;
+        if (wait == 0) 
+            *q++ = cache;
     }
     *q = 0;
     return q - q0;
 }
 
+
+std::wstring utf8::from_utf8(const uint8_t* data, size_t size)
+{
+    std::wstring result;
+    result.reserve(size);
+    utf8::utf8_to_wchar(data, size, result.data());
+    return result;
+}
 
 //
 // debug
@@ -243,21 +282,21 @@ size_t Utf8::utf8_to_wchar(const uint8_t* s, size_t size, wchar_t* w)
 void debug::log(const char* msg, ...) 
 {
     arg_vprintf(msg);
-    printf("\033[0m\n");
+    printf("\n\033[0m");
 }
 
 void debug::log_error(const char* msg, ...)
 {
-    printf("\x1b[31m");
+    printf("\n\x1b[31m");
     arg_vprintf(msg);
-    printf("\033[0m\n");
+    printf("\033[0m");
 }
 
 void debug::log_warning(const char* msg, ...)
 { 
-    printf("\x1B[33m");
+    printf("\n\x1B[33m");
     arg_vprintf(msg);
-    printf("\033[0m\n");
+    printf("\033[0m");
 }
 
 void debug::breakpoint()

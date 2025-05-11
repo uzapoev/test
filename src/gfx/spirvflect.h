@@ -239,9 +239,6 @@ static void parse_struct(sprivflect_info_t * ctx, spirvflect_type_t* type)
         auto offset_decor = _find_with_decor_in_child(ctx, type->id, i, SpvDecorationOffset);
 
         strcpy(uniform.buffer.fields[i].name, (char*)spv_name->name);
-     //   uniform.buffer.fields[i].
-
-        printf("");
     }
 }
 
@@ -282,7 +279,6 @@ static int parse_substruct(sprivflect_info_t* ctx, spirvflect_type_t* type)
         }
         else if (field_type->type == SpvOpTypeRuntimeArray) {
             auto array_field_type = _find_type(ctx, field_type->spvarray.type_id);
-            printf("");
         }else{
             assert(false);
         }

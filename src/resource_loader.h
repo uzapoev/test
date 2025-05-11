@@ -36,7 +36,7 @@ extern bool     load_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t* po
 extern void     load_mesh_from_file_data(gfx_context_t* ctx, gfx_mesh_pool_t* pool, const char* name, char* data, size_t size, gfx_mesh_t* out_mesh);
 
 extern void     load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_texture_t** out_texture);
-extern void     load_texture_from_file_data(gfx_context_t* ctx, char* data, size_t size, gfx_texture_t** out_texture);
+extern void     load_texture_from_file_data(gfx_context_t* ctx, const char* name, char* data, size_t size, gfx_texture_t** out_texture);
 
 extern void     load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader_t** out_shader);
 extern void     load_shader_from_file_data(gfx_context_t* ctx, const char* name, char* data, size_t size, gfx_shader_t** out_shader);

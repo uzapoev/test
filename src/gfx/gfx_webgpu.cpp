@@ -1246,7 +1246,7 @@ void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_de
 }
 
 
-void wgpu_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** out_cmd)
+void wgpu_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
 

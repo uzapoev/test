@@ -73,12 +73,12 @@ static bool is_pow(size_t x) {
     return x && !(x & (x - 1));
 }
 
-static size_t nextPowerOfTwo(size_t x) {
+static size_t next_pot(size_t x) {
     if (is_pow(x)) return x;
     return 1ull << (64 - clzll(x));
 }
 
-static size_t alignUp(size_t val, size_t align) {
+static size_t align_up(size_t val, size_t align) {
     return (val + align - 1) & ~(align - 1);
 }
 
@@ -125,10 +125,10 @@ struct FreeList
 {
     size_t* data = nullptr;
     int count = 0;
-    int capacity = 0;
+    int m_capacity = 0;
 
     void init(int cap) {
-        capacity = cap;
+        m_capacity = cap;
         data = new size_t[cap];
         count = 0;
     }
@@ -136,13 +136,13 @@ struct FreeList
     void destroy() {
         delete[] data;
         data = nullptr;
-        count = capacity = 0;
+        count = m_capacity = 0;
     }
 
     bool empty() const { return count == 0; }
 
     void push(size_t offset) {
-        assert(count < capacity);
+        assert(count < m_capacity);
         data[count++] = offset;
     }
 
@@ -198,9 +198,9 @@ void* buddy_allocator::allocate(size_t size, size_t aligment)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    size = alignUp(size, m_minBlockSize);
+    size = align_up(size, m_minBlockSize);
     if (!is_pow(size)) 
-        size = nextPowerOfTwo(size);
+        size = next_pot(size);
     int level = getLevel(size);
 
     for (int i = level; i <= m_maxLevel; ++i) {
@@ -245,10 +245,15 @@ void buddy_allocator::deallocate(void* ptr)
 
 
 
-
-
-
-
+offset_allocator::offset_allocator(size_t size, size_t min_size)
+:m_buffer_size(size)
+{
+    size_t block_count = size/ (min_size*4);
+    m_min_size = align_up(min_size, sizeof(void*));
+    m_free_blocks.reserve(64);
+    m_free_blocks.emplace_back(0, size);
+    m_allocated_blocks.reserve(64);
+}
 
 
 ptrdiff_t offset_allocator::allocate(size_t size, size_t alignment)
@@ -257,39 +262,36 @@ ptrdiff_t offset_allocator::allocate(size_t size, size_t alignment)
         return -1;
     }
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    size = align_up(size, m_min_size);
 
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     for (auto it = m_free_blocks.begin(); it != m_free_blocks.end(); ++it) {
         size_t block_offset = it->offset;
         size_t block_size = it->size;
-
-
-        size_t aligned_offset = (block_offset + alignment - 1) & ~(alignment - 1);
+        size_t aligned_offset = align_up(block_offset, alignment);
         size_t padding = aligned_offset - block_offset;
-
 
         if (block_size >= size + padding) {
 
             m_allocated_blocks.emplace_back(aligned_offset, size);
 
-
-            if (block_size == size + padding) {
-          
+            if (block_size == size + padding)
+            {
                 m_free_blocks.erase(it);
             }
-            else {
-
-                if (padding > 0) {
-
+            else 
+            {
+                if (padding > 0) 
+                {
                     it->size = padding;
-                    if (size < block_size - padding) {
-                     
+                    if (size < block_size - padding) 
+                    {
                         m_free_blocks.emplace_back(aligned_offset + size, block_size - size - padding);
                     }
                 }
-                else {
-
+                else 
+                {
                     it->offset = aligned_offset + size;
                     it->size = block_size - size;
                 }
@@ -320,15 +322,29 @@ void offset_allocator::deallocate(size_t offset)
     }
 }
 
-void offset_allocator::merge_free_blocks() {
-    if (m_free_blocks.empty()) {
+void offset_allocator::merge_free_blocks() 
+{
+    if (m_free_blocks.empty())
         return;
-    }
-
 
     std::sort(m_free_blocks.begin(), m_free_blocks.end(),
         [](const Block& a, const Block& b) { return a.offset < b.offset; });
 
+    size_t write_idx = 0;
+    for (size_t read_idx = 1; read_idx < m_free_blocks.size(); ++read_idx) {
+        auto& last = m_free_blocks[write_idx];
+        auto& current = m_free_blocks[read_idx];
+
+        if (last.offset + last.size == current.offset) {
+            last.size += current.size;
+        }
+        else {
+            ++write_idx;
+            m_free_blocks[write_idx] = current;
+        }
+    }
+    m_free_blocks.resize(write_idx + 1);
+/*
     std::vector<Block> merged;
     merged.push_back(m_free_blocks[0]);
 
@@ -344,7 +360,7 @@ void offset_allocator::merge_free_blocks() {
         }
     }
 
-    m_free_blocks = std::move(merged);
+    m_free_blocks = std::move(merged);*/
 }
 
 

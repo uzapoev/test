@@ -1,7 +1,7 @@
 #include "resource_loader.h"
 
 #include "gfx/gfx_reflection.h"
-#include "render_manager.h"
+#include "render_system.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -316,7 +316,7 @@ void load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_textu
     size_t size = read_file_data(path, &data);
 
     if (size != 0)
-        load_texture_from_file_data(ctx, data, size, out_texture);
+        load_texture_from_file_data(ctx, strrchr(path, '/'), data, size, out_texture);
 
     free(data);
 
@@ -325,12 +325,13 @@ void load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_textu
 }
 
 
-void load_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size, gfx_texture_t **out_texture)
+void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * data, size_t size, gfx_texture_t **out_texture)
 {
     uint32_t magik = *(uint32_t*)data;
 
     bool free_stbi_buffer = false;
     gfx_texture_desc_t desc = {};
+    desc.label = name;
     switch (magik)
     {
         case astc_magic: {
