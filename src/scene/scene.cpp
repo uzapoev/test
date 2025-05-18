@@ -346,6 +346,7 @@ void scene::update()
 
 void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
 {
+    gfx_cmd_push_marker(cmd, "test");
     mat4 vp = camera.view_proj();
     auto visible_renderers = cull(vp); // culling
 
@@ -374,6 +375,7 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
         }
         draw_renderer(cmd, renderer);
     }
+    gfx_cmd_pop_marker(cmd);
 }
 
 void scene::traverse(node & n, std::function<void(node&)> &cb)

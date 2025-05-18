@@ -1,5 +1,4 @@
 #include "gfx_vulkan.h"
-
 #ifdef VULKAN_AVAILABLE
 
 #if __has_include(<vma/vk_mem_alloc.h>)
@@ -416,9 +415,9 @@ static VkInstance _vk_create_instance(bool isdebug)
 #elif defined(__ANDROID__)
     #define SURFACE_EXTENSION_NAME      VK_KHR_ANDROID_SURFACE_EXTENSION_NAME
 #endif
-    const char * VK_LAYER_KHRONOS_validation = "VK_LAYER_KHRONOS_validation";
-
-    char* extensions_debug[] = { VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_REPORT_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
+    const char * VK_LAYER_KHRONOS_validation = "VK_LAYER_KHRONOS_validation";//VK_EXT_DEBUG_MARKER_EXTENSION_NAME
+    
+    char* extensions_debug[] =   { VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_REPORT_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
     char* extensions_release[] = { VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_REPORT_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
 
     char**   extension_names = isdebug ? extensions_debug : extensions_release;
@@ -917,12 +916,18 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vctx->dbg_log          = cfg->dbglog ? cfg->dbglog : gfx_default_log;
     vctx->msaa_samples     = VK_SAMPLE_COUNT_1_BIT;
 
+    vctx->vk_dbg_set_object_name    = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(vctx->device, "vkSetDebugUtilsObjectNameEXT");
+    vctx->vk_dbg_cmd_push_label     = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(vctx->device, "vkCmdBeginDebugUtilsLabelEXT");
+    vctx->vk_dbg_cmd_pop_label      = (PFN_vkCmdEndDebugUtilsLabelEXT)  vkGetDeviceProcAddr(vctx->device, "vkCmdEndDebugUtilsLabelEXT");
+
     vkGetPhysicalDeviceFeatures(physdevice, &vctx->device_features);
     vkGetPhysicalDeviceProperties(physdevice, &vctx->device_properties);
     vkGetPhysicalDeviceMemoryProperties(physdevice, &vctx->memory_properties);
     vkEnumerateDeviceExtensionProperties(physdevice, NULL, &vctx->extensions_count, NULL);
     vctx->extensions = (VkExtensionProperties*)calloc(vctx->extensions_count, sizeof(VkExtensionProperties));
     vkEnumerateDeviceExtensionProperties(physdevice, NULL, &vctx->extensions_count, vctx->extensions);
+
+    auto maxUniformBufferRange = vctx->device_properties.limits.maxUniformBufferRange;
 
     for(int i = 0; i < _countof(vctx->semaphores); ++i)
     {
@@ -966,7 +971,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
             descriptor.size     = cfg->limits.staging_buffer_size;
             descriptor.usage    = gfx_buffer_usage_staging;
         vk_create_buffer(&vctx->handle, &descriptor, &staging);
-        vctx->staging_buffer = (vk_buffer_t*)staging;
+        vctx->staging_buffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, staging->idx);
     }
 
     // default sampler
@@ -991,7 +996,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
             descriptor.mip_levels   = 3;
             descriptor.data         = &_colors[0];
         vk_create_texture(&vctx->handle, &descriptor, &default_texture);
-        vctx->default_texture = (vk_texture_t*)default_texture;
+        vctx->default_texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, default_texture->idx);
     }
 
     // default texture storage
@@ -1034,30 +1039,49 @@ void vk_create_renderpass(gfx_context_t* ctx, VkFormat colorformat, VkFormat dep
 {
     vk_context_t* vctx = from_ctx(ctx);
 
-    VkAttachmentDescription attachment_descs[2] = {};
     // color attachment
-    attachment_descs[0].format           = colorformat;
-    attachment_descs[0].samples          = vctx->msaa_samples;
-    attachment_descs[0].loadOp           = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachment_descs[0].storeOp          = VK_ATTACHMENT_STORE_OP_STORE;
-    attachment_descs[0].stencilLoadOp    = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachment_descs[0].stencilStoreOp   = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachment_descs[0].initialLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachment_descs[0].finalLayout      = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkAttachmentDescription color_attachment = {};
+    color_attachment.format           = colorformat;
+    color_attachment.samples          = vctx->msaa_samples;
+    color_attachment.loadOp           = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attachment.storeOp          = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attachment.stencilLoadOp    = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color_attachment.stencilStoreOp   = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color_attachment.initialLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
+    color_attachment.finalLayout      = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
     // depth attachment
-    attachment_descs[1].format           = depthformat;
-    attachment_descs[1].samples          = vctx->msaa_samples;
-    attachment_descs[1].loadOp           = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachment_descs[1].storeOp          = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachment_descs[1].stencilLoadOp    = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachment_descs[1].stencilStoreOp   = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachment_descs[1].initialLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachment_descs[1].finalLayout      = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentDescription depth_attachment = {};
+    depth_attachment.format           = depthformat;
+    depth_attachment.samples          = vctx->msaa_samples;
+    depth_attachment.loadOp           = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment.storeOp          = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.stencilLoadOp    = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth_attachment.stencilStoreOp   = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.initialLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth_attachment.finalLayout      = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription resolve_attachment ={};
+    resolve_attachment.format           = colorformat;
+    resolve_attachment.samples          = VK_SAMPLE_COUNT_1_BIT;
+    resolve_attachment.loadOp           = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    resolve_attachment.storeOp          = VK_ATTACHMENT_STORE_OP_STORE;
+    resolve_attachment.stencilLoadOp    = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    resolve_attachment.stencilStoreOp   = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    resolve_attachment.initialLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
+    resolve_attachment.finalLayout      = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
 
     VkAttachmentReference attachment_refs[] = {
-        {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
-        {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL}
+        {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+        {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
+   //     {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL }
+    };
+
+    VkAttachmentDescription attachment_descs[] = {
+        color_attachment,
+        depth_attachment,
+     //   resolve_attachment
     };
 
     VkSubpassDescription subpass = {};
@@ -1065,6 +1089,7 @@ void vk_create_renderpass(gfx_context_t* ctx, VkFormat colorformat, VkFormat dep
     subpass.colorAttachmentCount    = 1;
     subpass.pColorAttachments       = &attachment_refs[0];
     subpass.pDepthStencilAttachment = &attachment_refs[1];
+//    subpass.pResolveAttachments     = &attachment_refs[2];
 
     VkRenderPassCreateInfo renderPassInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
     renderPassInfo.pAttachments     = attachment_descs;
@@ -1130,6 +1155,7 @@ void vk_recreate_swapchain(gfx_context_t* ctx, vk_swapchain_t* swapchain)
         info.presentMode            = VK_PRESENT_MODE_FIFO_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
         info.presentMode            = VK_PRESENT_MODE_MAILBOX_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
         info.presentMode            = VK_PRESENT_MODE_IMMEDIATE_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
+        info.presentMode            = VK_PRESENT_MODE_MAILBOX_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
         info.clipped                = VK_TRUE;
         info.oldSwapchain           = prev_swapchain;
     VkResult result = vkCreateSwapchainKHR(vctx->device, &info, NULL, &swapchain->swapchain);
@@ -1168,10 +1194,12 @@ void vk_recreate_swapchain(gfx_context_t* ctx, vk_swapchain_t* swapchain)
     for (uint32_t i = 0; i < image_count; ++i)
     {
         VkImageView color_view = _vk_create_image_view(vctx, VK_IMAGE_VIEW_TYPE_2D, images[i], surface_format.format, 1);
-        VkImageView attachments[] = {
-            color_view,
-            depth_target.view
-        };
+
+        //                                      
+        VkImageView attachments[] =         { color_view,     depth_target.view   };
+
+        //                                    aa_view     aa_depth            resolve(swapchain view)
+        VkImageView sampled_attachments[] = { color_view, depth_target.view,  color_view        };
 
         if (swapchain->framebuffers[i] != VK_NULL_HANDLE)
             vkDestroyFramebuffer(vctx->device, swapchain->framebuffers[i], nullptr);
@@ -1427,7 +1455,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
             buff_desc.size  = ubo_buffer_size;
         vk_create_buffer(&ctx->handle, &buff_desc, &buffer);
 
-        ubo_buffer = (vk_buffer_t*)buffer;
+        ubo_buffer = (vk_buffer_t*)gfx_pool_map(ctx->buffers_pool, buffer->idx);
     }
 
     pool->capacity = capacity;
@@ -1457,9 +1485,8 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
         sets[i].writes = pool->writes + i * shader->uniform_count;
         sets[i].write_infos =  pool->write_infos + i * shader->uniform_count;
 
-        if(ubo_buffer_size > 0 && ubo_buffer != nullptr) {
+        if(ubo_buffer_size > 0 && ubo_buffer != nullptr)
             sets[i].uboptr = (uint8_t*)ubo_buffer->data_ptr + aligned_size * i;
-        }
 
         for(uint32_t j = 0;  j < shader->uniform_count; ++j)
         {
@@ -1804,8 +1831,6 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
 
     VkImageView image_view = _vk_create_image_view(vctx, VK_IMAGE_VIEW_TYPE_2D, image, format, desc->mip_levels);
 
-
-
     auto snap3 = gfx_gpu_ram_usage(ctx) - snap0;
 
     uint64_t handle = gfx_pool_alloc(vctx->texture_pool);
@@ -1870,23 +1895,26 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     vertex_input.pVertexAttributeDescriptions       = attributes;
 
     VkPipelineRasterizationStateCreateInfo  rasterizer = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
-    rasterizer.depthClampEnable         = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable  = VK_FALSE;
-    rasterizer.polygonMode              = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth                = 1.0f;
-    rasterizer.cullMode                 = gfx_cull_2_vk(desc->render_states.culling);
-    rasterizer.frontFace                = vk_face[desc->render_states.face];
-    rasterizer.depthBiasEnable          = VK_FALSE;
+    rasterizer.depthClampEnable             = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable      = VK_FALSE;
+    rasterizer.polygonMode                  = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth                    = 1.0f;
+    rasterizer.cullMode                     = gfx_cull_2_vk(desc->render_states.culling);
+    rasterizer.frontFace                    = vk_face[desc->render_states.face];
+    rasterizer.depthBiasEnable              = VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-    multisampling.sampleShadingEnable   = VK_FALSE;//vctx->msaa_samples != VK_SAMPLE_COUNT_1_BIT;
-    multisampling.rasterizationSamples  = vctx->msaa_samples;
+    multisampling.sampleShadingEnable       = VK_FALSE;//vctx->msaa_samples != VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples      = vctx->msaa_samples;
 
-    VkPipelineViewportStateCreateInfo viewportState = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
-    viewportState.viewportCount         = 1;
-    viewportState.pViewports            = NULL;
-    viewportState.scissorCount          = 1;
-    viewportState.pScissors             = NULL;
+  //  multisampling.sampleShadingEnable       = VK_TRUE; // enable sample shading in the pipeline
+  //  multisampling.minSampleShading          = .2f; //
+
+    VkPipelineViewportStateCreateInfo viewport_state = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    viewport_state.viewportCount            = 1;
+    viewport_state.pViewports               = NULL;
+    viewport_state.scissorCount             = 1;
+    viewport_state.pScissors                = NULL;
 
     // blend
     VkPipelineColorBlendAttachmentState blend_attachment    = {};
@@ -1900,10 +1928,10 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
 
 
     VkPipelineColorBlendStateCreateInfo blend_state = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-        blend_state.logicOpEnable               = VK_FALSE;
-        blend_state.logicOp                     = VK_LOGIC_OP_COPY;
-        blend_state.attachmentCount             = 1;
-        blend_state.pAttachments                = &blend_attachment;
+    blend_state.logicOpEnable               = VK_FALSE;
+    blend_state.logicOp                     = VK_LOGIC_OP_COPY;
+    blend_state.attachmentCount             = 1;
+    blend_state.pAttachments                = &blend_attachment;
 
     // depth
     VkPipelineDepthStencilStateCreateInfo depth_stencil = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
@@ -1915,7 +1943,8 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
 
     VkDynamicState dynamic_states[] = {
         VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
+        VK_DYNAMIC_STATE_SCISSOR,
+    //    VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT, //rasterizationSamples  vkCmdSetRasterizationSamplesEXT
     };
     VkPipelineDynamicStateCreateInfo dyn_state_info = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     dyn_state_info.dynamicStateCount    = _countof(dynamic_states);
@@ -1926,7 +1955,7 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     pipelineInfo.pStages                = vkshader->stages;
     pipelineInfo.pRasterizationState    = &rasterizer;
     pipelineInfo.pMultisampleState      = &multisampling;
-    pipelineInfo.pViewportState         = &viewportState;
+    pipelineInfo.pViewportState         = &viewport_state;
     pipelineInfo.pColorBlendState       = &blend_state;
     pipelineInfo.pDepthStencilState     = &depth_stencil;
     pipelineInfo.pInputAssemblyState    = &assembly;
@@ -2044,19 +2073,29 @@ void vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
 
     // create command buffers
     VkCommandBufferAllocateInfo alloc_info  = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-    alloc_info.level                    = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    alloc_info.commandPool              = vk_cmd->pool;
-    alloc_info.commandBufferCount       = 1;
+    alloc_info.level                        = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandPool                  = vk_cmd->pool;
+    alloc_info.commandBufferCount           = 1;
     if (auto result = vkAllocateCommandBuffers(vctx->device, &alloc_info, &vk_cmd->cmd))
     {
         auto err_str = string_VkResult(result);
         vctx->dbg_log(gfx_msg_error, "failed to allocate command buffers! (%s)", err_str);
     }
 
-    vk_cmd->handle = { handle };
-    vk_cmd->ctx = vctx;
-    vk_cmd->device = vctx->device;
-    vk_cmd->thread_id = gfx_utils_thread_id();
+    // create timestamps
+    VkQueryPoolCreateInfo timestamp_info    = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+    timestamp_info.queryType                = VK_QUERY_TYPE_TIMESTAMP;
+    timestamp_info.queryCount               = 128;
+    if (auto result = vkCreateQueryPool(vctx->device, &timestamp_info, nullptr, &vk_cmd->time_query_pool))
+    {
+        auto err_str = string_VkResult(result);
+        vctx->dbg_log(gfx_msg_error, "failed to create timestamps for command buffers! (%s)", err_str);
+    }
+
+    vk_cmd->handle      = { handle };
+    vk_cmd->ctx         = vctx;
+    vk_cmd->device      = vctx->device;
+    vk_cmd->thread_id   = gfx_utils_thread_id();
     *out_cmd = &vk_cmd->handle;
 }
 
@@ -2065,10 +2104,8 @@ void vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
 void vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)
 {
     vk_context_t* vctx = from_ctx(ctx);
-    vk_buffer_t* vkbuffer = (vk_buffer_t*)buffer;
-
-    vk_buffer_t * buf = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, vkbuffer->handle.idx);
-    if(buf)
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, buffer->idx);
+    if(vkbuffer)
     {
         if (vkbuffer->mapped && vkbuffer->buffer != nullptr)
             vkUnmapMemory(vctx->device, vkbuffer->memory);
@@ -2189,7 +2226,7 @@ void vk_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
 void vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
 {
     auto vkctx = (vk_context_t*)(ctx);
-    auto vkbuf = (vk_buffer_t*) (buffer);
+    auto vkbuf = (vk_buffer_t*)gfx_pool_map(vkctx->buffers_pool, buffer->idx);
 
     if(vkbuf->mapped)
     {
@@ -2215,7 +2252,6 @@ void vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data,
                 info.dst_buffer_size = (uint32_t)size;
                 info.dst_buffer_offset = offset;
             _vk_copy_buffer_to(vkctx, vkctx->staging_buffer->buffer, &info);
-            return;
         }
         else
         {
@@ -2319,11 +2355,12 @@ void vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_text
     if (set == NULL || handle == 0)
         return;
 
+    // TODO: need refactor
     vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
 
     vk_shader_t * vkshader      = (vk_shader_t*)vkset->shader;
-    vk_texture_t* vktexture     = (vk_texture_t*)texture;
     vk_context_t* vkctx         = vkshader->ctx;
+    vk_texture_t* vktexture     = texture?(vk_texture_t*)gfx_pool_map(vkctx->texture_pool, texture->idx) : vkctx->default_texture;
 
     uint16_t hash               = (handle) & 0xFFFF;
     uint16_t unform_id          = (handle >> 16) & 0xFFFF;
@@ -2394,8 +2431,10 @@ void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target)
         info.framebuffer        = vk_target->framebuffer;
         info.renderArea         = render_area;
         info.clearValueCount    = 2;
-        info.pClearValues       = clear_value;
+        info.pClearValues       = clear_value; 
     vkCmdBeginRenderPass(vk_cmd->cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
+
+  //  vkCmdSetRasterizationSamplesEXT(vk_cmd->cmd, VK_SAMPLE_COUNT_1_BIT);
 
     vk_cmd_viewport(cmd, 0, 0, vk_target->extend.width, vk_target->extend.height);
     vk_cmd_scissor(cmd, 0, 0, vk_target->extend.width, vk_target->extend.height);
@@ -2461,8 +2500,8 @@ void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t*
 
 void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
 {
-    vk_buffer_t* vkbuffer = (vk_buffer_t*)buffer;
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_pool_map(vk_cmd->ctx->buffers_pool, buffer->idx);
 
     VkIndexType index_type = gfx_index_format_2_vk(format);
     vkCmdBindIndexBuffer(vk_cmd->cmd, vkbuffer->buffer, offset, index_type);
@@ -2470,8 +2509,9 @@ void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, u
 
 void vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t binding, uint32_t offset, gfx_buffer_t* buffer)
 {
-    vk_buffer_t* vkbuffer = (vk_buffer_t*)buffer;
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_pool_map(vk_cmd->ctx->buffers_pool, buffer->idx);
     VkDeviceSize offsets[] = { offset };
     vkCmdBindVertexBuffers(vk_cmd->cmd, binding, 1, &vkbuffer->buffer, offsets);
 }
@@ -2492,6 +2532,39 @@ void vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, 
 {
     vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
     vkCmdDispatch(vkcmd->cmd, x, y, z);
+}
+
+void vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
+{
+    vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* ctx = vkcmd->ctx;
+
+    vkCmdWriteTimestamp(vkcmd->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vkcmd->time_query_pool, vkcmd->time_query_index);
+    vkcmd->time_query_index++;
+    vkcmd->stamp_count++;
+    //vkcmd->stamp_name[vkcmd->time_query_index] = marker;
+
+    if(ctx->vk_dbg_cmd_push_label != nullptr)
+    {
+        VkDebugUtilsLabelEXT label  = { VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
+        label.pLabelName            = marker;
+        ctx->vk_dbg_cmd_push_label(vkcmd->cmd, &label);
+    }
+}
+
+void vk_cmd_pop_marker(gfx_command_buffer_t* cmd)
+{
+    vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* ctx = vkcmd->ctx;
+
+    vkCmdWriteTimestamp(vkcmd->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vkcmd->time_query_pool, vkcmd->time_query_index);
+    vkcmd->stamp_count++;
+    vkcmd->time_query_index--;
+
+    if (ctx->vk_dbg_cmd_pop_label != nullptr)
+    {
+        ctx->vk_dbg_cmd_pop_label(vkcmd->cmd);
+    }
 }
 
 void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst)
@@ -2570,6 +2643,22 @@ void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
         vkResetFences(vkctx->device, 1, &fence);
         vkDestroyFence(vkctx->device, fence, nullptr);
     }
+
+    if(vk_cmd->stamp_count > 0) 
+    {
+        uint64_t timestamps[256] = {};
+        vkGetQueryPoolResults(  vkctx->device, vk_cmd->time_query_pool, 0, 
+                                vk_cmd->stamp_count,
+                                _countof(timestamps) * sizeof(uint64_t), 
+                                timestamps, 
+                                sizeof(uint64_t), 
+                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+
+        VkPhysicalDeviceLimits device_limits = vkctx->device_properties.limits;
+
+        float delta_in_ms = float(timestamps[1] - timestamps[0]) * device_limits.timestampPeriod / 1000000.0f;
+        vk_cmd->stamp_count = 0;
+    }
 }
 
 
@@ -2578,62 +2667,15 @@ void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
 
 void vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name)
 {
-    static PFN_vkDebugMarkerSetObjectNameEXT pfnDebugMarkerSetObjectNameEXT = nullptr;
-
-    static void* debug_marker_d_ptr = vkGetDeviceProcAddr(ctx->device,     "vkDebugMarkerSetObjectNameEXT");
-    static void* debug_marker_i_ptr = vkGetInstanceProcAddr(ctx->instance, "vkDebugMarkerSetObjectNameEXT");
-
-    static auto* debug_utils_object_name_d = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(ctx->device, "vkSetDebugUtilsObjectNameEXT");
-    static auto* debug_utils_object_name_i = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(ctx->instance, "vkSetDebugUtilsObjectNameEXT");
-
-    if(debug_utils_object_name_d != nullptr) {
+    if(ctx->vk_dbg_set_object_name != nullptr) {
         VkDebugUtilsObjectNameInfoEXT name_info = { VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT };
         name_info.objectType    = type;
         name_info.objectHandle  = vkobject;
         name_info.pObjectName   = name;
-        debug_utils_object_name_d(ctx->device, &name_info);
-    }
-
-    if(debug_marker_d_ptr != nullptr)    {
-        VkDebugMarkerObjectNameInfoEXT name_info = { VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT };
-            name_info.pNext         = NULL;
-        //    name_info.objectType    = type; //
-            name_info.object        = vkobject;
-            name_info.pObjectName   = name;
-        pfnDebugMarkerSetObjectNameEXT(ctx->device, &name_info);
+        ctx->vk_dbg_set_object_name(ctx->device, &name_info);
     }
 }
 
-
-void vk_debug_begin_region(vk_context_t* ctx, VkCommandBuffer cmd, const char* name, uint32_t color)
-{
-    static PFN_vkCmdDebugMarkerBeginEXT pfnCmdDebugMarkerBegin = VK_NULL_HANDLE;
-
-    if (pfnCmdDebugMarkerBegin == VK_NULL_HANDLE)
-        pfnCmdDebugMarkerBegin = (PFN_vkCmdDebugMarkerBeginEXT)(vkGetDeviceProcAddr(ctx->device, "vkCmdDebugMarkerBeginEXT"));
-
-    if (pfnCmdDebugMarkerBegin == VK_NULL_HANDLE)
-        return;
-
-    VkDebugMarkerMarkerInfoEXT markerInfo = { VK_STRUCTURE_TYPE_DEBUG_MARKER_MARKER_INFO_EXT };
-    markerInfo.color[0] = ((color >> 0) & 0xFF) / 255.0f;
-    markerInfo.color[1] = ((color >> 8) & 0xFF) / 255.0f;
-    markerInfo.color[2] = ((color >> 16) & 0xFF) / 255.0f;
-    markerInfo.color[3] = ((color >> 24) & 0xFF) / 255.0f;
-    markerInfo.pMarkerName = name;
-    pfnCmdDebugMarkerBegin(cmd, &markerInfo);
-}
-
-
-void vk_debug_end_region(vk_context_t* ctx, VkCommandBuffer cmd)
-{
-    static PFN_vkCmdDebugMarkerEndEXT pfnvkCmdDebugMarkerEnd = VK_NULL_HANDLE;
-
-    if (pfnvkCmdDebugMarkerEnd == VK_NULL_HANDLE)
-        pfnvkCmdDebugMarkerEnd = (PFN_vkCmdDebugMarkerEndEXT)(vkGetDeviceProcAddr(ctx->device, "vkCmdDebugMarkerEndEXT"));
-
-    pfnvkCmdDebugMarkerEnd(cmd);
-}
 
 
 void vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name)
@@ -2652,7 +2694,7 @@ void vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char
 {
     for (uint32_t i = 0; i < shader->stages_count; ++i)
     {
-  //      vk_debug_set_name(ctx, (uint64_t)shader->stages[i].module, VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT, name);
+        vk_debug_set_name(ctx, (uint64_t)shader->stages[i].module, VK_OBJECT_TYPE_SHADER_MODULE, name);
     }
 }
 

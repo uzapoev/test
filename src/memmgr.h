@@ -122,8 +122,7 @@ typedef void    (*allocation_callback_pfn)(size_t sz, void* ptr, void* data);
  
 
 
-typedef struct memory_stats_t
-{
+typedef struct memory_stats_t {
     int     active_allocations;
     size_t  total_allocated_size;
 

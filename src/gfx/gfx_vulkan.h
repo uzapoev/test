@@ -90,6 +90,10 @@ typedef struct vk_context_t
     gfx_handle_pool_t*                  shaders_pool;
     gfx_handle_pool_t *                 pipeline_pool;
     gfx_handle_pool_t *                 compute_pipeline_pool;
+
+    PFN_vkSetDebugUtilsObjectNameEXT    vk_dbg_set_object_name;
+    PFN_vkCmdBeginDebugUtilsLabelEXT    vk_dbg_cmd_push_label;
+    PFN_vkCmdEndDebugUtilsLabelEXT      vk_dbg_cmd_pop_label;
 } vk_context_t;
 
 
@@ -225,15 +229,19 @@ typedef struct vk_descriptor_set_t
 
 
 typedef struct vk_command_buffer_t {
-    gfx_command_buffer_t    handle;
+    gfx_command_buffer_t                handle;
 
-    vk_context_t *          ctx;
-    uint32_t                thread_id;
+    vk_context_t *                      ctx;
+    uint32_t                            thread_id;
 
-    VkDevice                device;
-    VkCommandPool           pool;
-    VkCommandBuffer         cmd;
+    VkDevice                            device              = VK_NULL_HANDLE;
+    VkCommandPool                       pool                = VK_NULL_HANDLE;
+    VkCommandBuffer                     cmd                 = VK_NULL_HANDLE;
 
+    // replace to struct begin+end+name
+    VkQueryPool                         time_query_pool     = VK_NULL_HANDLE;
+    uint32_t                            time_query_index    = 0;
+    uint32_t                            stamp_count;
 } vk_command_buffer_t;
 
 
@@ -279,16 +287,30 @@ gfx_api void     vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_
 gfx_api void     vk_cmd_end_pass(gfx_command_buffer_t* cmd);
 
 gfx_api void     vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
 gfx_api void     vk_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
 gfx_api void     vk_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+
 gfx_api void     vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
+
 gfx_api void     vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
+
 gfx_api void     vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
+
 gfx_api void     vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+
 gfx_api void     vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
+
 gfx_api void     vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+
 gfx_api void     vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
 gfx_api void     vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
+gfx_api void     vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char * marker);
+
+gfx_api void     vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
 
 
 gfx_api void     vk_cmd_end(gfx_command_buffer_t* cmd);
@@ -297,8 +319,6 @@ gfx_api void     vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gf
 
 
 extern void     vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name);
-extern void     vk_debug_begin_region(vk_context_t* ctx, VkCommandBuffer cmd, const char* name, uint32_t color = 0xFFFFFFFF);
-extern void     vk_debug_end_region(vk_context_t* ctx, VkCommandBuffer cmd);
 extern void     vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name);
 extern void     vk_debug_set_buffer_name(vk_context_t* ctx, vk_buffer_t* buffer, const char* name);
 extern void     vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char* name);

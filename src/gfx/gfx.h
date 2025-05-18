@@ -661,9 +661,8 @@ gfx_api void                    gfx_uniform_set_buffer      (gfx_descriptor_set_
 gfx_api void                    gfx_uniform_set_texture     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t * texture);
 gfx_api void                    gfx_uniform_set_sampler     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t * sampler);
 
-gfx_api void                    gfx_cmd_begin_marker        (gfx_command_buffer_t* cmd, const char * marker);
-gfx_api void                    gfx_cmd_insert_marker       (gfx_command_buffer_t* cmd, const char * marker);
-gfx_api void                    gfx_cmd_end_marker          (gfx_command_buffer_t* cmd);
+gfx_api void                    gfx_cmd_push_marker         (gfx_command_buffer_t* cmd, const char* marker);
+gfx_api void                    gfx_cmd_pop_marker          (gfx_command_buffer_t* cmd);
 
 gfx_api void                    gfx_cmd_begin               (gfx_command_buffer_t* cmd);
 gfx_api void                    gfx_cmd_begin_pass          (gfx_command_buffer_t* cmd, gfx_render_target_t* target);

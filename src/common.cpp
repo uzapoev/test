@@ -95,7 +95,7 @@ std::string bin2hex::dump(const char* data, size_t size, const char * name)
 }
 
 
-uint32_t Hash::murmur32(const void* key, uint32_t size, uint32_t seed)
+uint32_t hasher::murmur32(const void* key, uint32_t size, uint32_t seed)
 {
     // 'm' and 'r' are mixing constants generated offline.
     // They're not really 'magic', they just happen to work well.
@@ -141,7 +141,7 @@ uint32_t Hash::murmur32(const void* key, uint32_t size, uint32_t seed)
 }
 
 
-uint64_t Hash::murmur64(const void* key, uint32_t len, uint32_t seed)
+uint64_t hasher::murmur64(const void* key, uint32_t len, uint32_t seed)
 {
     const int64_t m = 0xc6a4a7935bd1e995ull;
     const int r = 47;
@@ -184,7 +184,7 @@ uint64_t Hash::murmur64(const void* key, uint32_t len, uint32_t seed)
     return h;
 }
 
-size_t Hash::bernstein_ci(const void* data_in, uint32_t size, uint32_t seed)
+size_t hasher::bernstein_ci(const void* data_in, uint32_t size, uint32_t seed)
 {
     const unsigned char * data = (const unsigned char*)data_in;
     unsigned int h = seed;
@@ -308,7 +308,7 @@ void debug::breakpoint()
 #endif
 }
 
-void debug::callstack(uintptr_t* frames, uint32_t count)
+int debug::callstack(uintptr_t* frames, uint32_t count)
 {
 #ifdef _WIN32
     static bool lazyinit = false;
@@ -319,11 +319,48 @@ void debug::callstack(uintptr_t* frames, uint32_t count)
     }
 
     int skipframes = 2;
-    int frame_count = RtlCaptureStackBackTrace(skipframes, (DWORD)count, (PVOID*)frames, NULL);
-
+    int frame_count = RtlCaptureStackBackTrace(skipframes, (DWORD)count, (PVOID*)frames, NULL) - 5;
+    if(frame_count > count)
+        frame_count = count;
+        /*
     HANDLE hprocess = GetCurrentProcess();
     char tmpbuffer[sizeof(SYMBOL_INFO) + 64] = "";
     for (uint64_t i = 0; i < frame_count; ++i)
+    {
+        DWORD ldsp = 0;
+        IMAGEHLP_LINE64 line = { sizeof(IMAGEHLP_LINE64) };
+         PSYMBOL_INFO symbol = (PSYMBOL_INFO)tmpbuffer;
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = 64;
+
+        // SymGetLineFromAddr64(hprocess, adress, &ldsp, &line);
+        SymFromAddr(hprocess, frames[i], 0, symbol);
+
+        if(names != nullptr) 
+        {
+            strcpy(name_buffer, symbol->Name);
+            strcat(name_buffer, "\0");
+            names[i] = name_buffer;
+            name_buffer += strlen(name_buffer) + 1;
+        }
+
+        debug::log("%s", symbol->Name);
+    }*/
+    return frame_count;
+#endif
+    return -1;
+}
+
+void debug::callstack_names(uintptr_t* frames, uint32_t count, char** names)
+{
+    char* name_buffer = nullptr;
+    if (name_buffer == nullptr)
+        name_buffer = (char*)malloc(1024);
+    memset(name_buffer, 0, 1024);
+
+    HANDLE hprocess = GetCurrentProcess();
+    char tmpbuffer[sizeof(SYMBOL_INFO) + 64] = "";
+    for (uint64_t i = 0; i < count; ++i)
     {
         DWORD ldsp = 0;
         IMAGEHLP_LINE64 line = { sizeof(IMAGEHLP_LINE64) };
@@ -334,12 +371,17 @@ void debug::callstack(uintptr_t* frames, uint32_t count)
         // SymGetLineFromAddr64(hprocess, adress, &ldsp, &line);
         SymFromAddr(hprocess, frames[i], 0, symbol);
 
-        debug::log("%s", symbol->Name);
-    //    printf("\n\t%s", symbol->Name);
-    }
-#endif
-}
+        if (names != nullptr)
+        {
+            strcpy(name_buffer, symbol->Name);
+            strcat(name_buffer, "\0");
+            names[i] = name_buffer;
+            name_buffer += strlen(name_buffer) + 1;
+        }
 
+        debug::log("%s", symbol->Name);
+    }
+}
 
 
 //

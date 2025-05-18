@@ -32,11 +32,23 @@ struct bin2hex
 };
 
 
-struct Hash
+struct hasher
 {
     static uint32_t murmur32(const void* data, uint32_t size, uint32_t seed = 5381);
     static uint64_t murmur64(const void *data, uint32_t size, uint32_t seed = 5381);
     static size_t   bernstein_ci(const void* data, uint32_t size, uint32_t seed = 5381);
+};
+
+
+struct debug
+{
+    static void     log(const char* msg, ...);
+    static void     log_error(const char* msg, ...);
+    static void     log_warning(const char* msg, ...);
+
+    static void     breakpoint();
+    static int      callstack(uintptr_t * frames, uint32_t count);
+    static void     callstack_names(uintptr_t * frames, uint32_t count, char** names = nullptr);
 };
 
 
@@ -49,17 +61,6 @@ struct utf8
     static size_t       utf8_to_wchar(const uint8_t* data, size_t size, wchar_t* w);
 
     static std::wstring from_utf8(const uint8_t* data, size_t size);
-};
-
-
-struct debug
-{
-    static void     log(const char* msg, ...);
-    static void     log_error(const char* msg, ...);
-    static void     log_warning(const char* msg, ...);
-
-    static void     breakpoint();
-    static void     callstack(uintptr_t * frames, uint32_t count);
 };
 
 
@@ -94,10 +95,6 @@ private:
     {
         return s_interned.insert(value).first->c_str();
     }
-    /*static const char* make_intern(const char * value)
-    {
-        return s_interned.insert(value).first->c_str();
-    }*/
 
     std::string_view  m_str;
 };

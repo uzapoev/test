@@ -254,6 +254,9 @@ typedef struct gfx_api_pfn
     void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
     void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
+    void     (*pfn_cmd_push_marker)(gfx_command_buffer_t* cmd, const char* marker);
+    void     (*pfn_cmd_pop_marker)(gfx_command_buffer_t* cmd);
+
     void     (*pfn_cmd_buffer_barrier)(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
     void     (*pfn_cmd_texture_barrier)(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
 
@@ -508,6 +511,15 @@ void gfx_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sam
 }
 #pragma endregion
 
+
+void gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker) {
+    g_tbl->pfn_cmd_push_marker(cmd, marker);
+}
+
+
+void gfx_cmd_pop_marker(gfx_command_buffer_t* cmd) {
+    g_tbl->pfn_cmd_pop_marker(cmd);
+}
 
 #pragma region commands
 
@@ -803,7 +815,7 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
         case gfx_pixel_format_rgb565:
         case gfx_pixel_format_rgba4444:         return width * sizeof(uint16_t);
 
-        case gfx_pixel_format_rgba8:            return width * sizeof(uint8_t) * 4;
+        case gfx_pixel_format_rgba8:            return width * sizeof(uint32_t);
 
         case gfx_pixel_format_etc1:             return (gfx_max(2, (width >> 2)) * 8);
         case gfx_pixel_format_etc2_rgba8:       return (gfx_max(2, (width >> 2)) * 16);
@@ -901,6 +913,9 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_cmd_draw                = vk_cmd_draw;
     func_table->pfn_cmd_draw_indexed        = vk_cmd_draw_indexed;
     func_table->pfn_cmd_dispatch_compute    = vk_cmd_dispatch_compute;
+
+    func_table->pfn_cmd_push_marker         = vk_cmd_push_marker;
+    func_table->pfn_cmd_pop_marker          = vk_cmd_pop_marker;
 
     func_table->pfn_cmd_buffer_barrier      = vk_cmd_buffer_barrier;
     func_table->pfn_cmd_texture_barrier     = vk_cmd_texture_barrier;

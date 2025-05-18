@@ -2,8 +2,9 @@
 #define __gfx_memory_h__
 
 #include <stdint.h> // uintXX_t 
-#include <stdlib.h> // allocations
-//#include <string.h> // allocations
+#include <stdlib.h> // calloc/free
+#include <stdio.h>  // printf
+#include <string.h> // memset
 
 struct gfx_offset_allocator_t;
 
@@ -45,14 +46,13 @@ static int block_sort(const void* a, const void* b) {
     return ((gfx_offset_block_t*)a)->offset > ((gfx_offset_block_t*)b)->offset;
 }
 
-static void block_erase(gfx_offset_block_t* bloks, uint32_t size, uint32_t idx) {
-    bloks[idx] = bloks[size];
-    bloks[size] = { 0,0 };
+static void block_erase(gfx_offset_block_t* blocks, uint32_t size, uint32_t idx) {
+    blocks[idx] = blocks[size];
+    blocks[size] = { 0,0 };
 }
 
 static void gfx_offset_allocator_create(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t min_size)
 {
-    memset(allocator, 0, sizeof(gfx_offset_allocator_t));
     allocator->size = size;
     allocator->min_size = align_up(min_size, sizeof(void*));
 
@@ -186,6 +186,7 @@ static void gfx_offset_allocator_test()
     dump(&oa);
 
     auto a4 = gfx_offset_allocator_allocate(&oa, 256, 64);
+
     dump(&oa);
 
     gfx_offset_allocator_destroy(&oa);

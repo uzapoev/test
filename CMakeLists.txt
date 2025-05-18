@@ -1,6 +1,8 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.3)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 project(gittest)
+
+find_package(Vulkan REQUIRED)
 
 if(WIN32)    
 #    include_directories("$ENV{DXSDK_DIR}/Include")
@@ -38,11 +40,16 @@ if(WIN32)
       endif()
     endforeach()
     
-    
+    if(EXISTS ${FBX_LIB_PATH})
+      execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FBX_LIB_PATH}/x64/debug/libfbxsdk.dll ${PROJECT_BINARY_DIR} )
+    endif()
 
-    message("!!!!!!" ${FBX_LIB_PATH}/x64/debug/libfbxsdk.dll)
-    execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FBX_LIB_PATH}/x64/debug/libfbxsdk.dll ${PROJECT_BINARY_DIR} )
-    execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WEBGPU_LIB_PATH}/x64/debug/libfbxsdk.dll ${PROJECT_BINARY_DIR} )
+    if(EXISTS ${WEBGPU_LIB_PATH})
+    message("fuckfuckfuckfuckfuckfuckfuckfuckfuck")
+    endif()
+
+   # execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FBX_LIB_PATH}/x64/debug/libfbxsdk.dll ${PROJECT_BINARY_DIR} )
+    execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WEBGPU_LIB_PATH}/x64/debug/webgpu.dll ${PROJECT_BINARY_DIR} )
     
     # PROJECT_BINARY_DIR PROJECT_SOURCE_DIR
    # message(${PROJECT_BINARY_DIR})
@@ -69,7 +76,7 @@ endif(EMSCRIPTEN)
 
 
 #add_definitions("-std=c++17")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

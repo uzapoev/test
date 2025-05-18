@@ -2,6 +2,7 @@
 #define __resource_loader_h__
 
 #include "gfx/gfx.h"
+#include "gfx/gfx_memory.h"
 #include "mathlib.h"
 
 typedef enum texture_option {
