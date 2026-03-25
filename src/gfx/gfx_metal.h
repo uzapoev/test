@@ -428,11 +428,11 @@ void metal_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer
 
     switch (desc->usage)
     {
-    case gfx_buffer_usage_index:    options = MTLResourceOptionCPUCacheModeDefault;
-    case gfx_buffer_usage_vertex:   options = MTLResourceOptionCPUCacheModeDefault;
-    case gfx_buffer_usage_uniform:  options = MTLResourceStorageModeShared;
-    case gfx_buffer_usage_storage:  options = MTLResourceOptionCPUCacheModeDefault;
-    case gfx_buffer_usage_indirect: options = MTLResourceOptionCPUCacheModeDefault;
+        case gfx_buffer_usage_index:    options = MTLResourceOptionCPUCacheModeDefault; break;
+        case gfx_buffer_usage_vertex:   options = MTLResourceOptionCPUCacheModeDefault; break;
+        case gfx_buffer_usage_uniform:  options = MTLResourceStorageModeShared; break;
+        case gfx_buffer_usage_storage:  options = MTLResourceOptionCPUCacheModeDefault; break;
+        case gfx_buffer_usage_indirect: options = MTLResourceOptionCPUCacheModeDefault; break;
     }
 
     if (desc->data == nullptr)
@@ -563,22 +563,22 @@ void metal_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader
         const char entry[PATH_MAX] = "";
         switch (stage)
         {
-        case gfx_shader_vertex: {
-            metal_entry_point((char*)desc->stages[i].data, "vertex", (char*)entry);
-            mshader->vertex_func = [mtllib newFunctionWithName : [NSString stringWithUTF8String : entry] ];
-        } break;
+            case gfx_shader_vertex: {
+                metal_entry_point((char*)desc->stages[i].data, "vertex", (char*)entry);
+                mshader->vertex_func = [mtllib newFunctionWithName : [NSString stringWithUTF8String : entry] ];
+            } break;
 
-        case gfx_shader_fragment: {
-            metal_entry_point((char*)desc->stages[i].data, "fragment", (char*)entry);
-            mshader->fragment_func = [mtllib newFunctionWithName : [NSString stringWithUTF8String : entry] ];
-        } break;
+            case gfx_shader_fragment: {
+                metal_entry_point((char*)desc->stages[i].data, "fragment", (char*)entry);
+                mshader->fragment_func = [mtllib newFunctionWithName : [NSString stringWithUTF8String : entry] ];
+            } break;
 
-        case gfx_shader_compute: {
-            metal_entry_point((char*)desc->stages[i].data, "compute", (char*)entry);
-            mshader->compute_func = [mtllib newFunctionWithName : [NSString stringWithUTF8String : entry] ];
-        } break;
+            case gfx_shader_compute: {
+                metal_entry_point((char*)desc->stages[i].data, "compute", (char*)entry);
+                mshader->compute_func = [mtllib newFunctionWithName : [NSString stringWithUTF8String : entry] ];
+            } break;
 
-        default: assert(false); break;
+            default: assert(false); break;
         }
     }
 

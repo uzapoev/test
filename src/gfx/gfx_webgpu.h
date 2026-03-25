@@ -1,6 +1,9 @@
 #ifndef __gfx_webgpu_h__
 #define __gfx_webgpu_h__
 
+
+///https://developer.chrome.com/docs/web-platform/webgpu/build-app?hl=ru
+
 #include "gfx.h"
 
 #ifdef __EMSCRIPTEN__
@@ -35,6 +38,7 @@ typedef struct wgpu_context_t {
     gfx_handle_pool_t *         shader_pool; 
     gfx_handle_pool_t *         pipeline_pool;
 
+    gfx_buffer_t *              staging_buffer = nullptr;
 
     gfx_texture_t *             default_texture = nullptr;
     gfx_sampler_t *             default_sampler = nullptr;
@@ -163,6 +167,8 @@ typedef struct wgpu_command_buffer_t {
 typedef struct wgpu_swapchain_t {
     gfx_swapchain_t             handle;
 
+    intptr_t                    window_handle;
+
     wgpu_render_target_t*       target;
 
     WGPUTextureFormat           format;
@@ -171,6 +177,8 @@ typedef struct wgpu_swapchain_t {
 
     WGPUTexture                 backbuffer;
     WGPUTextureView             backbuffer_view;
+
+    WGPUSurfaceConfiguration    config;
 } wgpu_swapchain_t;
 
 
@@ -185,6 +193,7 @@ gfx_api void     wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc,
 gfx_api void     wgpu_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
 gfx_api void     wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
 gfx_api void     wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api void     wgpu_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
 gfx_api void     wgpu_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
 gfx_api void     wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
 gfx_api void     wgpu_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
@@ -197,6 +206,8 @@ gfx_api void     wgpu_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipel
 gfx_api void     wgpu_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
 gfx_api void     wgpu_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
 gfx_api void     wgpu_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+
+gfx_api void     wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
 
 gfx_api uint64_t wgpu_uniform_location(gfx_shader_t* shader, const char* name);
 gfx_api void     wgpu_uniform_update_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t offset);
@@ -218,6 +229,9 @@ gfx_api void     wgpu_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slo
 gfx_api void     wgpu_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
 gfx_api void     wgpu_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_idx, uint32_t instance_count);
 gfx_api void     wgpu_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+
+gfx_api void     wgpu_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker);
+gfx_api void     wgpu_cmd_pop_marker(gfx_command_buffer_t* cmd);
                  
 gfx_api void     wgpu_cmd_end(gfx_command_buffer_t* cmd);
 gfx_api void     wgpu_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);

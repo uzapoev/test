@@ -353,11 +353,14 @@ int debug::callstack(uintptr_t* frames, uint32_t count)
 
 void debug::callstack_names(uintptr_t* frames, uint32_t count, char** names)
 {
+#ifdef _WIN32
     char* name_buffer = nullptr;
     if (name_buffer == nullptr)
         name_buffer = (char*)malloc(1024);
-    memset(name_buffer, 0, 1024);
+    if(!name_buffer)
+        return;
 
+    memset(name_buffer, 0, 1024);
     HANDLE hprocess = GetCurrentProcess();
     char tmpbuffer[sizeof(SYMBOL_INFO) + 64] = "";
     for (uint64_t i = 0; i < count; ++i)
@@ -381,20 +384,34 @@ void debug::callstack_names(uintptr_t* frames, uint32_t count, char** names)
 
         debug::log("%s", symbol->Name);
     }
+#endif
 }
 
 
+static size_t filesize(FILE* file)
+{
+    fseek(file, 0, SEEK_END);
+    size_t size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    return size;
+}
 //
 // stream_impl
 //
 struct stream_impl
 {
-    stream_impl(FILE* file, uint32_t buffer_size = 4 * 1024) : m_file(file)
+    stream_impl(FILE* file, uint32_t buffer_size = 512 * 1024) : m_file(file)
     {
+        m_file_size = filesize(m_file);
+
         m_write_buffer_size = buffer_size;
         m_write_buffer = new char[m_write_buffer_size]();
 
+      //  if(filesize(m_file) < buffer_size)
+      //      m_read_buffer_size = filesize(m_file);
+            
         m_read_buffer_size = buffer_size;
+        m_read_buffer_capacity = buffer_size;
         m_read_buffer = new char[m_write_buffer_size]();
 
         refill_buffer();
@@ -404,7 +421,7 @@ struct stream_impl
     {
         m_write_buffer_size = 0;
       //  m_write_buffer = new char[m_write_buffer_size]();
-
+        m_read_buffer_capacity = buffer_size;
         m_read_buffer_size = buffer_size;
         m_read_buffer = buffer;
         m_external_read_buffer = true;
@@ -425,7 +442,7 @@ struct stream_impl
     {
         size_t bytes_read = 0;
         while (bytes_read < size) {
-            if (m_read_pos == m_read_buffer_size) {
+            if (m_read_pos >= m_read_buffer_size) {
                 refill_buffer();
                 if (m_read_pos == m_read_buffer_size) {
                     break; // End of file
@@ -451,13 +468,32 @@ struct stream_impl
     size_t seek(size_t offset, int whence)
     {
         flush(); // Flush the write buffer before seeking
+        if(m_read_buffer_size > m_file_size) {
+            m_read_pos = offset;
+            return 0;
+        }
 
-        int result = fseek(m_file, (long)offset, whence);
+        bool refil = (offset > m_file_pos) ||
+                     (offset < m_file_pos - m_read_buffer_size);
+        if (refil) {
+            int chunk = offset / m_read_buffer_size;
+            int pos = offset % m_read_buffer_size;
+            fseek(m_file, (long)chunk * m_read_buffer_size, whence);
+            refill_buffer();
+        }
 
-        m_file_pos = result;
-        m_read_pos = m_read_buffer_size; // Invalidate the read buffer
+        switch(whence)
+        {
+            case SEEK_SET: m_read_pos = offset % m_read_buffer_size; break;
+            case SEEK_CUR: m_read_pos += offset; break;
+        }
 
-        return result;
+        return 0;
+    }
+
+    uint32_t tell()
+    {
+        return m_read_virtual_pos + m_read_pos;
     }
 
     void flush()
@@ -468,9 +504,10 @@ struct stream_impl
 private:
     void refill_buffer()
     {
-        size_t result = fread(m_read_buffer, 1, m_read_buffer_size, m_file);
+        m_read_virtual_pos = ftell(m_file);
+        m_read_buffer_size = fread(m_read_buffer, 1, m_read_buffer_capacity, m_file);
         m_read_pos = 0;
-        m_file_pos += result;
+        m_file_pos = ftell(m_file);
     }
 
     void write_buffer()
@@ -484,10 +521,15 @@ private:
 private:
     FILE*       m_file = nullptr;
     size_t      m_file_pos = 0;
+    size_t      m_file_size = 0;
+
 
     char*       m_read_buffer = nullptr;
+    size_t      m_read_buffer_capacity = 0;
     size_t      m_read_buffer_size = 0;
     size_t      m_read_pos = 0;
+    size_t      m_read_virtual_pos = 0;
+
     bool        m_external_read_buffer = false;  // external buffer, don't dealocate on destroy
 
     char*       m_write_buffer = nullptr;
@@ -527,7 +569,8 @@ filestream::filestream(stream_impl* imp)
 
 filestream::~filestream()
 {
-    delete m_impl;
+    if(m_impl)
+        delete m_impl;
 }
 
 
@@ -552,12 +595,16 @@ void filestream::seek(uint32_t offset, int whence)
     m_impl->seek(offset, whence);
 }
 
+uint32_t filestream::tell()
+{
+    return m_impl->tell();
+}
 
 static const char _guid_digits[] = "0123456789abcdef";
 
-Guid Guid::generate_from_seed(size_t seed)
+uuid uuid::generate_from_seed(size_t seed)
 {
-    Guid result;
+    uuid result;
     srand((unsigned int)seed);
     char* ptr = result.m_uuid;
     for (size_t i = 0; i < (sizeof(result.m_uuid) >> 1); i++)
@@ -568,27 +615,13 @@ Guid Guid::generate_from_seed(size_t seed)
     return result;
 }
 
-void Guid::generate(char *buff, size_t size)
+void uuid::generate(char *buff, size_t size)
 {
-    char tmp[38] = "";
-
-    time_t seed = time(NULL);// ^ (clock() << 16);
-    srand((unsigned int)seed);// ^ tv.tv_sec ^ tv.tv_usec);
-    for (size_t i = 0; i < sizeof(tmp); i++)
-    {
-        tmp[i] = rand() % 255;
-    }
-
-    char * ptr = buff;
-    for (size_t i = 0; i < (size >> 1); i++)
-    {
-        *ptr++ = _guid_digits[(tmp[i] >> 4) & 0xf];
-        *ptr++ = _guid_digits[(tmp[i] >> 0) & 0xf];
-    }
-    *ptr = '\0';
+    time_t seed = time(NULL);
+    generate_from_seed(seed);
 }
 
-bool Guid::validate(const char *buff)
+bool uuid::validate(const char *buff)
 {
     size_t len = buff ? strlen(buff) : 0;
     for (size_t i = 0; i < len; ++i) {
@@ -599,12 +632,12 @@ bool Guid::validate(const char *buff)
 }
 
 
-Guid::Guid(void)
+uuid::uuid(void)
 {
     memset(m_uuid, 0, sizeof(m_uuid));
 }
 
-Guid::Guid(const char * uuid)
+uuid::uuid(const char * uuid)
 {
     if (!uuid)
         generate(m_uuid, sizeof(m_uuid));
@@ -612,12 +645,12 @@ Guid::Guid(const char * uuid)
         memcpy(m_uuid, uuid, sizeof(m_uuid));
 }
 
-Guid::Guid(const Guid & uuid)
+uuid::uuid(const uuid& uuid)
 {
     memcpy(m_uuid, uuid.m_uuid, sizeof(m_uuid));
 }
 
-void Guid::set(const char * uuid)
+void uuid::set(const char * uuid)
 {
     assert(uuid);
     assert(strlen(uuid) <= sizeof(m_uuid));

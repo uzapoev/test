@@ -294,6 +294,19 @@ static const char* to_string(WGPUBackendType type)
 }
 
 
+
+static void get_window_size(intptr_t handle, int * width, int * height)
+{
+#ifdef EMSCRIPTEN
+    emscripten_get_canvas_element_size((const char*)handle, width, height);
+#else
+    RECT rect = {};
+    GetClientRect((HWND)handle, &rect);
+    *width = rect.right;
+    *height = rect.bottom;
+#endif
+}
+
 typedef struct wgsl_info {
     uint32_t            group;
     uint32_t            binding;
@@ -603,6 +616,13 @@ void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
     gfx_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool,   nullptr);
     gfx_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool, nullptr);
 
+
+    gfx_buffer_desc_t desc = {};
+    desc.usage  = gfx_buffer_usage_staging;
+    desc.label  = "staging";
+    desc.size   = settings->limits.staging_buffer_size;
+    wgpu_create_buffer(*ctx, &desc, &wctx->staging_buffer);
+
     create_default_resources(*ctx);
 }
 
@@ -619,20 +639,13 @@ void wgpu_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t 
         desc.presentMode = WGPUPresentMode_Fifo;
     WGPUSurfaceDescriptor surface_descriptor = {0};
 
+    get_window_size(handle, (int*)&desc.width, (int*)&desc.height);
+
 #ifdef EMSCRIPTEN
-    emscripten_get_canvas_element_size((const char*)handle, (int*)&desc.width, (int*)&desc.height);
-
-    int fformat = EM_ASM_INT(return navigator.gpu.getPreferredCanvasFormat());
-
     WGPUSurfaceDescriptorFromCanvasHTMLSelector canvDesc = { nullptr, WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector };
         canvDesc.selector = "canvas";
     surface_descriptor.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&canvDesc);
 #else
-    RECT rect = {};
-    GetClientRect((HWND)handle, &rect);
-    desc.width = rect.right;
-    desc.height = rect.bottom;
-
     WGPUSurfaceDescriptorFromWindowsHWND wnddesc = { nullptr, WGPUSType_SurfaceDescriptorFromWindowsHWND };
         wnddesc.hwnd = (void*)handle;
         wnddesc.hinstance = GetModuleHandle(nullptr);
@@ -641,8 +654,6 @@ void wgpu_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t 
     // wgpuDeviceCreateSwapChain is outdated
     // 
     // https://github.com/gfx-rs/wgpu-native/blob/trunk/examples/triangle/main.c
-    // WGPUSurfaceCapabilities surface_capabilities = { 0 };
-    // wgpuSurfaceGetCapabilities(surface, wctx->adapter, &surface_capabilities);
     // wgpuSurfaceConfigure(surface, &config);
     // WGPUSurfaceTexture surface_texture;
     // loop
@@ -652,14 +663,12 @@ void wgpu_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t 
 
     WGPUSurface surface = wgpuInstanceCreateSurface(wctx->instance, &surface_descriptor);
 
-    desc.format = wgpuSurfaceGetPreferredFormat(surface, wctx->adapter);
+    WGPUSurfaceCapabilities capabilities = { 0 };
+    wgpuSurfaceGetCapabilities(surface, wctx->adapter, &capabilities);
+    desc.format = capabilities.formats ? capabilities.formats[0] : wgpuSurfaceGetPreferredFormat(surface, wctx->adapter);
+    desc.format = capabilities.formats ? capabilities.formats[0] : wgpuSurfaceGetPreferredFormat(surface, wctx->adapter);
 
-   /* WGPUSurfaceCapabilities surface_capabilities = { 0 };
-    wgpuSurfaceGetCapabilities(surface, wctx->adapter, &surface_capabilities);
-    WGPUTextureFormat formats[64] = {};
-    memcpy(formats, surface_capabilities.formats, sizeof(WGPUTextureFormat)* surface_capabilities.formatCount);
 
-    desc.format = formats[0];*/
     WGPUSwapChain swapchain = wgpuDeviceCreateSwapChain(wctx->device, surface, &desc);
 
     GFX_VERBOSE(wctx->dbglog(gfx_msg_info, "    (%d   %d   %d)",
@@ -669,10 +678,19 @@ void wgpu_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t 
     wgpu_render_target_t* target = (wgpu_render_target_t*)calloc(1, sizeof(wgpu_render_target_t));
     wgpu_swapchain_t * chain = (wgpu_swapchain_t*)calloc(1, sizeof(wgpu_swapchain_t));
     if(chain != nullptr) {
-        chain->format = desc.format;
-        chain->surface = surface;
-        chain->swapchain = swapchain;
-        chain->target = target;
+        chain->window_handle    = handle;
+        chain->format           = desc.format;
+        chain->surface          = surface;
+        chain->swapchain        = swapchain;
+        chain->target           = target;
+
+        chain->config.device        = wctx->device;
+        chain->config.usage         = WGPUTextureUsage_RenderAttachment;
+        chain->config.format        = desc.format;
+        chain->config.presentMode   = WGPUPresentMode_Fifo;
+        chain->config.alphaMode     = capabilities.alphaModes[0];
+        chain->config.width         = desc.width;
+        chain->config.height        = desc.height;
     }
 
     wgpu_texture_t* depth_texture = (wgpu_texture_t*)calloc(1, sizeof(wgpu_texture_t));
@@ -729,6 +747,15 @@ void wgpu_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t i
 
     wgpuSwapChainPresent(wgpu_swapchain->swapchain);
     wgpuTextureViewRelease(wgpu_swapchain->backbuffer_view);
+
+    int width = 0;
+    int height = 0;
+    get_window_size(wgpu_swapchain->window_handle, &width, &height);
+    if (wgpu_swapchain->config.width != width || wgpu_swapchain->config.height != height) {
+        wgpu_swapchain->config.width = width;
+        wgpu_swapchain->config.height = height;
+        wgpuSurfaceConfigure(wgpu_swapchain->surface, &wgpu_swapchain->config);
+    }
 }
 
 
@@ -736,11 +763,10 @@ void wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_
 {
     wgpu_context_t* wgpu_ctx = from_ctx(ctx);
 
-    GFX_VERBOSE(wgpu_ctx->dbglog(gfx_msg_info, "wgpu_create_buffer(%s, %d, %p,)", 
-                                 gfx_to_string(desc->usage), desc->size,  desc->size));
+    GFX_VERBOSE(wgpu_ctx->dbglog(gfx_msg_info, "wgpu_create_buffer(%s, %d, %p,)",
+        gfx_to_string(desc->usage), desc->size, desc->size));
 
-    // Ensure that buffer size is a multiple of 4
-    const uint32_t size = (desc->size + 3) & ~3;
+    uint32_t size = gfx_utils_align_up(desc->size, 4);
 
     void* data_ptr = nullptr;
     bool mapped = desc->data != nullptr && desc->size > 0;
@@ -748,27 +774,36 @@ void wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_
     if (desc->mapped /*|| desc->usage == gfx_buffer_usage_uniform*/)
         mapped = true;
 
+    WGPUBufferUsageFlags usage = WGPUBufferUsage_None;
+    switch(desc->usage) {
+        case gfx_buffer_usage_staging:   usage = WGPUBufferUsage_MapWrite   | WGPUBufferUsage_CopySrc; break;
+        case gfx_buffer_usage_index:     usage = WGPUBufferUsage_Index      | WGPUBufferUsage_CopyDst; break;
+        case gfx_buffer_usage_vertex:    usage = WGPUBufferUsage_Vertex     | WGPUBufferUsage_CopyDst; break;
+        case gfx_buffer_usage_uniform:   usage = WGPUBufferUsage_Uniform    | WGPUBufferUsage_CopyDst; break;
+        case gfx_buffer_usage_storage:   usage = WGPUBufferUsage_Storage    | WGPUBufferUsage_CopyDst; break;
+        case gfx_buffer_usage_indirect:  usage = WGPUBufferUsage_Indirect   | WGPUBufferUsage_CopyDst; break;
+    };
+
     WGPUBufferDescriptor buffer_desc = {};
-        buffer_desc.label = gfx_to_string(desc->usage);//"user vertex buffer";
-        buffer_desc.usage = gfx_usage_2_wgpu(desc->usage) | WGPUBufferUsage_CopyDst;
-        buffer_desc.size = size;
+        buffer_desc.label   = gfx_to_string(desc->usage);//"user vertex buffer";
+        buffer_desc.usage   = usage;
+        buffer_desc.size    = size;
         buffer_desc.mappedAtCreation = mapped;
     WGPUBuffer buffer = wgpuDeviceCreateBuffer(wgpu_ctx->device, &buffer_desc);
 
-    if (mapped) {
-        data_ptr = wgpuBufferGetMappedRange(buffer, 0, size);
-        if((desc->data != nullptr && desc->size > 0))
-            memcpy(data_ptr, desc->data, size);
-        wgpuBufferUnmap(buffer);
-    }
-    auto wgpu_buffer = (wgpu_buffer_t*)calloc(1, sizeof(wgpu_buffer_t));
-    if(wgpu_buffer != nullptr) {
-        *out_buffer = &wgpu_buffer->handle;
+    auto handle = gfx_pool_alloc(wgpu_ctx->buffer_pool);
+    auto wgpu_buffer = (wgpu_buffer_t*)gfx_pool_map(wgpu_ctx->buffer_pool, handle);
+    if (wgpu_buffer != nullptr) {
+        wgpu_buffer->handle = { handle };
         wgpu_buffer->buffer = buffer;
         wgpu_buffer->usage = gfx_usage_2_wgpu(desc->usage);
         wgpu_buffer->data_ptr = data_ptr;
         wgpu_buffer->size = size;
+        *out_buffer = &wgpu_buffer->handle;
     }
+
+    if (wgpu_buffer != nullptr && (desc->data != nullptr && desc->size > 0))
+        wgpu_update_buffer_data(ctx, &wgpu_buffer->handle, desc->data, desc->size, 0);
 }
 
 
@@ -1130,6 +1165,12 @@ void wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pip
     }
 }
 
+void wgpu_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wctx->dbglog(gfx_msg_error, "wgpu_create_compute_pipeline not implemented");
+}
+
 
 void wgpu_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** out_target)
 {
@@ -1227,7 +1268,7 @@ void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_de
     if(wgpu_shader->current_pool->free_set_count == 0)
     {
         wctx->dbglog(gfx_msg_warning, "TODO: push pool before allocarte new one");
-        wgpu_create_descriptor_set_pool(ctx, wgpu_shader, 256, &wgpu_shader->current_pool);
+        wgpu_create_descriptor_set_pool(ctx, wgpu_shader, 1024, &wgpu_shader->current_pool);
     }
 
     for (uint32_t i = wgpu_shader->current_pool->next_free; i < wgpu_shader->current_pool->capacity; i++)
@@ -1322,6 +1363,18 @@ void wgpu_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
     printf("gfx_destroy_cmd not inmplemented\n");
+}
+
+void wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* dst_buffer, void* data, uint32_t size, uint32_t offset)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+
+    auto dst_buff = (wgpu_buffer_t*)gfx_pool_map(wctx->buffer_pool, dst_buffer->idx);
+    auto src_buff = (wgpu_buffer_t*)gfx_pool_map(wctx->buffer_pool, wctx->staging_buffer->idx);
+
+    auto asize = gfx_utils_align_up(size, 4);
+
+    wgpuQueueWriteBuffer(wctx->queue, dst_buff->buffer, offset, data, asize);
 }
 
 struct uniform_handle_t
@@ -1650,6 +1703,18 @@ void wgpu_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y
 
     wgpuComputePassEncoderDispatchWorkgroups(wgpu_cmd->compute_pass, x, y, z);
 }
+
+
+void wgpu_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
+{
+    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
+}
+
+void wgpu_cmd_pop_marker(gfx_command_buffer_t* cmd)
+{
+    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd; 
+}
+
 
 //
 // gfx_cmd_end

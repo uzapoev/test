@@ -28,7 +28,7 @@ static gfx_allocator_t* gfx_default_allocator()
     static gfx_allocator_t s_allocator = {};
 
     if(s_allocator.gfx_alloc == nullptr)
-        s_allocator.gfx_alloc = [](size_t size, void * userdata)    { return malloc(size);  };
+        s_allocator.gfx_alloc = [](size_t size, void * userdata)    { return calloc(1, size);  };
         
     if (s_allocator.gfx_free == nullptr)
         s_allocator.gfx_free = [](void* ptr, void* userdata)        { free(ptr);            };
@@ -39,22 +39,18 @@ static gfx_allocator_t* gfx_default_allocator()
 #pragma region handle pool
 
 typedef struct gfx_handle_t {
-    uint16_t            index;
-    uint16_t            hash;
-    uint16_t            generation;
-    uint16_t            flag;
+    union {
+        uint64_t                handle;
+        struct {
+            uint16_t            index;
+            uint16_t            hash;
+            uint16_t            generation;
+            uint16_t            flag;
+        };
+    };
 } gfx_handle_t;
+static_assert(sizeof(gfx_handle_t) == sizeof(uint64_t));
 
-
-gfx_handle_t uint64_2_handle(uint64_t h)
-{
-    return *(gfx_handle_t*)&h;
-}
-
-uint64_t handle_2_uint64(gfx_handle_t h)
-{
-    return *(uint64_t*)&h;
-}
 
 typedef struct gfx_handle_pool_t {
     size_t              size;
@@ -147,12 +143,12 @@ uint64_t gfx_pool_alloc(gfx_handle_pool_t* pool)
     uint32_t index = pool->free_list[pool->used_chunks++];
     pool->handles[index].generation = pool->generation_counters[index];
 
-    return handle_2_uint64 (pool->handles[index]);
+    return pool->handles[index].handle;
 }
 
 void gfx_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 {
-    gfx_handle_t handle = uint64_2_handle(_handle);
+    gfx_handle_t handle = { _handle };
 
     if (pool->used_chunks == 0 || handle.index >= pool->capacity)
         return;
@@ -166,7 +162,7 @@ void gfx_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 
 void * gfx_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
 {
-    gfx_handle_t handle = uint64_2_handle(_handle);
+    gfx_handle_t handle = { _handle };
     if(handle.hash != pool->hash)
         return nullptr;
 
@@ -218,7 +214,7 @@ typedef struct gfx_api_pfn
     void     (*pfn_create_sampler) (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
     void     (*pfn_create_texture) (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
     void     (*pfn_create_pipeline) (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** texture);
-    void     (*pfn_create_compute_pipeline) (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
+    void     (*pfn_create_compute_pipeline) (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
     void     (*pfn_create_render_target) (gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
     void     (*pfn_create_descriptor_set) (gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
     void     (*pfn_create_cmd) (gfx_context_t* ctx, gfx_command_buffer_t** cmd);
@@ -946,6 +942,7 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_create_sampler          = wgpu_create_sampler;
     func_table->pfn_create_texture          = wgpu_create_texture;
     func_table->pfn_create_pipeline         = wgpu_create_pipeline;
+    func_table->pfn_create_compute_pipeline = wgpu_create_compute_pipeline;
     func_table->pfn_create_render_target    = wgpu_create_render_target;
     func_table->pfn_create_descriptor_set   = wgpu_create_descriptor_set;
     func_table->pfn_create_cmd              = wgpu_create_cmd;
@@ -965,6 +962,8 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_destroy_descriptor_set  = wgpu_destroy_descriptor_set;
     func_table->pfn_destroy_cmd             = wgpu_destroy_cmd;
 
+    func_table->pfn_update_buffer_data      = wgpu_update_buffer_data;
+
     func_table->pfn_cmd_begin               = wgpu_cmd_begin;
     func_table->pfn_cmd_begin_pass          = wgpu_cmd_begin_pass;
     func_table->pfn_cmd_end_pass            = wgpu_cmd_end_pass;
@@ -978,6 +977,9 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_cmd_draw                = wgpu_cmd_draw;
     func_table->pfn_cmd_draw_indexed        = wgpu_cmd_draw_indexed;
     func_table->pfn_cmd_dispatch_compute    = wgpu_cmd_dispatch_compute;
+
+    g_tbl->pfn_cmd_push_marker              = wgpu_cmd_push_marker;
+    g_tbl->pfn_cmd_pop_marker               = wgpu_cmd_pop_marker;
 
     func_table->pfn_cmd_end                 = wgpu_cmd_end;
     func_table->pfn_submit_cmd              = wgpu_submit_cmd;

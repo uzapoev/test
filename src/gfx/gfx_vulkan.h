@@ -5,25 +5,21 @@
 
 #ifdef VULKAN_AVAILABLE
 
+#ifdef GFX_PLATFORM_WIN
 #define VK_USE_PLATFORM_WIN32_KHR
-
+#endif
 
 #include <vulkan/vulkan.h>
-#include <vulkan/vk_enum_string_helper.h>
-//#include <vulkan/vk_sdk_platform.h>
-#include <spirv_cross/spirv.h>
 
+/*
 #ifdef __cplusplus 
 extern "C" {
-#endif
+#endif*/
 
-#if __has_include(<vma/vk_mem_alloc.h>)
-   // #include <vma/vk_mem_alloc.h>
-#endif
  
 #define   MAX_DESCRIPTOR_POOL_SET_SIZE      (1024)
 
- 
+/**/
 struct vk_descriptor_pool_t;
 struct vk_descriptor_set_t;
 struct vk_command_buffer_t;
@@ -33,6 +29,7 @@ struct vk_texture_t;
 typedef struct vk_context_t
 {
     gfx_context_t                       handle;
+
     VkInstance                          instance            = nullptr;
     VkDevice                            device              = nullptr;
     VkPhysicalDevice                    physicaldevice      = nullptr;
@@ -205,12 +202,10 @@ typedef struct vk_descriptor_pool_t {
 
     VkWriteDescriptorSet *              writes;
     struct vk_write_info_t*             write_infos;
-
 } vk_descriptor_pool_t;
 
 
-typedef struct vk_descriptor_set_t
-{
+typedef struct vk_descriptor_set_t {
     gfx_descriptor_set_t                handle;
 
     vk_shader_t *                       shader;
@@ -224,7 +219,6 @@ typedef struct vk_descriptor_set_t
 
     VkWriteDescriptorSet *              writes;
     struct vk_write_info_t *            write_infos;
-
 } vk_descriptor_set_t;
 
 
@@ -322,9 +316,9 @@ extern void     vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObject
 extern void     vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name);
 extern void     vk_debug_set_buffer_name(vk_context_t* ctx, vk_buffer_t* buffer, const char* name);
 extern void     vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char* name);
-#ifdef __cplusplus 
+/*#ifdef __cplusplus 
 }
 #endif
-
+*/
 #endif
 #endif

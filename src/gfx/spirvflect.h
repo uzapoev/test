@@ -270,6 +270,9 @@ static int parse_substruct(sprivflect_info_t* ctx, spirvflect_type_t* type)
                     case SpvOpTypeFloat:
                         struct_size += (sizeof(float) * array_field_type->count) * array_length;
                         break;
+                    default:
+                        assert(false);
+                        break;
                 }
             }
             else
@@ -461,9 +464,19 @@ static int spirvflect_create(const uint32_t* data, uint32_t size, spirvflect_t**
                                 //StructuredBuffer<BufType> Buffer1;
                                 if(orig_type->type == SpvOpTypeRuntimeArray)
                                 {
+                                    uniform->is_storage = true;
                                     uint32_t array_element_type_id = orig_type->spvarray.type_id;
                                     spirvflect_type_t* array_element_type = _find_type(&ctx, array_element_type_id);
                                     spirvflect_name_t* array_element_type_name =  _find_name(&ctx, array_element_type_id);
+
+                                    if(array_element_type->type == SpvOpTypeInt)
+                                    {
+                                        field_size = sizeof(int);
+                                    }
+                                    if (array_element_type->type == SpvOpTypeFloat)
+                                    {
+                                        field_size = sizeof(float);
+                                    }
 
                                     if (array_element_type_name && array_element_type->type == SpvOpTypeStruct)
                                     {

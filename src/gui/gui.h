@@ -58,7 +58,7 @@
 // class widget: sprite
 // class panel:  widget
 // class button: widget // toggle, 
-// class lable:  widget
+// class label:  widget
 // class image:  widget
 // class scroll: widget
 // class slider: widget
@@ -247,10 +247,11 @@ class panel : public widget
 };
 
 
-class lable : public widget
+class label : public widget
 {
 public:
-    void set_lable(const std::string_view & lable);
+    void set_labellabel(const std::string_view & label);
+    void on_localization()
 };
 
 
@@ -265,13 +266,12 @@ public:
 
 public:
     void set_caption(const std::string & caption);
-    void set_callback();
+    void set_callback(std::function<void()> callback);
     void set_icon();
-    
     void set_group();
 
 private:
-    lable*                      m_lable = nullptr;
+    label*                      m_label = nullptr;
     std::vector<button*>        m_group;
     std::function<void()>       m_callback;
 };

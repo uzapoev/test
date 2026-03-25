@@ -1,6 +1,9 @@
 #include "gfx_vulkan.h"
 #ifdef VULKAN_AVAILABLE
 
+#include <vulkan/vk_enum_string_helper.h>
+#include <spirv_cross/spirv.h>
+
 #if __has_include(<vma/vk_mem_alloc.h>)
     #define VMA_IMPLEMENTATION
     #include <vma/vk_mem_alloc.h>
@@ -13,8 +16,7 @@
 
 VkFormat gfx_pixel_format_2_vk(gfx_pixel_format format)
 {
-    switch (format)
-    {
+    switch (format) {
         case gfx_pixel_format_a8:               return VK_FORMAT_R8_UNORM;
         case gfx_pixel_format_rgba4444:         return VK_FORMAT_R4G4B4A4_UNORM_PACK16;
         case gfx_pixel_format_rgb5a1:           return VK_FORMAT_R5G5B5A1_UNORM_PACK16;
@@ -60,8 +62,7 @@ VkFormat gfx_pixel_format_2_vk(gfx_pixel_format format)
 
 VkFormat gfx_vertex_format_2_vk(gfx_vertex_format fromat)
 {
-    switch (fromat)
-    {
+    switch (fromat) {
         case gfx_vertex_format_float1:      return VK_FORMAT_R32_SFLOAT;
         case gfx_vertex_format_float2:      return VK_FORMAT_R32G32_SFLOAT;
         case gfx_vertex_format_float4:      return VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -88,8 +89,7 @@ VkFormat gfx_vertex_format_2_vk(gfx_vertex_format fromat)
 
 VkIndexType gfx_index_format_2_vk(gfx_index_format format)
 {
-    switch(format)
-    {
+    switch(format) {
         case gfx_index_format_16:           return VK_INDEX_TYPE_UINT16;
         case gfx_index_format_32:           return VK_INDEX_TYPE_UINT32;
     }
@@ -98,8 +98,7 @@ VkIndexType gfx_index_format_2_vk(gfx_index_format format)
 
 VkPrimitiveTopology gfx_topology_2_vk(gfx_topology topogy)
 {
-    switch(topogy) 
-    {
+    switch(topogy) {
         case gfx_topology_points:           return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
         case gfx_topology_lines:            return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
         case gfx_topology_lines_strip:      return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
@@ -877,7 +876,7 @@ static void vk_gpu_memstatus(gfx_context_t * ctx)
         device_memory_total_usage += (uint32_t)physical_device_memory_budget_properties.heapUsage[i];
         device_memory_total_budget += (uint32_t)physical_device_memory_budget_properties.heapBudget[i];
     }/**/
-    vkctx->dbg_log(gfx_msg_info, "gpu memory usage: %10d Kb  budget: %10ul Kb", device_memory_total_usage/1024, device_memory_total_budget/1024);
+    vkctx->dbg_log(gfx_msg_info, "gpu memory usage: %10d Kb  budget: %10d Mb", device_memory_total_usage/1024, device_memory_total_budget/1024/1024);
 }
 
 // vulkan
@@ -1284,6 +1283,7 @@ int32_t vk_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_rende
         auto result = vkAcquireNextImageKHR(vctx->device, vk_swapchain->swapchain, UINT64_MAX, semaphore, VK_NULL_HANDLE, &idx);
         switch(result)
         {
+            case VK_SUBOPTIMAL_KHR:
             case VK_ERROR_OUT_OF_DATE_KHR: 
                 vk_recreate_swapchain(ctx, vk_swapchain); 
                 continue;
@@ -1294,6 +1294,7 @@ int32_t vk_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_rende
                 return idx;
 
             default: 
+                vctx->dbg_log(gfx_msg_error, "vk_acquire_img failed with %s error", string_VkResult(result));
                 return -1;
         }
 
@@ -1890,7 +1891,6 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     VkPipelineVertexInputStateCreateInfo vertex_input = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
     vertex_input.vertexBindingDescriptionCount      = desc->assembly.slot_count;
     vertex_input.pVertexBindingDescriptions         = vertex_descriptor;
-
     vertex_input.vertexAttributeDescriptionCount    = attribute_count;
     vertex_input.pVertexAttributeDescriptions       = attributes;
 
@@ -1898,6 +1898,7 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     rasterizer.depthClampEnable             = VK_FALSE;
     rasterizer.rasterizerDiscardEnable      = VK_FALSE;
     rasterizer.polygonMode                  = VK_POLYGON_MODE_FILL;
+  //  rasterizer.polygonMode                  = VK_POLYGON_MODE_LINE;
     rasterizer.lineWidth                    = 1.0f;
     rasterizer.cullMode                     = gfx_cull_2_vk(desc->render_states.culling);
     rasterizer.frontFace                    = vk_face[desc->render_states.face];
@@ -1906,7 +1907,6 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     VkPipelineMultisampleStateCreateInfo multisampling = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
     multisampling.sampleShadingEnable       = VK_FALSE;//vctx->msaa_samples != VK_SAMPLE_COUNT_1_BIT;
     multisampling.rasterizationSamples      = vctx->msaa_samples;
-
   //  multisampling.sampleShadingEnable       = VK_TRUE; // enable sample shading in the pipeline
   //  multisampling.minSampleShading          = .2f; //
 
@@ -2117,10 +2117,6 @@ void vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)
             vkFreeMemory(vctx->device, vkbuffer->memory, nullptr);
 
         gfx_pool_free(vctx->buffers_pool, vkbuffer->handle.idx);
-    }
-    else
-    {
-        vctx->dbg_log(gfx_msg_error, "invalid buffer handle %d", vkbuffer->handle.idx);
     }
 }
 

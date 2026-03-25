@@ -34,21 +34,21 @@ struct bin2hex
 
 struct hasher
 {
-    static uint32_t murmur32(const void* data, uint32_t size, uint32_t seed = 5381);
-    static uint64_t murmur64(const void *data, uint32_t size, uint32_t seed = 5381);
-    static size_t   bernstein_ci(const void* data, uint32_t size, uint32_t seed = 5381);
+    static uint32_t     murmur32(const void* data, uint32_t size, uint32_t seed = 5381);
+    static uint64_t     murmur64(const void *data, uint32_t size, uint32_t seed = 5381);
+    static size_t       bernstein_ci(const void* data, uint32_t size, uint32_t seed = 5381);
 };
 
 
 struct debug
 {
-    static void     log(const char* msg, ...);
-    static void     log_error(const char* msg, ...);
-    static void     log_warning(const char* msg, ...);
+    static void         log(const char* msg, ...);
+    static void         log_error(const char* msg, ...);
+    static void         log_warning(const char* msg, ...);
 
-    static void     breakpoint();
-    static int      callstack(uintptr_t * frames, uint32_t count);
-    static void     callstack_names(uintptr_t * frames, uint32_t count, char** names = nullptr);
+    static void         breakpoint();
+    static int          callstack(uintptr_t * frames, uint32_t count);
+    static void         callstack_names(uintptr_t * frames, uint32_t count, char** names = nullptr);
 };
 
 
@@ -67,7 +67,7 @@ struct utf8
 struct interned_string
 {
 public:
-    interned_string()                                       {}
+    interned_string()                                       { clear(); }
     interned_string(const char * str)                       { m_str = make_intern(str); }
     interned_string(const std::string & str)                { m_str = make_intern(str.data()); }
     interned_string(const std::string_view & str)           { m_str = make_intern(str.data()); }
@@ -114,42 +114,36 @@ struct filestream
     static filestream* open(const char* path, const char* mode);
     static filestream* open_rb(const char* path);   // binary read only 
     static filestream* open_wb(const char* path);   // binary write
+    static filestream* open_mem_rw();              // binary write
 
     ~filestream();
 
-    uint32_t    read(uint32_t size, void* out_data);
-    uint32_t    write(uint32_t size, const void* in_data);
-    void        seek(uint32_t offset, int whence);
-    void        flush();
+    virtual uint32_t            read(uint32_t size, void* out_data);
+    virtual uint32_t            write(uint32_t size, const void* in_data);
+    virtual void                seek(uint32_t offset, int whence);
+    virtual uint32_t            tell();
+    virtual void                flush();
    
     template<class T>
-    inline T    read() { T res = {}; read(sizeof(T), &res); return res; }
- 
-    inline char* read_string(char* data) {
-        data[0] = '\0';
-        uint16_t len = read<uint16_t>();
-        read(len, data);
-        return data;
-    }
+    inline T            read()      { T res = {}; read(sizeof(T), &res); return res; }
 
     template<class T>
-    inline void write(T v) { write(sizeof(T), &v); }
+    inline void         write(T v)  { write(sizeof(T), &v); }
 
-    inline void write_chunk_info(uint16_t type, uint16_t size) {
-        write(type);
-        write(size);
+    template<>  
+    inline void write(interned_string str) { 
+        write((uint16_t)str.length());
+        write(str.length(), str.data());
     }
 
-    inline void write_chunk(uint16_t type, uint16_t size, const char* data) {
-        write(type);
-        write(size);
-        write(size, data);
+    template<>
+    inline interned_string  read() { 
+        char buffer[2048] = "";
+        uint16_t len = read<uint16_t>();
+        assert(len < sizeof(buffer));
+        read(len, buffer);
+        return interned_string(buffer);
     }
-
-    inline void write_string(uint16_t size, const char* data) {
-        write(size);
-        write(size, data);
-    }/**/
 
 private:
     filestream(struct stream_impl*);
@@ -157,14 +151,25 @@ private:
 };
 
 
-class Guid
+typedef struct uuid_t {
+    union {
+        struct  {
+            uint64_t hi;
+            uint64_t lo; 
+        };
+        char     str[32] = "";
+    };
+} uuid_t;
+
+
+class uuid
 {
 public:
-    Guid(void);
-    Guid(const char * uuid);
-    Guid(const Guid & uuid);
+    uuid(void);
+    uuid(const char * uuid);
+    uuid(const uuid& uuid);
 public:
-    static Guid             generate_from_seed(size_t seed);
+    static uuid             generate_from_seed(size_t seed);
     static void             generate(char *buff, size_t size);
     static bool             validate(const char *buff);
 public:
@@ -172,16 +177,23 @@ public:
     inline const char   *   c_str(void) const           { return m_uuid; }
     inline size_t           size() const                { return sizeof(m_uuid); }
 
-    inline bool             operator <  (const Guid & other) const { return memcmp(c_str(), other.c_str(), size()) < 0;  }
-    inline bool             operator == (const Guid & other) const { return m_lo == other.m_lo && m_hi == other.m_hi; }
-    inline bool             operator != (const Guid & other) const { return m_lo != other.m_lo && m_hi != other.m_hi; }
+    inline bool             operator == (const uuid& other) const { return m_low == other.m_low && m_high == other.m_high; }
+    inline bool             operator != (const uuid& other) const { return m_low != other.m_low && m_high != other.m_high; }
+    inline bool             operator <  (const uuid& other) const { 
+        if (m_high < other.m_high) return true;
+        if (m_high > other.m_high) return false;
+        return m_low < other.m_low;
+    }
 protected:
     union
     {
-        struct { uint64_t m_lo, m_hi; };
-        char     m_uuid[32 + 1];// 32 sign + '\0'
+        struct { uint64_t m_low, m_high; };
+        char     m_uuid[32];// 32 sign + '\0'
     };
+
 };
+static_assert(sizeof(uuid) == 32);
+
 
 
 class measure
@@ -197,7 +209,7 @@ public:
     {
         intend--;
         m_end = std::chrono::high_resolution_clock::now();
-        auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(m_end - m_start);
+        auto diff = std::chrono::duration_cast<std::chrono::microseconds>(m_end - m_start);
 
         printf(R"("%*s%s: %lldms)", intend*4, " ", m_msg, (long long)diff.count());
       //  printf(R"(%s: %lldms)", m_msg, (long long)diff.count());

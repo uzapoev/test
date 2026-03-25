@@ -1,10 +1,11 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.5)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 project(gittest)
 
-find_package(Vulkan REQUIRED)
 
 if(WIN32)    
+    find_package(Vulkan REQUIRED)
+
 #    include_directories("$ENV{DXSDK_DIR}/Include")
     include_directories("$ENV{POWERVR_SDK}/Builds/Include")
 #    link_directories("$ENV{DXSDK_DIR}/Lib/x86")
@@ -110,6 +111,7 @@ set(SOURCES
     src/platform/platform.h
     src/gfx/gfx.h
     src/gfx/gfx.cpp
+    src/gfx/gfx_memory.h
     src/gfx/gfx_vulkan.cpp
     src/gfx/gfx_webgpu.cpp
     src/scene/scene.cpp

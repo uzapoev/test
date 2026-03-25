@@ -3,6 +3,7 @@
 *   gpu_device_type     type;       // discrete/embbed
 *   char                name[64]    // 
 * } gfx_device_info_t;
+* 
 * gfx_device_info_t infos [8]  = 0;
 * int count = gfx_enumerate_devices(&infos);
 * 
@@ -11,6 +12,10 @@
 *   cfg.options         = GFX_DEBUG | GFX_VALIDATE;
 *   cfg.backend         = gfx_backend_auto;
 *   cfg.gpu_type        = gfx_discrete_gpu;
+*   cfg.callbaks.stacktrace = ;
+*   cfg.callbaks.threadid   = ;
+*   cfg.callbaks.logfunc    = ;
+* 
 * gfx_context_t * ctx = gfx_create(cfg);
 **/
 
@@ -96,10 +101,10 @@ typedef enum gfx_backend {
 typedef enum gfx_buffer_usage {
     gfx_buffer_usage_staging,       // cpu mapped
     gfx_buffer_usage_index,         // gpu
-    gfx_buffer_usage_vertex,        // gpu 
-    gfx_buffer_usage_uniform,       // cpu mapped
-    gfx_buffer_usage_storage,
-    gfx_buffer_usage_indirect,
+    gfx_buffer_usage_vertex,        // gpu
+    gfx_buffer_usage_uniform,       // cpu --> gpu, limited size for shader binding
+    gfx_buffer_usage_storage,       // cpu <-> gpu, unlimited size for shader binding
+    gfx_buffer_usage_indirect,      //
 } gfx_buffer_usage;
 
 
@@ -320,7 +325,14 @@ typedef enum gfx_semantic {
     gfx_position,
     gfx_color,
     gfx_normal,
+    gfx_tangent,
+    gfx_bnormal,
     gfx_uv0,
+    gfx_uv1,
+    gfx_uv2,
+    gfx_uv3,
+    gfx_weight,
+    gfx_index,
 } gfx_semantic;
 
 
@@ -366,7 +378,12 @@ typedef enum gfx_submit_options {
 
 struct gfx_handle_pool_t;
 
-typedef struct { uint64_t idx; } gfx_context_t;
+typedef struct gfx_context_t {
+    uint64_t            idx; 
+    struct gfx_tbl *    vtbl;
+} gfx_context_t;
+
+
 typedef struct { uint64_t idx; } gfx_swapchain_t;
 typedef struct { uint64_t idx; } gfx_buffer_t;
 typedef struct { uint64_t idx; } gfx_texture_t;
@@ -379,6 +396,7 @@ typedef struct { uint64_t idx; } gfx_render_target_t;
 typedef struct { uint64_t idx; } gfx_command_buffer_t;
 
 
+
 // type - info/warning/error
 typedef void (*gfx_callback)(gfx_msg type, const char* msg, ...);
 
@@ -387,6 +405,11 @@ typedef struct gfx_allocator_t {
     void    (*gfx_free)  (void* ptr, void* userdata)    = nullptr;
     void    *user_data                                  = nullptr;
 } gfx_allocator_t;
+
+typedef struct gfx_error_t {
+    const char *    message = nullptr;
+    uint32_t        code    = 0;
+} gfx_error_t;
 
 
 typedef struct gfx_settings_t {
@@ -733,6 +756,11 @@ gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_b
 // gfx_api void     gfx_blit_image(gfx_context_t* ctx, /*gfx_blit_info_t*/gfx_texture_t* src, gfx_texture_t* dst);
 // 
 
+gfx_api void gfx_cmd_push_constant(gfx_command_buffer_t * cmd, uint64_t handle, void * data, uint32_t size);
+gfx_api void gfx_update_bindless_texture_slot(gfx_context_t * cmd, gfx_texture_t * texture, uint32_t idx);
+
+
+
 extern const char*  gfx_to_string(gfx_buffer_usage usage);
 extern const char*  gfx_to_string(gfx_shader_stage stage);
 extern const char*  gfx_to_string(gfx_texture_type type);
@@ -754,13 +782,18 @@ gfx_api void        gfx_pool_destroy(gfx_handle_pool_t* pool);
 gfx_api uint64_t    gfx_pool_alloc(gfx_handle_pool_t* pool);
 gfx_api void        gfx_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api void*       gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
-
-//gfx_api void*       gfx_pool_get_data(gfx_handle_pool_t* pool);
-//gfx_api size_t      gfx_pool_get_stride(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_size(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_capacity(gfx_handle_pool_t* pool);
-//gfx_api size_t      gfx_pool_has_free(gfx_handle_pool_t* pool);
 
+
+/*
+* 
+* */
+//gfx_api void _gfx_error(ctx, GFX_ERROR_OUT_OF_MEMORY, "Buffer pool exhausted!");
+inline void _gfx_error(gfx_context_t * ctx, uint32_t type, const char * msg, ...) {
+    //ctx->vtbl
+   // ctx->dbg_callback(, "")
+}
 
 /*
 * gfx_handle_pool_t* pool = gfx_pool_create(sizeof(vk_buffer_t), capacity);

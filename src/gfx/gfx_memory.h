@@ -8,13 +8,10 @@
 
 struct gfx_offset_allocator_t;
 
-extern void         gfx_offset_allocator_create(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t min_size);
-
-extern void         gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator);
-
-extern ptrdiff_t    gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t aligment);
-
-extern void         gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, ptrdiff_t offset);
+static void         gfx_offset_allocator_create(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t min_size);
+static void         gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator);
+static ptrdiff_t    gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t aligment);
+static void         gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, ptrdiff_t offset);
 
 
 
@@ -74,8 +71,8 @@ static void gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator)
 static ptrdiff_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t alignment)
 {
     size = align_up(size, allocator->min_size);
-    for (uint32_t i = 0; allocator->free_blocks_count; ++i) {
-
+    for (uint32_t i = 0; i < allocator->free_blocks_count; ++i) 
+    {
         uint32_t block_offset = allocator->free_blocks[i].offset;
         uint32_t block_size = allocator->free_blocks[i].size;
         uint32_t aligned_offset = align_up(block_offset, alignment);
@@ -94,7 +91,7 @@ static ptrdiff_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator
                 if (padding > 0) {
                     allocator->free_blocks[i].size = padding;
                     if (size < block_size - padding) {
-                        int idx = allocator->free_blocks_count;
+                        uint32_t idx = allocator->free_blocks_count;
                         allocator->free_blocks[idx].offset = aligned_offset + size;
                         allocator->free_blocks[idx].size = block_size - size - padding;
                         allocator->free_blocks_count++;
@@ -125,7 +122,6 @@ static void dump(gfx_offset_allocator_t* allocator)
     for (size_t i = 0; i < allocator->free_blocks_count; ++i) {
         printf("\n   offset: %8d  size: %4u", allocator->free_blocks[i].offset, allocator->free_blocks[i].size);
     }
-
 }
 
 static void merge_free_blocks(gfx_offset_allocator_t* allocator)
@@ -191,109 +187,4 @@ static void gfx_offset_allocator_test()
 
     gfx_offset_allocator_destroy(&oa);
 }
-
-#ifdef GFX_MEMORY_IMPLEMENTATION
-/*
-typedef struct gfx_o_allocator_t {
-    uint32_t size;              // total size
-    uint32_t min_block_size;    // powe oo two
-    uint32_t levels;            // levels (log2(size / min_block_size) + 1)
-
-    uint8_t* tree;              // bitmask (0=free, 1=busy)
-} gfx_allocator_t;
-
-
-static inline uint32_t log2_uint32(uint32_t x) {
-    uint32_t r = 0;
-    while (x >>= 1) r++;
-    return r;
-}
-
-static inline uint32_t index_offset(uint32_t level, uint32_t i) {
-    return (1 << level) - 1 + i;
-}
-
-static void buddy_init(buddy_allocator_t* alloc, uint32_t total_size, uint32_t min_block_size) {
-    alloc->size = total_size;
-    alloc->min_block_size = min_block_size;
-    alloc->levels = log2_uint32(total_size / min_block_size) + 1;
-
-    int tree_size = (1 << alloc->levels) - 1;
-    alloc->tree = (uint8_t*)calloc(tree_size, 1);
-    memset(alloc->tree, 0, (1 << alloc->levels) - 1);
-}
-
-static void mark_parents(buddy_allocator_t* alloc, uint32_t index) {
-    while (index) {
-        index = (index - 1) >> 1;
-        alloc->tree[index] = 1;
-    }
-}
-
-static void unmark_parents(buddy_allocator_t* alloc, uint32_t index) {
-    while (index) {
-        uint32_t parent = (index - 1) >> 1;
-        uint32_t left = parent * 2 + 1;
-        uint32_t right = left + 1;
-        if (alloc->tree[left] || alloc->tree[right]) break;
-        alloc->tree[parent] = 0;
-        index = parent;
-    }
-}
-
-static int32_t buddy_alloc(buddy_allocator_t* alloc, uint32_t size) {
-    if (size > alloc->size) return -1;
-
-    uint32_t level = 0;
-    uint32_t block_size = alloc->size;
-
-    while (block_size > size && block_size > alloc->min_block_size) {
-        block_size >>= 1;
-        level++;
-    }
-
-    uint32_t first = (1 << level) - 1;
-    uint32_t last = (1 << (level + 1)) - 2;
-
-    for (uint32_t i = first; i <= last; ++i) {
-        if (alloc->tree[i] == 0) {
-            uint32_t parent = (i - 1) >> 1;
-            bool ok = true;
-            while (i) {
-                if (alloc->tree[parent]) {
-                    ok = false;
-                    break;
-                }
-                parent = (parent - 1) >> 1;
-                i = (i - 1) >> 1;
-            }
-            if (!ok) continue;
-
-            alloc->tree[i] = 1;
-            mark_parents(alloc, i);
-            uint32_t block_index = i - ((1 << level) - 1);
-            return block_index * block_size;
-        }
-    }
-
-    return -1;
-}
-
-static void buddy_free(buddy_allocator_t* alloc, uint32_t offset) {
-    uint32_t level = 0;
-    uint32_t block_size = alloc->size;
-
-    while (block_size > alloc->min_block_size) {
-        if (offset % block_size == 0) break;
-        block_size >>= 1;
-        level++;
-    }
-
-    uint32_t index_in_level = offset / block_size;
-    uint32_t index = index_offset(level, index_in_level);
-    alloc->tree[index] = 0;
-    unmark_parents(alloc, index);
-}*/
-#endif // GFX_MEMORY_IMPLEMENTATION
-
 #endif 
