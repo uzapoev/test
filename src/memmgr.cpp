@@ -8,6 +8,9 @@
 #include <assert.h>
 #include "memmgr.h"
 #include <algorithm>
+#include <unordered_set>
+
+#include "common.h"
 
 
 #define TRACE_MEMORY_ALLOCATION     0
@@ -18,6 +21,10 @@ bool                        s_allocatorDeepLogEnable    = true;
 allocation_callback_pfn     s_allocationCallback        = nullptr;
 void*                       s_allocationCallbackData    = nullptr;
 
+static volatile size_t  g_total_allocated_memory = 0;
+static volatile bool    g_trace_allocations = 0;
+
+
 
 #define sys_malloc(x)           ::malloc(x)
 #define sys_free(x)             ::free(x)
@@ -27,6 +34,12 @@ void*                       s_allocationCallbackData    = nullptr;
 
     #define sys_msize(x)            ::_msize(x)
     #define memlog(...)             ::printf(__VA_ARGS__)
+
+    inline uint32_t __builtin_ctz(uint64_t x) {
+        unsigned long retVal;
+        auto b = _BitScanForward64(&retVal, x);
+        return retVal;
+    }
 
 #elif defined (__APPLE__)
     #define sys_msize(x)            ::malloc_size(x)
@@ -39,21 +52,20 @@ void*                       s_allocationCallbackData    = nullptr;
     #define memlog(...)             __android_log_print(ANDROID_LOG_INFO, "memory", __VA_ARGS__)
 
 #elif defined (__NINTENDO__)
-
     #define sys_msize(x)            (0)
     #define memlog(...)             ::printf(__VA_ARGS__)
 
+#elif defined (EMSCRIPTEN)
+    #define memlog(...)
+    #define sys_msize(x)            ::malloc_usable_size(x)
+#else
+    #error unknown platform
 #endif
 
-static volatile size_t  g_total_allocated_memory = 0;
-static volatile bool    g_trace_allocations = 0;
 
-static memory_stats_t   mem_total_allocs = { 0, 0x0fffffff, 0, 0 };
-static memory_stats_t   mem_frame_allocs;
-static memory_stats_t   mem_frame_frees;
+#ifdef _MSC_VER
 
-void Mem_UpdateAllocStats( size_t size );
-void Mem_UpdateFreeStats ( size_t size );
+#endif // _MSC_VER
 
 
 int clzll(uint64_t x) {
@@ -87,20 +99,245 @@ static int log2(size_t x) {
 }
 
 
-static void setAllocationCallback(allocation_callback_pfn cb, void* data)
-{
-    s_allocationCallback = cb;
-    s_allocationCallbackData = data;
+inline void bitmask_set(uint64_t * _bitmask, size_t index, bool value) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    if (value)  _bitmask[w] |= (1ull << b);
+    else        _bitmask[w] &= ~(1ull << b);
 }
 
-MemoryManager * g_pMemoryManager = nullptr;
-static char _reserved[sizeof(MemoryManager)] = {};
+inline bool bitmask_value(uint64_t* _bitmask, size_t index) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    return (_bitmask[w]) >> b & 1ull;
+}
+
+
+struct bitmask {
+    bitmask(size_t size) {
+        init(size);
+    }
+
+    void init(size_t size) {
+        _word_count = align_up(size, 64) / 64;
+        _bitmask = new uint64_t[_word_count]();
+    }
+
+    size_t bits_size() const {
+        return _word_count * 64;
+    }
+
+    void set(size_t index, bool value) {
+        bitmask_set(_bitmask, index, value);
+    }
+
+    bool value(size_t index) {
+        return bitmask_value(_bitmask, index);
+    }
+
+    bool has_free() const {
+        for (uint16_t i = 0; i < _word_count; ++i) {
+            uint64_t inv = ~_bitmask[i];
+            if (inv != 0)
+                return true;
+        }
+        return false;
+    }
+
+    size_t first_free_index() {
+        for (uint16_t i = 0; i < _word_count; ++i) {
+            uint64_t inv = ~_bitmask[i];
+            if (inv != 0)
+                return 64 * i + ctz(inv);
+        }
+        return 0;
+    }
+
+    static uint32_t ctz(uint64_t x) {
+        return __builtin_ctz(x);
+    }
+private:
+    size_t    _word_count = 0;
+    uint64_t* _bitmask = nullptr;
+};
+
+
+
+struct mem_traker
+{
+    void track_allocation(void * ptr, size_t size) {
+        _traked_allocations.emplace(ptr, size);
+    }
+
+    void track_dealocation(void* ptr) {
+        auto it = _traked_allocations.find({ ptr, 0 });
+        if(it != _traked_allocations.end())
+            _traked_allocations.erase(it);
+    }
+
+    struct memblock
+    {
+        memblock(void* p, size_t sz) :ptr(p), size(sz)  { memset(frames, 0, sizeof(frames)); }
+        bool operator == (const memblock& a) const     { return a.ptr == ptr; }
+
+        void*       ptr;
+        size_t      size;
+        intptr_t    frames[16] = {}; // replace to stack frames 
+    };
+
+    struct memblock_hash {
+        inline std::size_t operator() (const memblock& s) const {
+            return reinterpret_cast<std::size_t>(s.ptr);
+        }
+    };
+
+    std::unordered_set<memblock, memblock_hash> _traked_allocations;
+};
+
+
+
+//
+//  aligned_allocator
+//
+
+aligned_allocator::aligned_allocator(const char* dbgname)
+{
+    strcpy(m_name, dbgname);
+    m_traker = new mem_traker();
+}
+
+aligned_allocator::~aligned_allocator()
+{
+    delete m_traker;
+    m_traker = nullptr;
+}
+
+
+void* aligned_allocator::allocate(size_t size, size_t alignment) 
+{
+    void* ptr = _aligned_malloc(size, alignment);
+    size_t sizeee = _aligned_msize(ptr, alignment,0);
+    //void *ptr = calloc(size+128, 1);
+    m_traker->track_allocation(ptr, size);
+    return ptr ? memset(ptr, 0, size) : nullptr;
+}
+
+void aligned_allocator::deallocate(void* memory) 
+{
+    m_traker->track_dealocation(memory);
+    _aligned_free(memory);
+}
+
+
+
+//
+// paged_pool_allocator
+//
+
+struct page {
+    bitmask     _bitmask;
+    page*       _next = nullptr;
+    uint64_t*   _bitset = nullptr;
+    char*       _data = nullptr;
+};
+
+paged_pool_allocator::paged_pool_allocator(iallocator* memory_resource, size_t allocation_size, size_t allocations_per_page)
+:m_allocator(memory_resource)
+,m_allocation_size(allocation_size)
+,m_allocations_per_page(allocations_per_page)
+{
+    m_allocations_per_page = align_up(allocations_per_page, 64);
+    m_bitset_word_count = m_allocations_per_page / 64;
+    m_page_size = m_allocations_per_page * allocation_size;
+    m_page_head = allocate_page();
+    m_page_current = m_page_head;
+}
+
+paged_pool_allocator::~paged_pool_allocator()
+{
+    while (m_page_head != nullptr) {
+        auto next = m_page_head->_next;
+        m_allocator->deallocate(m_page_head);
+        m_page_head = next;
+    }
+    m_page_head = nullptr;
+}
+
+page* paged_pool_allocator::allocate_page()
+{
+    // allocate page info + data size + bitset size
+    size_t size = sizeof(page) + // page info
+                  sizeof(uint64_t) + m_bitset_word_count + // bitmask size
+                  (m_allocation_size * m_allocations_per_page); // data size
+
+    auto result = (page*)m_allocator->allocate(size, alignof(page));
+
+    result->_bitmask.init(m_allocations_per_page);
+    result->_bitset = (uint64_t*)((char*)result + sizeof(page));
+    result->_data   = (char*)    ((char*)result + sizeof(page) + sizeof(uint64_t) + m_bitset_word_count);
+
+    debug::log_error("allocated page(%s): %u  data: %u", m_allocator->tag(), result, result->_data);
+    return result;
+}
+
+struct page* paged_pool_allocator::find_page_with_free_blocs()
+{   
+    page * tmp = m_page_head;
+    while (tmp != nullptr)    {
+        if(tmp->_bitmask.has_free())
+            return tmp;
+
+        tmp = tmp->_next;
+    }
+    return nullptr;
+}
+
+struct page* paged_pool_allocator::find_page_for_ptr(void* ptr)
+{
+    page* tmp = m_page_head;
+    while (tmp != nullptr) {
+        if ( ((char*)ptr >= tmp->_data) && 
+             ((char*)ptr < (tmp->_data + m_page_size)))
+            return tmp;
+
+        tmp = tmp->_next;
+    }
+    return nullptr;
+}
+
+void* paged_pool_allocator::allocate(size_t size, size_t alignment)
+{
+    auto page = find_page_with_free_blocs();
+
+    if(page == nullptr)
+    {
+        auto newpage = allocate_page();
+        m_page_current->_next = newpage;
+        m_page_current = newpage;
+    }
+
+    size_t index = m_page_current->_bitmask.first_free_index();
+    m_page_current->_bitmask.set(index, true);
+
+    return m_page_current->_data + m_allocation_size * index;
+}
+
+void paged_pool_allocator::deallocate(void* ptr)
+{
+    auto page = find_page_for_ptr(ptr);
+    if(!page)
+        return;
+
+    ptrdiff_t index = ((char*)ptr - page->_data)/m_allocation_size;
+    page->_bitmask.set(index, false);
+}
+
 
 
 void memory::enable_tracking()
 {
-    if(g_pMemoryManager == nullptr)
-        g_pMemoryManager = new(_reserved) MemoryManager();
+  //  if(g_pMemoryManager == nullptr)
+  //      g_pMemoryManager = new(_reserved) MemoryManager();
 }
 
 void memory::enable_allocation_traking(bool value)
@@ -110,8 +347,8 @@ void memory::enable_allocation_traking(bool value)
 
 void memory::dump(memory_stats_t* stats)
 {
-    if(stats != nullptr)
-        memcpy(stats, &mem_total_allocs, sizeof(memory_stats_t));
+   // if(stats != nullptr)
+    //    memcpy(stats, &mem_total_allocs, sizeof(memory_stats_t));
 }
 
 size_t memory::allocated()
@@ -364,8 +601,26 @@ void offset_allocator::merge_free_blocks()
 }
 
 
+#if 0
 
 
+
+static memory_stats_t   mem_total_allocs = { 0, 0x0fffffff, 0, 0 };
+static memory_stats_t   mem_frame_allocs;
+static memory_stats_t   mem_frame_frees;
+
+void Mem_UpdateAllocStats(size_t size);
+void Mem_UpdateFreeStats(size_t size);
+
+
+static void setAllocationCallback(allocation_callback_pfn cb, void* data)
+{
+    s_allocationCallback = cb;
+    s_allocationCallbackData = data;
+}
+
+MemoryManager* g_pMemoryManager = nullptr;
+static char _reserved[sizeof(MemoryManager)] = {};
 
 MemoryManager::MemoryManager()
 {
@@ -399,7 +654,7 @@ MemoryManager::~MemoryManager()
         for(int i = 0; i < memblock_t::k_max_stack_size; ++i)
             framesinfo[i] = (char*)malloc(sizeof(char)*2048);
          
-        for(auto & it = m_blocks.begin(); it != m_blocks.end(); ++it)
+        for(auto it = m_blocks.begin(); it != m_blocks.end(); ++it)
         {
             for(int i = 0; i< memblock_t::k_max_stack_size; ++i)
                 if(framesinfo[i] != nullptr)
@@ -530,7 +785,7 @@ void MemoryManager::dump()
     std::lock_guard lock(m_mutex);
     
     size_t totalMemUsage = 0;
-    for(auto & it = m_blocks.begin(); it != m_blocks.end(); ++it)
+    for(auto it = m_blocks.begin(); it != m_blocks.end(); ++it)
     {
         totalMemUsage += it->second.size;
     }
@@ -607,6 +862,8 @@ void Mem_UpdateFreeStats( size_t size )
     mem_total_allocs.active_allocations--;
     mem_total_allocs.total_allocated_size -= size;
 }
+
+
 
 
 
@@ -704,5 +961,8 @@ void operator delete[](void * ptr) noexcept
         }
     }
 }
-/**/
+ #endif // #if USE_CUSTOM_NEW_ALLOCATION
+
+
+
 #endif

@@ -12,35 +12,104 @@
     #pragma warning (disable: 4530)// C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
 #endif
 
-#include <map>
+#include <malloc.h>
 #include <mutex>
 #include <unordered_map>
+
+
+typedef struct memory_stats_t {
+    int     active_allocations;
+
+    size_t  total_allocated_size;
+
+    size_t  min_size;
+
+    size_t  max_size;
+} memory_stats_t;
+
 
 // https://github.com/suVrik/allocator_benchmark
 struct iallocator
 {
-    virtual void *  allocate(size_t size, size_t alignment) = 0;
+    virtual void *      allocate(size_t size, size_t alignment) = 0;
 
-    virtual void    deallocate(void* memory) = 0;
+    virtual void        deallocate(void* memory) = 0;
 
-    template <typename T>
-    T* allocate(size_t count) {
-        return static_cast<T*>(allocate(sizeof(T) * count, alignof(T)));
-    }
+    virtual const char * tag() {return "";}
 };
 
 
-class default_allocator : iallocator
+//
+// auto ptr = allocator.allocate(sizeof(transform), alignof(transform));
+//
+struct aligned_allocator : iallocator
 {
-public:
-    virtual void *  allocate(size_t size, size_t alignment);
+    aligned_allocator(const char * dbgname = "aligned_allocator");
 
-    virtual void    deallocate(void* memory);
+    virtual ~aligned_allocator();
+
+    virtual void *      allocate(size_t size, size_t alignment);
+
+    virtual void        deallocate(void* memory);
+
+    virtual const char* tag() { return m_name; }
+
+private:
+    char                m_name[64] = "";
+
+    struct mem_traker * m_traker   = nullptr;
 };
 
 
+//
+// Paged pool allocator
+//  min alocation per page - 64(aligned up)
+struct paged_pool_allocator : iallocator
+{
+                         paged_pool_allocator(iallocator* memory_resource, size_t allocation_size, size_t allocations_per_page);
+    virtual             ~paged_pool_allocator();
 
-class buddy_allocator : iallocator
+    template <class T> T* allocate() {
+        assert(m_allocation_size == sizeof(T));
+        return new(allocate(sizeof(T), alignof(T))) T();
+    }
+
+    virtual void *      allocate(size_t size, size_t alignment);
+
+    virtual void        deallocate(void* ptr);
+
+private:
+
+    struct page *       allocate_page();
+
+    struct page *       find_page_with_free_blocs();
+
+    struct page *       find_page_for_ptr(void * ptr);
+
+private:
+    typedef struct page_ {
+        page_*      _next           = nullptr;
+        size_t      _bitmask_len    = 0;
+        uint64_t*   _bitmask        = nullptr;
+        char*       _data           = nullptr;
+    } page_;
+
+private:
+    iallocator*         m_allocator = nullptr;
+    struct page*        m_page_head = nullptr;
+    struct page*        m_page_current = nullptr;
+
+    size_t              m_allocation_size;
+    size_t              m_allocations_per_page;
+    size_t              m_page_size;
+    size_t              m_bitset_word_count;
+};
+
+
+//
+//
+//
+class buddy_allocator  : public iallocator
 {
 public:
     buddy_allocator(void* buffer, size_t totalSize, size_t minBlockSize = 64);
@@ -58,8 +127,7 @@ public:
     size_t              get_buddy(size_t offset, int level) const   {        return offset ^ block_size(level);    }
 
 private:
-
-    default_allocator * m_allocator = nullptr;
+    iallocator *        m_allocator = nullptr;
     uint8_t*            m_buffer;
     size_t              m_totalSize;
     size_t              m_minBlockSize;
@@ -71,22 +139,17 @@ private:
 };
 
 
-struct paged_pool_allocator: iallocator
-{
-};
-
-
 struct offset_allocator
 {
     offset_allocator(size_t size, size_t min_size = 16);
 
-    ptrdiff_t   allocate(size_t size, size_t alignment = 0);
-    void        deallocate(size_t offset);
+    ptrdiff_t           allocate(size_t size, size_t alignment = 0);
+    void                deallocate(size_t offset);
 
 protected:
-    void        merge_free_blocks();
+    void                merge_free_blocks();
 
-    size_t      buffer_size() const         {   return m_buffer_size;    }
+    size_t              buffer_size() const         {   return m_buffer_size;    }
 
 private:
     struct Block {
@@ -113,24 +176,11 @@ struct memory
     static size_t  allocated();
 };
 
+typedef void    (*allocation_callback_pfn)(size_t sz, void* ptr, void* data);
 
 ////////////////////////
 //
-typedef void    (*allocation_callback_pfn)(size_t sz, void* ptr, void* data);
-
-
- 
-
-
-typedef struct memory_stats_t {
-    int     active_allocations;
-    size_t  total_allocated_size;
-
-    size_t  min_size;
-    size_t  max_size;
-} memory_stats_t;
-
-
+#if 1
 
 /***************************************************************
  *        MemoryManager
@@ -170,21 +220,14 @@ protected:
 
     struct memblock_t
     {
-        memblock_t(size_t sz, void* p) :ptr(p), size(sz) { memset(frames, 0, sizeof(frames)); }
-
-        memblock_t(const memblock_t& src)               { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); }
-     //   memblock_t& operator = (const memblock_t& src)  { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); return *this; }
-
-        bool    operator == (void* ptr) const { return ptr == ptr; }
-
-      //  inline friend bool operator == (const memblock& b1, const memblock& b2) { return b1.ptr == b2.ptr; }
-      //  inline friend bool operator <  (const memblock& b1, const memblock& b2) { return b1.ptr < b2.ptr; }
+        memblock_t(size_t sz, void* p) :ptr(p), size(sz)    { memset(frames, 0, sizeof(frames)); }
+        memblock_t(const memblock_t& src)                   { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); }
 
         static const int    k_max_stack_size = 16;
 
         void*               ptr;
         size_t              size;
-        intptr_t            frames[k_max_stack_size] = {}; // replace to stack frames 
+        intptr_t            frames[16] = {}; // replace to stack frames 
     };
 
 
@@ -206,13 +249,13 @@ protected:
     using mem_block_map      = std::unordered_map< intptr_t, memblock_t, std::hash<intptr_t>, std::equal_to<intptr_t>, memblock_allocator >;
 
     mem_block_map   m_blocks;
+
+    template<class T, class U>
+    friend bool operator==(const MemoryManager::internal_allocator <T>&, const MemoryManager::internal_allocator <U>&) { return true; }
+
+    template<class T, class U>
+    friend bool operator!=(const MemoryManager::internal_allocator <T>&, const MemoryManager::internal_allocator <U>&) { return false; }
 };
-
-template<class T, class U>
-static bool operator==(const MemoryManager::internal_allocator <T>&, const MemoryManager::internal_allocator <U>&) { return true; }
-
-template<class T, class U>
-static bool operator!=(const MemoryManager::internal_allocator <T>&, const MemoryManager::internal_allocator <U>&) { return false; }
-
+#endif
 
 #endif

@@ -54,7 +54,7 @@ MATH_INLINE bool operator == (const vec4& a, const vec4& b) { return math::fcmp(
 
 MATH_INLINE vec3 operator - (const vec3& v) { return { -v.x, -v.y, -v.z }; }
 
-static bool g_is_right_hand = false;
+static bool g_is_right_hand = true;
 
 static bool is_right_hand()         { return g_is_right_hand;   }
 static void set_right_hand(bool rh) { g_is_right_hand = rh;     }
@@ -121,6 +121,10 @@ namespace math
     MATH_INLINE float distance(const vec2& a, const vec2& b)    { return length(vec2{a.x - b.x, a.y - b.y}); }
     MATH_INLINE float distance(const vec3& a, const vec3& b)    { return length(vec3{a.x - b.x, a.y - b.y, a.z - b.z}); }
     MATH_INLINE float distance(const vec4& a, const vec4& b)    { return length(vec4{a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w }); }
+
+    MATH_INLINE float distance_sq(const vec2& a, const vec2& b) { return (a.x * b.x) + (a.y * b.y); }
+    MATH_INLINE float distance_sq(const vec3& a, const vec3& b) { return (a.x * b.x) + (a.y * b.y) + (a.z * b.z); }
+    MATH_INLINE float distance_sq(const vec4& a, const vec4& b) { return (a.x * b.x) + (a.y * b.y) + (a.z * b.z); }
 
     MATH_INLINE vec2  normalize(const vec2& a)                  { float l = length(a); return { a.x / l, a.y / l }; }
     MATH_INLINE vec3  normalize(const vec3& a)                  { float l = length(a); return { a.x / l, a.y / l, a.z / l }; }
@@ -634,7 +638,7 @@ public:
     };
 };
 
-
+// https://gpfault.net/posts/aabb-tricks.html
 struct aabbox
 {
     aabbox() = default;
