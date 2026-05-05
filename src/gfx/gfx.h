@@ -108,6 +108,13 @@ typedef enum gfx_buffer_usage {
 } gfx_buffer_usage;
 
 
+typedef enum gfx_memory_hint {
+    gfx_memory_auto,
+    gfx_memory_gpu_only,
+    gfx_memory_cpu_to_gpu,
+    gfx_memory_gpu_to_cpu,
+} gfx_memory_hint;
+
 typedef enum gfx_access_type {
     gfx_access_read,
     gfx_access_write,
@@ -284,7 +291,7 @@ typedef enum gfx_stencil_op {
     gfx_stencil_op_decr,                // D3D10_STENCIL_OP_DECR_SAT     D3DSTENCILOP_DECRSAT    GL_DECR
     gfx_stencil_op_decr_wrap,           // D3D10_STENCIL_OP_DECR         D3DSTENCILOP_DECR       GL_DECR_WRAP
     gfx_stencil_op_invert,              // D3D10_STENCIL_OP_INVERT       D3DSTENCILOP_INVERT     GL_INVERT
-} gf_stencil_op;
+} gfx_stencil_op;
 
 
 typedef enum gfx_blend_mode {
@@ -484,6 +491,7 @@ typedef struct gfx_texture_desc_t {
 
 typedef struct gfx_buffer_desc_t {
     const char*             label;
+    gfx_memory_hint         memory_hint;
     gfx_buffer_usage        usage;
     bool                    mapped;
     uint32_t                size;
