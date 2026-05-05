@@ -271,7 +271,7 @@ extern void gfx_init_dx12(gfx_api_pfn* func_table);
 
 
 
-gfx_api gfx_backend  gfx_detect_bakend(gfx_backend* backends, uint32_t size)
+gfx_api gfx_backend  gfx_detect_backend(gfx_backend* backends, uint32_t size)
 {
 #if defined(GFX_PLATFORM_APPLE)
     return gfx_backend_metal;

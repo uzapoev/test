@@ -247,7 +247,7 @@ static WGPUBlendOperation gfx_blend_op_2_webgpu(gfx_blend_op op)
         case gfx_blend_op_min:             return WGPUBlendOperation_Min;
         case gfx_blend_op_max:             return WGPUBlendOperation_Max;
         case gfx_blend_op_subtract:        return WGPUBlendOperation_Subtract;
-        case gfx_blend_op_rev_substract:   return WGPUBlendOperation_ReverseSubtract;
+        case gfx_blend_op_rev_subtract:   return WGPUBlendOperation_ReverseSubtract;
     }
     return WGPUBlendOperation_Add;
 }

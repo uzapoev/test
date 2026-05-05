@@ -222,7 +222,7 @@ VkBlendOp gfx_blend_op_2_vk(gfx_blend_op op) {
         case gfx_blend_op_min:                  return VK_BLEND_OP_MIN;
         case gfx_blend_op_max:                  return VK_BLEND_OP_MAX;
         case gfx_blend_op_subtract:             return VK_BLEND_OP_SUBTRACT;
-        case gfx_blend_op_rev_substract:        return VK_BLEND_OP_REVERSE_SUBTRACT;
+        case gfx_blend_op_rev_subtract:        return VK_BLEND_OP_REVERSE_SUBTRACT;
     }
     return VK_BLEND_OP_ADD;
 }

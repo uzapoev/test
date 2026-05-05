@@ -12,9 +12,9 @@
 *   cfg.options         = GFX_DEBUG | GFX_VALIDATE;
 *   cfg.backend         = gfx_backend_auto;
 *   cfg.gpu_type        = gfx_discrete_gpu;
-*   cfg.callbaks.stacktrace = ;
-*   cfg.callbaks.threadid   = ;
-*   cfg.callbaks.logfunc    = ;
+*   cfg.callbacks.stacktrace = ;
+*   cfg.callbacks.threadid   = ;
+*   cfg.callbacks.logfunc    = ;
 * 
 * gfx_context_t * ctx = gfx_create(cfg);
 **/
@@ -51,7 +51,7 @@
 #elif defined(__APPLE__)
     #define     GFX_PLATFORM_APPLE
 #elif defined(__ANDROID__)
-    #define     GFX_PLATFORM__ANDROID
+    #define     GFX_PLATFORM_ANDROID
     #define     VULKAN_AVAILABLE
 #elif defined(EMSCRIPTEN)
     #define     GFX_PLATFORM_WEB
@@ -313,7 +313,7 @@ typedef enum gfx_blend_op {
     gfx_blend_op_min,
     gfx_blend_op_max,
     gfx_blend_op_subtract,
-    gfx_blend_op_rev_substract,
+    gfx_blend_op_rev_subtract,
 } gfx_blend_op;
 
 
@@ -589,7 +589,7 @@ typedef struct gfx_render_states_desc_t {
 
     struct {
         gfx_pixel_format*   color;
-    } attacments;
+    } attachments;
 
     struct {
         bool                enable      = false;
@@ -665,7 +665,7 @@ typedef struct indirect_data_t {
 } indirect_data_t;
 
 gfx_api int32_t                 gfx_enumerate_devices(gfx_device_info_t * infos, int32_t capacity);
-gfx_api gfx_backend             gfx_detect_bakend(gfx_backend * backends, uint32_t size);
+gfx_api gfx_backend             gfx_detect_backend(gfx_backend * backends, uint32_t size);
 gfx_api void                    gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
 gfx_api void                    gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
