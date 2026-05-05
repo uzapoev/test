@@ -210,9 +210,10 @@ public:
         intend--;
         m_end = std::chrono::high_resolution_clock::now();
         auto diff = std::chrono::duration_cast<std::chrono::microseconds>(m_end - m_start);
+        float ms = ((double)diff.count())/1000.0f;
 
-        printf(R"("%*s%s: %lldms)", intend*4, " ", m_msg, (long long)diff.count());
-      //  printf(R"(%s: %lldms)", m_msg, (long long)diff.count());
+       // printf(R"("%*s%s: %lldms)", intend*4, " ", m_msg, (long long)diff.count());
+        printf(R"("%*s%s: %.3f)", intend*4, " ", m_msg, ms);
     }
 
 private:

@@ -3,7 +3,7 @@
 //#include <algorithm>
 //#include <set>
 
-#include "render_system.h"
+#include "scene/render_system.h"
 #include "json_serializer.h"
 
 
@@ -23,13 +23,13 @@ static size_t filesize(FILE* file)
 }
 
 
-texture::texture( gfx_texture_t* tex, interned_string guid, interned_string name)
+texture::texture(gfx_texture_t* tex, interned_string guid, interned_string name)
     : resource(guid, name)
     , m_texture(tex)
 {   
 }
 
-rendermesh::rendermesh(interned_string guid, interned_string name, gfx_mesh_t mesh)
+rendermesh::rendermesh(interned_string guid, interned_string name, render_mesh_t mesh)
     : resource(guid, name)
     , m_mesh(mesh)
 {
@@ -168,8 +168,8 @@ void resource_manager::init()
 {
     load_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
 
-    create_mesh_pool(m_ctx, (256 + 128)*1024*1024, (16 + 8)*1024*1024, &m_mesh_pool);
-  //  create_mesh_pool(m_ctx, 256*1024*1024, 16*1024*1024, &m_mesh_pool1);
+  //  create_mesh_pool(m_ctx, (64)*1024*1024, (8)*1024*1024, &m_mesh_pool);
+    create_mesh_pool(m_ctx, 380*1024*1024, 32*1024*1024, &m_mesh_pool);
 
     gfx_vertex_attribute attributes[] = {
         { 0, 0, gfx_vertex_format_float4,   0                   },
@@ -328,7 +328,9 @@ rendermesh* resource_manager::load_mesh(const char* name)
     auto path = find(name);
     if (!path.empty())
     {
-        gfx_mesh_t handle = {};
+        render_mesh_t handle = {};
+       ///!!! if(strstr(path.data(), "65c335c13e918b9e113be724ce664b82"))
+       ///!!!     debug::breakpoint();
 
         if (!load_mesh_from_file_path(m_ctx, &m_mesh_pool, path.data(), &handle))
             return nullptr;

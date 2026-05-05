@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <condition_variable>
 
-#define MAX_TASKS           1024u
+#define MAX_TASKS           128u //1024u //
 #define MAX_DEPENDENCIES    16u
 #define MAX_CONTINUATIONS   16u
 #define MASK                MAX_TASKS - 1u
@@ -130,7 +130,7 @@ struct WorkerThread
     std::thread                 m_thread;
     std::mutex                  m_mutex;
     std::condition_variable     m_condition;
-    bool                        m_signal;
+    bool                        m_signal = false;
 };
 
 
@@ -148,8 +148,6 @@ public:
     ThreadPool(uint32_t workers)
     {
         m_shutdown = false;
-        
-        // get number of logical threads on CPU
         m_num_logical_threads = std::thread::hardware_concurrency();
         m_num_worker_threads = std::min(workers, m_num_logical_threads);
         
@@ -358,7 +356,7 @@ public:
         {
             m_threads.emplace_back(std::thread([this](int index) {
                 int jobs_done = 0;
-                while (!m_done)
+                while (!m_stop)
                 {
                     auto task = m_task_queue.pop();
                     if (task != nullptr)
@@ -384,7 +382,7 @@ public:
 
     void stop()
     {
-        m_done = true;
+        m_stop = true;
         m_cond_var.notify_all();
 
         for (auto& thread : m_threads)
@@ -434,7 +432,7 @@ public:
     }
 
 private:
-    std::atomic_bool            m_done;
+    std::atomic_bool            m_stop;
     std::mutex                  m_mutex;
     std::condition_variable     m_cond_var;
     std::vector<std::thread>    m_threads;
@@ -549,7 +547,7 @@ void thread_test()
     thread_pool tp0;
     tp0.init();
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
+/*
     auto animation_pre_transform_update_task    = tp0.create_task(AnimationPreTransformUpdateTask, nullptr);
     auto transform_update_task                  = tp0.create_task(TransformUpdateTask, nullptr);
     auto physics_sync_task                      = tp0.create_task(PhysicsSyncTask, nullptr);
@@ -559,15 +557,7 @@ void thread_test()
     auto particle_update_task                   = tp0.create_task(ParticleUpdateTask, nullptr);
     auto script_update_task                     = tp0.create_task(ScriptUpdateTask, nullptr);
 
-    /*
-    auto task_handle_0 = tppp.create_task([](void*) { printf("\tjob 0"); }, nullptr);
-    auto task_handle_1 = tppp.create_task([](void*) { printf("\tjob 1"); }, nullptr);
-    auto task_handle_2 = tppp.create_task([](void*) { printf("\tjob 2"); }, nullptr);
 
-    tppp.enqueue(task_handle_0);
-    tppp.enqueue(task_handle_1);
-    tppp.enqueue(task_handle_2);
-    */
 
     {
         measure ms("\nsingle");
@@ -584,13 +574,13 @@ void thread_test()
         AudioListenerUpdateTask(nullptr);
         AudioSourceUpdateTask(nullptr);
         ParticleUpdateTask(nullptr);
-        ScriptUpdateTask(nullptr);/**/
+        ScriptUpdateTask(nullptr);
     }
 
     {
         measure ms("\ntp");
         tp0.wait_for_all();
-    }
+    }*/
     // tppp.stop();
      //std::this_thread::sleep_for(std::chrono::seconds(2));
 

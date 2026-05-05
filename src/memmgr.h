@@ -12,7 +12,7 @@
     #pragma warning (disable: 4530)// C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
 #endif
 
-#include <malloc.h>
+//#include <malloc.h>
 #include <mutex>
 #include <unordered_map>
 
@@ -44,7 +44,7 @@ struct iallocator
 //
 struct aligned_allocator : iallocator
 {
-    aligned_allocator(const char * dbgname = "aligned_allocator");
+    aligned_allocator(const char * tag = "aligned_allocator");
 
     virtual ~aligned_allocator();
 
@@ -56,6 +56,7 @@ struct aligned_allocator : iallocator
 
 private:
     char                m_name[64] = "";
+    size_t              m_allocated_size = 0;
 
     struct mem_traker * m_traker   = nullptr;
 };

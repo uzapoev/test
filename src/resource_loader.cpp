@@ -1,7 +1,8 @@
 #include "resource_loader.h"
+#include "common.h"
 
 #include "gfx/gfx_reflection.h"
-#include "render_system.h"
+//#include "render_system.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -98,10 +99,17 @@ struct mesh_header_t
 #pragma pack(pop)
 
 
-void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, gfx_mesh_pool_t* pool)
+void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, mesh_pool_t* pool)
 {
-    //   pool->vertex_allocator = offset_alocator_create(vertex_buffer_size);
-    //   pool->index_allocator = offset_alocator_create(index_buffer_size);
+    gfx_offset_allocator_create(&pool->vertex_buffer_allocator, vertex_buffer_size, 1024);
+    gfx_offset_allocator_create(&pool->index_buffer_allocator, index_buffer_size, 128);
+
+   /* gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
+    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
+    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
+    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
+    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);*/
+
     gfx_buffer_desc_t vb = {};
         vb.data     = nullptr;
         vb.mapped   = false;
@@ -119,7 +127,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
     pool->index_buffer_size = index_buffer_size;
 }
 
-bool load_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t * pool, const char * path, gfx_mesh_t* out_mesh)
+bool load_mesh_from_file_path(gfx_context_t* ctx, mesh_pool_t * pool, const char * path, render_mesh_t* out_mesh)
 {
     char* data = nullptr;
     size_t size = read_file_data2(path, &data);
@@ -137,7 +145,7 @@ bool load_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t * pool, const 
     return true;
 }
 
-void load_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, const char *name, char * data, size_t size, gfx_mesh_t*out_mesh)
+void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char *name, char * data, size_t size, render_mesh_t* out_mesh)
 {
     char* curent_ptr = data;
 
@@ -152,58 +160,62 @@ void load_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, const 
 
     int* submeshes = (int*)curent_ptr;
 
-    int32_t vertex_buffer_size = header->vertex_stride * header->vertex_count;
-    int32_t index_buffer_size = header->index_stride * header->index_count;
+    int32_t vertex_buffer_size = gfx_utils_align_up(header->vertex_stride * header->vertex_count, 16);
+    int32_t index_buffer_size = gfx_utils_align_up(header->index_stride * header->index_count, 16);
 
-    gfx_buffer_t* vertex_buffer = nullptr;
-    gfx_buffer_t* index_buffer = nullptr;
-
-    bool ispooled = false;
     if(pool != nullptr)
     {
-        int32_t vertex_left = pool->vertex_buffer_size - pool->vertex_buffer_offset;
-        int32_t index_left = pool->index_buffer_size - pool->index_buffer_offset;
+        auto offset_vb = gfx_offset_allocator_allocate(&pool->vertex_buffer_allocator, vertex_buffer_size, 16);
+        auto offset_ib = gfx_offset_allocator_allocate(&pool->index_buffer_allocator, index_buffer_size, 16);
 
-        if (vertex_left > vertex_buffer_size && index_left > index_buffer_size)
+        if(offset_vb != -1)
         {
-            vertex_buffer = pool->vertex_buffer;
-            index_buffer = pool->index_buffer;
+            out_mesh->vertex_buffer = pool->vertex_buffer;
+            out_mesh->vertex_buffer_offset = offset_vb;
 
-            gfx_update_buffer_data(ctx, vertex_buffer, vertex_data_ptr, vertex_buffer_size, pool->vertex_buffer_offset);
-            gfx_update_buffer_data(ctx, index_buffer, index_data_ptr, index_buffer_size, pool->index_buffer_offset);
+            gfx_update_buffer_data(ctx, pool->vertex_buffer, vertex_data_ptr, vertex_buffer_size, offset_vb);
+        }
+        else
+        {
+            debug::log_error("not enough memory in vb mesh pool");
+        }
 
-            out_mesh->vertex_buffer_offset = pool->vertex_buffer_offset;
-            out_mesh->index_buffer_offset = pool->index_buffer_offset;
+        if (offset_ib != -1)
+        {
+            out_mesh->index_buffer = pool->index_buffer;
+            out_mesh->index_buffer_offset = offset_ib;
 
-            pool->vertex_buffer_offset += vertex_buffer_size;
-            pool->index_buffer_offset += index_buffer_size;
+            gfx_update_buffer_data(ctx, pool->index_buffer, index_data_ptr, index_buffer_size, offset_ib);
+        }
+        else
+        {
+            debug::log_error("not enough memory in ib mesh pool");
         }
     }
 
-    if(vertex_buffer == nullptr)
+    if(out_mesh->vertex_buffer == nullptr)
     {
         gfx_buffer_desc_t vb_desc = {};
             vb_desc.label = name;
             vb_desc.usage = gfx_buffer_usage_vertex;
             vb_desc.data = (uint8_t*)vertex_data_ptr;
             vb_desc.size = header->vertex_stride * header->vertex_count;
-        vertex_buffer = gfx_create_buffer2(ctx, &vb_desc);
+        out_mesh->vertex_buffer = gfx_create_buffer2(ctx, &vb_desc);
     }
 
-    if(index_buffer == nullptr)
+    if(out_mesh->index_buffer == nullptr)
     {
         gfx_buffer_desc_t ib_desc = {};
             ib_desc.label = name;
             ib_desc.usage = gfx_buffer_usage_index;
             ib_desc.data = (uint8_t*)index_data_ptr;
             ib_desc.size = header->index_stride * header->index_count;
-        index_buffer = gfx_create_buffer2(ctx, &ib_desc);
+        out_mesh->index_buffer = gfx_create_buffer2(ctx, &ib_desc);
     }
 
     out_mesh->index_format = header->index_stride == 2 ? gfx_index_format_16 : gfx_index_format_32;
     out_mesh->submesh_count = header->submesh_count;
-    out_mesh->index_buffer  = index_buffer;
-    out_mesh->vertex_buffer = vertex_buffer;
+    out_mesh->vertex_stride = header->vertex_stride;
     out_mesh->vertex_count  = header->vertex_count;
     out_mesh->index_count   = header->index_count;
 
@@ -215,7 +227,6 @@ void load_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, const 
     for (uint32_t i = 0; i < header->submesh_count; ++i)
         out_mesh->submeshes[i] = submeshes[i];
 }
-
 
 
 #ifndef MAKEFOURCC
@@ -366,19 +377,18 @@ void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * d
                 case MAKEFOURCC('D', 'X', 'T', '1'): desc.format = gfx_pixel_format_bc1; break;
                 case MAKEFOURCC('D', 'X', 'T', '3'): desc.format = gfx_pixel_format_bc2; break;
                 case MAKEFOURCC('D', 'X', 'T', '5'): desc.format = gfx_pixel_format_bc3; break;
-                case MAKEFOURCC('D', 'X', '1', '0'): desc.format = gfx_pixel_format_bc7; break;
+                case MAKEFOURCC('D', 'X', '1', '0'): {
+                    dds_header_dx10_t* header10 = (dds_header_dx10_t*)desc.data;
+                    desc.data = (data + sizeof(dds_magic) + header->size + sizeof(dds_header_dx10_t));
+                    if (header10->dxgiFormat == 95)
+                        desc.format = gfx_pixel_format_bc6;
+                    if (header10->dxgiFormat == 98)
+                        desc.format = gfx_pixel_format_bc7;
+                }break;
+
                 default: assert(false); break;
             };
 
-            if(desc.format == gfx_pixel_format_bc7)
-            {
-                dds_header_dx10_t* header10 = (dds_header_dx10_t*)desc.data;
-                desc.data = (data + sizeof(dds_magic) + header->size + sizeof(dds_header_dx10_t));
-                if(header10->dxgiFormat == 95)
-                    desc.format = gfx_pixel_format_bc6;
-                if(header10->dxgiFormat == 98)
-                    desc.format = gfx_pixel_format_bc7;
-            }
             desc.width      = header->width;
             desc.height     = header->height;
             desc.depth      = header->depth == 0? 1: header->depth;
@@ -461,19 +471,21 @@ void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * d
         };
     }
 
-    if(desc.data != nullptr && desc.mip_levels > 1)
+    if(desc.data != nullptr)
     {
-        uint32_t target_width = 1024;
-        uint32_t offset = 0;
-        while (desc.width > target_width)
+        if(desc.mip_levels > 1)
         {
-            offset += gfx_utils_image_layer_size(desc.width, desc.height, desc.depth, desc.format);
-            desc.width = desc.width >> 1;
-            desc.height = desc.height >> 1;
-            desc.mip_levels--;
+            uint32_t target_width = 512;
+            uint32_t offset = 0;
+            while (desc.width > target_width)
+            {
+                offset += gfx_utils_image_layer_size(desc.width, desc.height, desc.depth, desc.format);
+                desc.width = desc.width >> 1;
+                desc.height = desc.height >> 1;
+                desc.mip_levels--;
+            }
+            desc.data = (char*)desc.data + offset;
         }
-        desc.data = (char*)desc.data + offset;
-
         desc.type = gfx_texture2d;
         gfx_texture_t* texture = gfx_create_texture2(ctx, &desc);
         *out_texture = texture;
@@ -559,7 +571,7 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
         load_shader_from_file_data(ctx, name, data, size, out_shader);
         free(data);
         return;
-    }
+    }/**/
 
     size = read_file_data_text(path, &data);
     if (size == 0)
@@ -580,9 +592,8 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
 
 void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* data, size_t size, gfx_shader_t** out_shader)
 {
-    /**/
     uint32_t uniform_count = 0;
-    gfx_uniform_t uniforms[64] = {};
+    gfx_uniform_t uniforms[32] = {};
 
     char* blobs[16] = {};
     const char* stages[16] = {};

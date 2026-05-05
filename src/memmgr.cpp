@@ -200,9 +200,9 @@ struct mem_traker
 //  aligned_allocator
 //
 
-aligned_allocator::aligned_allocator(const char* dbgname)
+aligned_allocator::aligned_allocator(const char* tag)
 {
-    strcpy(m_name, dbgname);
+    strcpy(m_name, tag);
     m_traker = new mem_traker();
 }
 
@@ -216,8 +216,7 @@ aligned_allocator::~aligned_allocator()
 void* aligned_allocator::allocate(size_t size, size_t alignment) 
 {
     void* ptr = _aligned_malloc(size, alignment);
-    size_t sizeee = _aligned_msize(ptr, alignment,0);
-    //void *ptr = calloc(size+128, 1);
+    m_allocated_size += _aligned_msize(ptr, alignment, 0);
     m_traker->track_allocation(ptr, size);
     return ptr ? memset(ptr, 0, size) : nullptr;
 }

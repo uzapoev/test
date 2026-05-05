@@ -2,8 +2,6 @@
 #define __render_system_h__
 
 #include "gfx/gfx.h"
-#include "gfx/gfx_memory.h"
-
 #include "common.h"
 //#include "scene/scene.h"
 
@@ -34,8 +32,6 @@ typedef struct gfx_material_t {
 
 
 typedef struct gfx_mesh_pool_t {
-    gfx_offset_allocator_t*     vertex_buffer_allocator;
-    gfx_offset_allocator_t*     index_buffer_allocator;
 
     int32_t                     vertex_buffer_size;
     int32_t                     index_buffer_size;
@@ -94,9 +90,9 @@ typedef struct renderer_t
 
 
 namespace components {
-    struct renderer;
-    struct light;
-    struct lodgroup;
+    class renderer;
+    class light;
+    class lodgroup;
 };
 
 struct attachements
@@ -107,29 +103,13 @@ struct attachements
     static constexpr char * hiz_attachement             = "_hiz_attachment";
     static constexpr char * cluster_attachement         = "_cluster_attachment";
 
-    static constexpr char * gbuffer0_attachement        = "_gbuffer0_attachment";   // rgba8: rgb(albedo) a(ao)
-    static constexpr char * gbuffer1_attachement        = "_gbuffer1_attachment";   // rgba8: normal
-    static constexpr char * gbuffer2_attachement        = "_gbuffer2_attachment";   // rgba8: color-metal-roughness or diffuse-specular-glossiness
+    static constexpr char * gbuffer0_attachement         = "_gbuffer0_attachment";   // rgba8: rgb(albedo) a(ao)
+    static constexpr char * gbuffer1_attachement         = "_gbuffer1_attachment";   // rgba8: normal
+    static constexpr char * gbuffer2_attachement         = "_gbuffer2_attachment";   // rgba8: color-metal-roughness or diffuse-specular-glossiness
 
-    static constexpr char * light_attachement           = "_light_attachment";      // rgba8: color-metal-roughness or diffuse-specular-glossiness
+    static constexpr char * light_attachement            = "_light_attachment";   // rgba8: color-metal-roughness or diffuse-specular-glossiness
 };
-/*
-struct attachement_data {
-    const char *            name;
-    gfx_pixel_format        format;
-    gfx_render_target_t*    target;
-} attachement_config [] = {
-    {attachements::color_attachement,           gfx_pixel_format_rgba8, nullptr },
-    {attachements::depth_attachement,           gfx_pixel_format_d24s8, nullptr },
-    {attachements::hiz_attachement,             gfx_pixel_format_d32,   nullptr },
-    {attachements::motion_vectors_attachement,  gfx_pixel_format_rgba8, nullptr },
 
-    {attachements::gbuffer0_attachement,        gfx_pixel_format_rgba8, nullptr },
-    {attachements::gbuffer1_attachement,        gfx_pixel_format_rgba8, nullptr },
-    {attachements::gbuffer2_attachement,        gfx_pixel_format_rgba8, nullptr },
-    {attachements::light_attachement,           gfx_pixel_format_rgba8, nullptr },
-};
-*/
 struct render_pass
 {
 public:
@@ -159,7 +139,7 @@ class geometry_pass  : render_pass { };
 struct render_manager
 {
 public:
-    components::renderer * allocate_renderer(/*scene, node**/) {
+    components::renderer * allocate_renderer() {
         //return m_allocator.allocate();
         return m_renderers[0]; 
     }
@@ -189,7 +169,7 @@ public:
         for(size_t i = 0; i < m_passes.size(); ++i) {
             if(!m_passes[i]->active())
                 continue;
-            m_passes[i]->draw(/*this*/);
+            m_passes[i]->draw();
         }
     }
 

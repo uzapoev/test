@@ -243,11 +243,12 @@ typedef struct gfx_api_pfn
     void     (*pfn_cmd_scissor) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     void     (*pfn_cmd_bind_pipeline) (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-    void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
+    void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
     void     (*pfn_cmd_bind_buffer_ib) (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
     void     (*pfn_cmd_bind_buffer_vb) (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
     void     (*pfn_cmd_draw) (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-    void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
+    void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+    void     (*pfn_cmd_draw_indexed_indirect)(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
     void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
     void     (*pfn_cmd_push_marker)(gfx_command_buffer_t* cmd, const char* marker);
@@ -546,8 +547,8 @@ void gfx_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline) 
     g_tbl->pfn_cmd_bind_pipeline(cmd, pipeline);
 }
 
-void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor) {
-    g_tbl->pfn_cmd_bind_descriptor_set(cmd, descriptor);
+void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor) {
+    g_tbl->pfn_cmd_bind_descriptor_set(cmd, slot, descriptor);
 }
 
 void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer) { 
@@ -565,8 +566,12 @@ void gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t ins
 }
 
 
-void gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count) { 
-    g_tbl->pfn_cmd_draw_indexed(cmd, idx_count, first_idx, instance_count);
+void gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset) {
+    g_tbl->pfn_cmd_draw_indexed(cmd, idx_count, first_idx, instance_count, vertex_offset);
+}
+
+void gfx_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride) {
+    g_tbl->pfn_cmd_draw_indexed_indirect(cmd, buffer, offset, draw_count, stride);
 }
 
 
@@ -746,6 +751,7 @@ uint16_t gfx_utils_hash_16(const char* data, uint32_t size)
 
 
 static uint32_t gfx_max(uint32_t a, uint32_t b)            { return  (a > b ? a : b); }
+
 static uint32_t gfx_block_count(uint32_t s, uint32_t b)    { return ((s + b - 1) / b); }
 
 uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format)

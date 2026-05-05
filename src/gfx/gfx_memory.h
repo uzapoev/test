@@ -9,8 +9,11 @@
 struct gfx_offset_allocator_t;
 
 static void         gfx_offset_allocator_create(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t min_size);
+
 static void         gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator);
+
 static ptrdiff_t    gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t aligment);
+
 static void         gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, ptrdiff_t offset);
 
 
@@ -146,7 +149,7 @@ static void merge_free_blocks(gfx_offset_allocator_t* allocator)
 
 static void gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, ptrdiff_t offset)
 {
-    for (uint32_t i = 0; allocator->allocated_blocks_count; ++i) {
+    for (uint32_t i = 0; i < allocator->allocated_blocks_count; ++i) {
         if (allocator->allocated_blocks[i].offset == offset) {
             int idx = allocator->free_blocks_count;
             allocator->free_blocks[idx].offset = allocator->allocated_blocks[i].offset;

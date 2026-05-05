@@ -1196,7 +1196,7 @@ void metal_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint3
         indexCount : idx_count
         indexType : mcmd->index_type
         indexBuffer : mcmd->index_buffer
-        indexBufferOffset : 0] ;
+        indexBufferOffset : 0];
 }
 
 void metal_cmd_end(gfx_command_buffer_t* cmd)

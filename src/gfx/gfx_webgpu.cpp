@@ -1571,7 +1571,7 @@ void wgpu_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline)
 }
 
 
-void wgpu_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* set)
+void wgpu_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* set)
 {
     wgpu_command_buffer_t*  wgpu_cmd = (wgpu_command_buffer_t*)cmd;
     wgpu_descriptor_set_t*  wgpu_set = (wgpu_descriptor_set_t*)set;
@@ -1585,7 +1585,7 @@ void wgpu_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_
         pool->dirty = false;
     }
 
-    wgpuRenderPassEncoderSetBindGroup(wgpu_cmd->pass, 0, wgpu_set->bind_group, 0, &wgpu_set->dynamic_offset);
+    wgpuRenderPassEncoderSetBindGroup(wgpu_cmd->pass, slot, wgpu_set->bind_group, 0, &wgpu_set->dynamic_offset);
 }
 
 
@@ -1686,11 +1686,11 @@ void wgpu_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t in
 //
 //  gfx_cmd_draw_indexed
 //
-void wgpu_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_idx, uint32_t instance_count)
+void wgpu_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
 
-    wgpuRenderPassEncoderDrawIndexed(wgpu_cmd->pass, index_count, instance_count, first_idx, 0, 0);
+    wgpuRenderPassEncoderDrawIndexed(wgpu_cmd->pass, index_count, instance_count, first_idx, vertex_offset, 0);
 }
 
 

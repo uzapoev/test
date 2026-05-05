@@ -169,6 +169,8 @@ typedef enum gfx_pixel_format {
     gfx_pixel_format_astc10x10,         //
     gfx_pixel_format_astc12x12,         //
 
+    gfx_pixel_format_astc4x4_hdr,       //
+
     gfx_pixel_format_r16f,              //!
     gfx_pixel_format_rg16f,             //!
     gfx_pixel_format_rgba16f,           //!
@@ -361,8 +363,10 @@ typedef enum gfx_shader_stage {
 
 typedef enum gfx_barrier {
     gfx_barrier_compute,
+    gfx_barrier_indirect,
     gfx_barrier_vertex,
     gfx_barrier_fragment,
+
     gfx_barrier_rendertarget
 } gfx_barrier;
 
@@ -420,7 +424,7 @@ typedef struct gfx_settings_t {
 
     struct {
         uint32_t            staging_buffer_size             = 16 * 1024 * 1024;
-        uint32_t            buffer_pool_capacity            = 1  * 1024;
+        uint32_t            buffer_pool_capacity            = 2  * 1024;
         uint32_t            shaders_pool_capacity           = 1  * 1024;
         uint32_t            textures_pool_capacity          = 2  * 1024;
         uint32_t            pipeline_pool_capacity          = 1  * 1024;
@@ -644,6 +648,13 @@ typedef struct gfx_render_pass_desc_t {
     uint32_t                    clear_depth;
 } gfx_render_pass_desc_t;
 
+typedef struct indirect_data_t {
+    uint32_t instance_count;    // (filed in Compute Shader)
+    uint32_t index_count;   
+    uint32_t first_index;       // offset in EBO
+    uint32_t base_vertex;       // offset in VBO
+    uint32_t base_instance;     // offset in SSBO with data
+} indirect_data_t;
 
 gfx_api int32_t                 gfx_enumerate_devices(gfx_device_info_t * infos, int32_t capacity);
 gfx_api gfx_backend             gfx_detect_bakend(gfx_backend * backends, uint32_t size);
@@ -694,11 +705,13 @@ gfx_api void                    gfx_cmd_end_pass            (gfx_command_buffer_
 gfx_api void                    gfx_cmd_scissor             (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 gfx_api void                    gfx_cmd_viewport            (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 gfx_api void                    gfx_cmd_bind_pipeline       (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-gfx_api void                    gfx_cmd_bind_descriptor_set (gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
+gfx_api void                    gfx_cmd_bind_descriptor_set (gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
 gfx_api void                    gfx_cmd_bind_index_buffer   (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
 gfx_api void                    gfx_cmd_bind_vertex_buffer  (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
 gfx_api void                    gfx_cmd_draw                (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-gfx_api void                    gfx_cmd_draw_indexed        (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
+gfx_api void                    gfx_cmd_draw_indexed        (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+gfx_api void                    gfx_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t * buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
+
 gfx_api void                    gfx_cmd_dispatch_compute    (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
 gfx_api void                    gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
@@ -712,7 +725,7 @@ gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_b
 // https://github.com/khronosgroup/vulkan-docs/wiki/synchronization-examples
 
 
-// WIP: occlusion query, timestamp, mipmap, raytracing
+// WIP: mipmap, raytracing
 // 
 // typedef struct gfx_rt_acceleration_struct {
 //     struct {
@@ -721,10 +734,12 @@ gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_b
 //         uint32_t            vertex_count = 0;
 //         uint64_t            vertex_stride = 0;
 //         gfx_vertex_format   vertex_format = gfx_vertex_format_byte4;
+// 
 //         gfx_buffer_t *      index_buffer = nullptr;
 //         uint64_t            index_offset = 0;
 //         uint32_t            index_count = 0;
 //         gfx_index_format    index_format = gfx_index_format_16;
+// 
 //         gfx_buffer_t *      transform_buffer = nullptr;
 //         uint64_t            transform_offset = 0;
 //     } triangles;
@@ -746,19 +761,22 @@ gfx_api void                    gfx_submit_cmd(gfx_context_t* ctx, gfx_command_b
 
 
 // gfx_api void     gfx_cmd_begin_timer(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-// gfx_api void     gfx_cmd_write_querry_stamp(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_pipeline_stage);
 // 
+// gfx_api void     gfx_cmd_write_querry_stamp(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_pipeline_stage); // stage - graphic, compute
+// gfx_api void     gfx_cmd_time_stamp_begin(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_pipeline_stage);
+// gfx_api void     gfx_cmd_time_stamp_end(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_pipeline_stage);
+// 
+//
 // gfx_api void     gfx_update_image_data(gfx_context_t* ctx, gfx_texture_t *texture, void* data, uint32_t size, uint32_t offset);
 // 
-// gfx_api void     gfx_create_pipeline_cash(gfx_context_t* ctx, struct gfx_pipeline_cash_t* cmd);
 // gfx_api void     gfx_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 // gfx_api void     gfx_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
 // gfx_api void     gfx_blit_image(gfx_context_t* ctx, /*gfx_blit_info_t*/gfx_texture_t* src, gfx_texture_t* dst);
 // 
 
 gfx_api void gfx_cmd_push_constant(gfx_command_buffer_t * cmd, uint64_t handle, void * data, uint32_t size);
-gfx_api void gfx_update_bindless_texture_slot(gfx_context_t * cmd, gfx_texture_t * texture, uint32_t idx);
-
+gfx_api void gfx_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
+gfx_api void gfx_cmd_get_marker_timestamp(const char * marker);
 
 
 extern const char*  gfx_to_string(gfx_buffer_usage usage);

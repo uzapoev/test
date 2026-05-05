@@ -1,5 +1,5 @@
-#ifndef __resources_h__
-#define __resources_h__
+#ifndef __resource_manager_h__
+#define __resource_manager_h__
 
 #include <string>
 #include <vector>
@@ -10,12 +10,13 @@
 #include "gfx/gfx.h"
 #include "mathlib.h"
 #include "common.h"
+#include "resources.h"
 
-#include "render_system.h"
+#include "scene/render_system.h"
 #include "resource_loader.h"
 
 extern size_t   read_file_data(const char* path, char** data);
-extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vsize, uint32_t isize, gfx_mesh_pool_t* pool);
+extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vsize, uint32_t isize, mesh_pool_t* pool);
 
 
 /*
@@ -68,6 +69,7 @@ private:
 };
 
 
+class texture_manager_prototype;
 class texture : public resource
 {
     friend class texture_manager_prototype;
@@ -98,30 +100,21 @@ private:
 class rendermesh : public resource
 {
 public:
-    rendermesh(interned_string guid, interned_string name, gfx_mesh_t mesh);
+    rendermesh(interned_string guid, interned_string name, render_mesh_t mesh);
 
-    gfx_mesh_pool_t *       mesh_pool() { return m_pool; }
-    gfx_mesh_t*             mesh()      { return &m_mesh; }
+    mesh_pool_t *       mesh_pool() { return m_pool; }
+    render_mesh_t*      mesh()      { return &m_mesh; }
 
 private:
-    gfx_mesh_pool_t *       m_pool = nullptr;
-    gfx_mesh_t              m_mesh = {};
+    mesh_pool_t *       m_pool = nullptr;
+    render_mesh_t       m_mesh = {};
 };
 
 
 class material : resource
 {
 public:
-    void set_texture(const char * slot, texture * _texture)
-    {
-        assert(slot);
-        auto uniform_handle = gfx_uniform_location(m_instance->shader, slot);
-        auto texture_handle = _texture ? _texture->texture_handle() : nullptr;
-        if(uniform_handle)
-            gfx_uniform_set_texture(m_descriptor_set, uniform_handle, texture_handle);
-
-    //    _texture->subscribe(this);
-    }
+    void set_texture(const char * slot, texture * _texture)    { replace_texture(slot,  _texture); }
 
     void clear()
     {
@@ -135,6 +128,22 @@ public:
     }
 
 private:
+    void replace_texture(const char * slot, texture * _texture)
+    {
+        assert(slot);
+        auto uniform_handle = gfx_uniform_location(m_instance->shader, slot);
+        if(uniform_handle == -1) {
+            debug::log_warning("no texture slot in material: %s", name());
+            return;
+        }
+        
+        auto texture_handle = _texture ? _texture->texture_handle() : nullptr;
+        gfx_uniform_set_texture(m_descriptor_set, uniform_handle, texture_handle);
+
+     //   if(_texture != nullptr)
+     //       m_material_manager->on_texture_changed(this, _texture);
+    }
+    
     void texture_handle_changed(texture * _texture)
     {
         uint64_t uniform_handle = 0;//find_slot(tex);
@@ -144,17 +153,23 @@ private:
     gfx_material_instance_t *   m_instance = nullptr;
     gfx_uniform_t *             m_uniforms = nullptr; //in instance material
     gfx_descriptor_set_t *      m_descriptor_set = nullptr;
+
+    class material_manager *    m_material_manager = nullptr;
 };
 
 
 class atlas : resource
 {
 public:
-    vec4 get_frame(const std::string_view& name);
+    vec4 get_frame(const std::string_view& name) {
+        auto frame = m_frames.find(name);
+        return frame != m_frames.end() ? frame->second : vec4();
+    }
 private:
     texture*                                    m_texture;
     std::unordered_map<interned_string, vec4>   m_frames;  // name + tileinfo(uv)
 };
+
 
 
 class texture_manager_prototype
@@ -201,6 +216,7 @@ private:
     std::unordered_set<interned_string>             m_load_queue;
 };
 
+
 class mesh_manager_prototype
 {
 public:
@@ -213,8 +229,22 @@ private:
     class resource_manager*                             m_filesystem = nullptr;
 
     std::unordered_map<interned_string, rendermesh*>    m_meshes;
-    std::vector<gfx_mesh_pool_t*>                       m_mesh_pools;
+    std::vector<mesh_pool_t*>                           m_mesh_pools;
 };
+
+
+class material_manager_prototype
+{
+public:
+    material * load(const char* guid, bool async);
+
+protected:
+    void on_texture_removed(texture * _texture);
+    void on_texture_changed(material * _material, texture * _texture);
+private:
+    std::unordered_map<texture*, std::vector<material*>> m_texture_consumers;
+};
+
 
 class resource_manager
 {
@@ -241,7 +271,7 @@ public:
     void                                                            load_shader(const char * path);
 
     static std::vector<char>                                        file_data(const std::string_view& path);
-   // void                                                            set_defaults(gfx_shader_t * shader, gfx_texture_t * texture);
+   // void                                                          set_defaults(gfx_shader_t * shader, gfx_texture_t * texture);
 private:
     gfx_material_instance_t *                                       load_material_instance(const std::string_view& guid);
     void                                                            directory_changed(std::filesystem::path &path);
@@ -287,7 +317,7 @@ private:
 
     texture_manager_prototype                                       m_texture_manager;
 
-    gfx_mesh_pool_t                                                 m_mesh_pool = {};
+    mesh_pool_t                                                     m_mesh_pool = {};
 
     std::unordered_set<interned_string>                             m_dirs;
     std::unordered_map<interned_string, std::filesystem::path>      m_guid_2_path;
@@ -295,72 +325,16 @@ private:
     std::unordered_map<interned_string, texture*>                   m_textures;
     std::unordered_map<interned_string, rendermesh*>                m_meshes;
 
+    struct aligned_allocator *                                      m_allocator = nullptr;
+    struct temp_allocator *                                         m_temp_allocator = nullptr;
+    struct paged_pool_allocator *                                   m_texture_allocator = nullptr;
+    struct paged_pool_allocator *                                   m_material_allocator = nullptr;
+    struct paged_pool_allocator *                                   m_rendermesh_allocator = nullptr;
+
 
     std::unordered_map<interned_string, std::shared_ptr<gfx_material_instance_t>>   m_material_instances;
     std::unordered_map<interned_string, std::shared_ptr<gfx_shader_t>>              m_shaders;
     std::vector<std::shared_ptr<gfx_material_t>>                                    m_materials;
 }; 
 
-
-struct vertex
-{
-    vec4    position;
-    vec4    normal;
-    vec4    tangent;
-    vec4    uv;
-};
-
-struct vertex_bones
-{
-    float4  weight;
-    int4    indexes;
-};
-
-
-struct vertex_compressed
-{
-    int64_t position;   // 16+16+16 - pos, 16 - ?
-    int64_t uv01;       // 
-    int64_t tbn;        // quaternion or int32_t norm, tangent(10bit per component, 2 bit not used)
-   // int64_t payload;  // bones: 8+8+8+8 - indexes, 8+8+8+8 - weights
-
-    // int4  pos_tbn;    128bit:  xy - pos, zw - normal tangent
-    // int4  uv_payload; 128bit:  16+16 - uv0, 16+16 - uv1, 32+32 - payload
-    // int4                      //  8+8+8+8 = bone indexes,  8+8+8+8 = bone weights
-};
-
-struct vertex_bones_compressed
-{
-    int64_t     index_weight; // 8+8+8+8 index, 8+8+8+8 - weight
-};
-
-
-/*
-//extern bool   read_mesh_meta(char* data, size_t size, int *vertex_size, int * index_size);
-extern bool     create_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t* pool, const char* path, gfx_mesh_t* out_mesh);
-extern void     create_mesh_from_file_data(gfx_context_t* ctx, gfx_mesh_pool_t* pool, const char* name, char* data, size_t size, gfx_mesh_t* out_mesh);
-
-//extern bool   read_texture_meta(char* data, size_t size, int * w, int * h, int * d, int * mips, gfx_pizel_format * format);
-extern void     create_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_texture_t** out_texture);
-extern void     create_texture_from_file_data(gfx_context_t* ctx, char* data, size_t size, gfx_texture_t** out_texture);
-
-extern void     create_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader_t** out_shader);
-extern void     create_shader_from_file_data(gfx_context_t* ctx, const char* name, char* data, size_t size, gfx_shader_t** out_shader);
-
-extern void     create_material_from_file_path(gfx_context_t* ctx, const char* path, struct gfx_material_instance_t** instance);
-extern void     create_material_from_file_data(gfx_context_t* ctx, char* data, size_t size, struct gfx_material_instance_t** instance);
-
-
-// struct gfx_rawmesh_t; // collision
-//extern void   load_animation_from_file_path(const char* path, gfx_rawmesh_t ** insance);
-//extern void   load_animation_from_file_data(char* data, size_t size, gfx_rawmesh_t ** insance);
-
-//struct gfx_animation_t;
-//extern void   load_animation_from_file_path(const char* path, gfx_animation_t ** insance);
-//extern void   load_animation_from_file_data(char* data, size_t size, gfx_animation_t ** insance);
-
-// struct gfx_cinematic_t;
-//extern void   load_cinematic_from_file_path(const char* path, gfx_cinematic_t ** insance);
-//extern void   load_cinematic_from_file_data(char* data, size_t size, gfx_cinematic_t ** insance);
-*/
-#endif // __resources_h__
+#endif // __resource_manager_h__

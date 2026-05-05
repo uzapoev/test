@@ -4,6 +4,20 @@
 #include <stdlib.h>  // rand
 #include <stdint.h>  // int8_t
 #include <math.h>
+
+#if defined(__SSE2__) || defined(_M_IX86_FP) && (_M_IX86_FP >= 2) || defined(_M_X64)
+    #define MATHLIB_SSE
+    #include <emmintrin.h>
+    #include <immintrin.h>
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(_M_ARM64) || defined(_M_ARM)
+    #define MATHLIB_NEON
+    #include <arm_neon.h>
+#else
+    #error "SIMD doesn't supported"
+#endif
+
+
+
 //#include <float.h>
 
 #define MATH_INLINE inline
@@ -12,15 +26,19 @@ typedef struct vec2     { float x = 0.0f, y = 0.0f;                     } vec2;
 typedef struct vec3     { float x = 0.0f, y = 0.0f, z = 0.0f;           } vec3;
 typedef struct vec4     { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; } vec4;
 
-typedef struct float2   { float x = 0.0f, y = 0.0f;                     } float2;
-typedef struct float3   { float x = 0.0f, y = 0.0f, z = 0.0f;           } float3;
-typedef struct float4   { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; } float4;
-typedef struct float4x4 { float4 c0, c1, c2, c3;                        } float4x4;
+typedef struct alignas(16) float2   { float x = 0.0f, y = 0.0f;                     } float2;
+typedef struct alignas(16) float3   { float x = 0.0f, y = 0.0f, z = 0.0f;           } float3;
+typedef struct alignas(16) float4   { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; } float4;
+typedef struct alignas(16) float4x4 { float4 c0, c1, c2, c3;                        } float4x4;
 
 typedef struct short4   { int16_t  x = 0, y = 0, z = 0, w = 0;          } short4;
 typedef struct ushort4  { uint16_t x = 0, y = 0, z = 0, w = 0;          } ushort4;
 typedef struct int4     { int32_t  x = 0, y = 0, z = 0, w = 0;          } int4;
 typedef struct uint4    { uint32_t x = 0, y = 0, z = 0, w = 0;          } uint4;
+
+typedef struct half4    { uint16_t x = 0, y = 0, z = 0, w = 0;          } half4;
+
+static_assert(sizeof(uint64_t) == sizeof(half4));
 
 
 #define DECL_VPTR       float * v_ptr = (float*)&v.x;
@@ -98,8 +116,12 @@ namespace math
     }
 
     MATH_INLINE vec3 make_vec3(float x, float y, float z)           { return {x,y,z}; }
+    MATH_INLINE vec3 make_vec3(const vec4& a)                       { return {a.x, a.y, a.z}; }
+    MATH_INLINE vec3 make_vec3(const float3& a)                     { return {a.x, a.y, a.z}; }
+    MATH_INLINE vec3 make_vec3(const float4& a)                     { return {a.x, a.y, a.z}; }
     MATH_INLINE vec4 make_vec4(const vec3 &a)                       { return { a.x, a.y, a.z, 1.0f}; }
     MATH_INLINE vec4 make_vec4(float x, float y, float z, float w)  { return { x, y, z, w}; }
+
 
     MATH_INLINE float4 make_float4(const vec4& a)                       { return { a.x, a.y, a.z, a.w}; }
     MATH_INLINE float4 make_float4(float x, float y, float z, float w)  { return { x, y, z, w}; }
@@ -1031,43 +1053,149 @@ namespace math
         return { math::rad2deg(roll), math::rad2deg(yaw), math::rad2deg(pitch) };
     }
 
-    //mat3f::packTangentFrame({t, b, n});
-    MATH_INLINE quat pack_tbn(vec3 n, vec3 t)
+
+    inline quat encode_tbn(vec3 T, vec3 B, vec3 N) 
     {
-        vec3 b = math::cross(n, t);
-        return quat::identity();
-    //    TMat33<T>{ m[0], cross(m[2], m[0]), m[2] }
+        float det = (T.x * (B.y * N.z - B.z * N.y) -
+                     T.y * (B.x * N.z - B.z * N.x) +
+                     T.z * (B.x * N.y - B.y * N.x));
+        float handedness = (det < 0.0f) ? -1.0f : 1.0f;
+
+        vec3 Bp = {
+            N.y * T.z - N.z * T.y,
+            N.z * T.x - N.x * T.z,
+            N.x * T.y - N.y * T.x
+        };
+
+        float m00 = T.x, m01 = Bp.x, m02 = N.x;
+        float m10 = T.y, m11 = Bp.y, m12 = N.y;
+        float m20 = T.z, m21 = Bp.z, m22 = N.z;
+
+        quat q;
+        float trace = m00 + m11 + m22;
+        if (trace > 0.0f) {
+            float s = 0.5f / sqrtf(trace + 1.0f);
+            q.w = 0.25f / s;
+            q.x = (m21 - m12) * s;
+            q.y = (m02 - m20) * s;
+            q.z = (m10 - m01) * s;
+        }
+        else {
+            if (m00 > m11 && m00 > m22) {
+                float s = 2.0f * sqrtf(1.0f + m00 - m11 - m22);
+                q.w = (m21 - m12) / s; q.x = 0.25f * s; q.y = (m01 + m10) / s; q.z = (m02 + m20) / s;
+            }
+            else if (m11 > m22) {
+                float s = 2.0f * sqrtf(1.0f + m11 - m00 - m22);
+                q.w = (m02 - m20) / s; q.x = (m01 + m10) / s; q.y = 0.25f * s; q.z = (m12 + m21) / s;
+            }
+            else {
+                float s = 2.0f * sqrtf(1.0f + m22 - m00 - m11);
+                q.w = (m10 - m01) / s; q.x = (m02 + m20) / s; q.y = (m12 + m21) / s; q.z = 0.25f * s;
+            }
+        }
+
+        if (q.w < 0.0f) { q.x = -q.x; q.y = -q.y; q.z = -q.z; q.w = -q.w; }
+
+        if (handedness < 0.0f) {
+            q.w = -q.w;
+            if (q.w > -1e-7f) q.w = -1e-7f; 
+        }
+        return q;
     }
 
+    /**
+     * DECODE: Quaternion -> TBN Basis
+     */
+    inline void decode_tbn(const quat& q, vec3& outT, vec3& outB, vec3& outN) 
+    {
+        float x2 = q.x + q.x, y2 = q.y + q.y, z2 = q.z + q.z;
+        float xx = q.x * x2, xy = q.x * y2, xz = q.x * z2;
+        float yy = q.y * y2, yz = q.y * z2, zz = q.z * z2;
+        float wx = q.w * x2, wy = q.w * y2, wz = q.w * z2;
+
+        // Tangent = Rotation * (1, 0, 0)
+        outT = { 1.0f - (yy + zz), xy + wz, xz - wy };
+
+        // Normal = Rotation * (0, 0, 1)
+        outN = { xz + wy, yz - wx, 1.0f - (xx + yy) };
+
+        // Bitangent = cross(N, T) * sign(q.w)
+        float reflection = (q.w < 0.0f) ? -1.0f : 1.0f;
+        outB = {
+            (outN.y * outT.z - outN.z * outT.y) * reflection,
+            (outN.z * outT.x - outN.x * outT.z) * reflection,
+            (outN.x * outT.y - outN.y * outT.x) * reflection
+        };
+    }
+
+
+    inline uint32_t pack_quat(quat q) 
+    {
+        uint32_t handedness = (q.w < 0.0f) ? 1 : 0;
+
+        float abs_q[4] = { fabsf(q.x), fabsf(q.y), fabsf(q.z), fabsf(q.w) };
+        uint32_t max_idx = 0;
+        for (uint32_t i = 1; i < 4; ++i) {
+            if (abs_q[i] > abs_q[max_idx]) max_idx = i;
+        }
+
+        float sign_fix = (reinterpret_cast<float*>(&q)[max_idx] < 0.0f) ? -1.0f : 1.0f;
+
+        auto quantize9 = [](float v) -> uint32_t {
+            float normalized = (v / 0.707106f) * 0.5f + 0.5f;
+            uint32_t quantized = static_cast<uint32_t>(normalized * 511.0f + 0.5f);
+            return clamp(quantized, 0u, 511u);
+            };
+
+        uint32_t components[3];
+        int c = 0;
+        for (uint32_t i = 0; i < 4; ++i) {
+            if (i == max_idx) continue;
+            components[c++] = quantize9(reinterpret_cast<float*>(&q)[i] * sign_fix);
+        }
+
+        uint32_t packed = 0;
+        packed |= (max_idx << 30);
+        packed |= (handedness << 29);
+        packed |= (components[0] << 20);
+        packed |= (components[1] << 11);
+        packed |= (components[2] << 2);
+
+        return packed;
+    }
+
+    //
+    inline quat unpack_quat(uint32_t packed) 
+    {
+        uint32_t max_idx = (packed >> 30) & 0x3;
+        uint32_t handedness = (packed >> 29) & 0x1;
+
+        auto dequantize9 = [](uint32_t v) -> float {
+            float normalized = static_cast<float>(v) / 511.0f;
+            return (normalized - 0.5f) * 2.0f * 0.707106f;
+            };
+
+        float components[3];
+        components[0] = dequantize9((packed >> 20) & 0x1FF);
+        components[1] = dequantize9((packed >> 11) & 0x1FF);
+        components[2] = dequantize9((packed >> 2) & 0x1FF);
+
+        float s_sq = components[0] * components[0] + components[1] * components[1] + components[2] * components[2];
+        float missing = sqrtf(fmaxf(0.0f, 1.0f - s_sq));
+
+        quat q;
+        float* q_ptr = reinterpret_cast<float*>(&q);
+        int c = 0;
+        for (int i = 0; i < 4; ++i) {
+            if (i == max_idx) q_ptr[i] = missing;
+            else q_ptr[i] = components[c++];
+        }
+
+        if (handedness) q.w = -fabsf(q.w);
+
+        return q;
+    }
 }
-
-
-
-/*
-const tangent = [1, 0, 0, 1];
-const normal = [0, 1, 0];
-
-const q = [];
-//pack tangent and normal to a quaternion
-packTangentFrame(q, normal, tangent);
-const n = [], t = [];
-//unpack a given quaternion to a normal and tangent.
-unpackQuaternion(q, n, t);
-
-
-void toTangentFrame(const vec4 & q, vec3 &n) {
-    n = vec3(0.0, 0.0, 1.0) +
-        vec3(2.0, -2.0, -2.0) * q.x * q.zwx +
-        vec3(2.0, 2.0, -2.0) * q.y * q.wzy;
-}
-// 
-// Extracts the normal and tangent vectors of the tangent frame encoded in the specified quaternion.
-
-void toTangentFrame(const vec4 &q, out highp vec3 n, out highp vec3 t) {
-    toTangentFrame(q, n);
-    t = vec3(1.0, 0.0, 0.0) +
-        vec3(-2.0, 2.0, -2.0) * q.y * q.yxw +
-        vec3(-2.0, 2.0, 2.0) * q.z * q.zwx;
-}*/
 
 #endif  // __MATHLIB_H__

@@ -26,16 +26,16 @@ JsonSerializeExternal(quat,
     SerializeFieldWithKey("z", z), 
     SerializeFieldWithKey("w", w));
 
-JsonSerializeExternal(components::lodgroup,
+JsonSerializeExternal(lodgroup,
     SerializeFieldWithKey("mesh", renderers));
 
-JsonSerializeExternal(components::renderer,
+JsonSerializeExternal(renderer,
     SerializeFieldWithKey("mesh", mesh_guid),
     SerializeFieldWithKey("material", material_guid),
     SerializeFieldWithKey("lightmap", lightmap_guid),
     SerializeFieldWithKey("lightmapScaleOffset", lightmap_scale_offset));
 
-JsonSerializeExternal(components::transform,
+JsonSerializeExternal(transform,
     SerializeFieldWithKey("position",   position),
     SerializeFieldWithKey("scale",      scale),
     SerializeFieldWithKey("rotation",   rotation));
@@ -55,7 +55,7 @@ JsonSerializeExternal(scene,
 
 struct scene_reader_json
 {
-    static scene create_form_file(const std::string & path)
+    static scene create_form_file(const std::string_view& path)
     {
         auto data = resource_manager::file_data(path);
         std::string tmp(data.begin(), data.end());

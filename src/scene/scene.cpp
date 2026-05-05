@@ -1,6 +1,20 @@
 #include "scene.h"
+#include "world.h"
+#include "../memmgr.h"
 #include "scene_json.h"
 
+
+struct scene_chunk_info_t {
+    uint32_t type = 0;
+    uint32_t size = 0;
+  //  uint32_t id   = 0;
+};
+
+struct scene_header_t {
+    uint32_t magick = MAKEFOURCC('S', 'C', 'N', '0');
+    uint32_t version;
+    uint32_t node_count;
+};
 
 void camera::update()
 {
@@ -17,31 +31,32 @@ void camera::update()
     m_view_proj = math::mul(proj, view);
 }
 
-scene scene::create_from_file(const std::string& path)
+scene scene::create_from_file(const std::string_view& path)
 {
     scene result;
-    if(path.empty())
-        return result;
+    result.load(path);
+  //  result.init();
+    return result;
 }
 
 
-scene scene::create_from_json_file(const std::string& path)
+scene scene::create_from_json_file(const std::string_view& path)
 {
     measure ms("\nscene loading");
 
     scene result;
-    std::string bin_path = path;
+    std::string bin_path = path.data();
     bin_path.append(".bin");
-    if(std::filesystem::exists(bin_path))
-    {
+    if(std::filesystem::exists(bin_path)) {
         result.load(bin_path);
         result.init();
-    }
-    else
-    {
+    } else if(std::filesystem::exists(path)) {
         result = scene_reader_json::create_form_file(path);
         result.init();
         result.save(bin_path);
+    } else {
+        debug::log_error("no file at path %s", path.data());
+        return result;
     }
 
     int current_vb_size = 0;
@@ -56,7 +71,7 @@ scene scene::create_from_json_file(const std::string& path)
             {
                 current_ib_size += mesh->mesh()->index_count * sizeof(uint16_t);
                 current_vb_size += mesh->mesh()->vertex_count * sizeof(vertex);
-                compressed_vb_size += mesh->mesh()->vertex_count * sizeof(vertex_compressed);
+                compressed_vb_size += mesh->mesh()->vertex_count * sizeof(vertex_packed);
             }
             else
                 debug::log_error("failed load mesh %s", m.c_str());
@@ -97,6 +112,11 @@ scene scene::create_from_json_file(const std::string& path)
         renderer.mesh = mesh->mesh();
         renderer.material = resource_manager::shared()->load_material(material_guid).get();
         renderer.world_bounds = bbox::create(renderer.mesh->bounds, renderer.transform);
+
+        for(int i = 0; i < 8; i++)
+            renderer.bounds.extend({renderer.world_bounds.corners[i].x,
+                                    renderer.world_bounds.corners[i].y,
+                                    renderer.world_bounds.corners[i].z });
 
         if(renderer.material == nullptr)
             debug::log_error("failed to load material %s", material_guid);
@@ -149,158 +169,97 @@ scene scene::create_from_json_file(const std::string& path)
 }
 
 
-void scene::load(const std::string& path)
+
+void scene::load(const std::string_view& path)
 {
+    if(m_node_allocator == nullptr){
+        auto allocator = new aligned_allocator("scene node");
+
+        m_world = new world();
+        m_node_allocator = new paged_pool_allocator(allocator, sizeof(node), 1024*16);
+        m_transform_allocator = new paged_pool_allocator(allocator, sizeof(transform), 1024*16);
+        m_hierarchy_allocator = new paged_pool_allocator(allocator, sizeof(hierarchy), 1024*16);
+    }
+
     PROFILE_SAMPLE("scene::load")
-    filestream * stream = filestream::open_rb(path.c_str());
+    filestream * stream = filestream::open_rb(path.data());
 
     //scene_header_t header = stream->read<scene_header_t>();
-    uint32_t node_count = stream->read<uint32_t>();
+    auto header = stream->read<scene_header_t>();
 
-    auto p0 = sizeof(node);
-    auto p1 = sizeof(tinynode);
+    m_nodes.resize(header.node_count);// = allocator->alloc<node>(nodes_count);
 
-    m_nodes.resize(node_count);// = allocator->alloc<node>(nodes_count);
-    for (uint32_t i = 0; i < node_count; i++)
+    scene_chunk_info_t info = {};
+    while(stream->read(sizeof(scene_chunk_info_t), &info) != 0)
     {
-        char buffer[512] = "";
-
-        while(1)
+        if(info.type == component_node)        
         {
-            memset(buffer, 0, sizeof(buffer));
-            uint16_t id = stream->read<uint16_t>();
-            uint16_t size = stream->read<uint16_t>();
-
-            if(id == component_node_end)
-                break;
-
-            switch (id)
-            {
-                case component_node_begin:
-                    m_nodes[i].name  = stream->read_string(buffer);
-                    m_nodes[i].guid  = stream->read_string(buffer);
-                    m_nodes[i].tag   = stream->read_string(buffer);
-                    m_nodes[i].flags = stream->read<uint64_t>();
-                break;
-
-                case component_transform:
-                    stream->read(size, &m_nodes[i].transform); 
-                break;
-
-                case component_renderer: {
-                    auto component = m_world.allocate_component<components::renderer>(this, buffer);
-
-                    m_nodes[i].renderer.mesh_guid = stream->read_string(buffer);
-                    m_nodes[i].renderer.material_guid = stream->read_string(buffer);
-                    m_nodes[i].renderer.lightmap_guid = stream->read_string(buffer);
-                    m_nodes[i].renderer.lightmap_scale_offset = stream->read<vec4>();
-                } break;
-
-                case component_collider: {
-                   //     auto component = m_world.allocate_component<components::collider>(this, buffer);
-
-                        auto collider_type = stream->read<uint16_t>();
-                        auto trigger_type = stream->read<uint16_t>();   // is trigger
-
-                        // read<float4> center + payload (radius for sphere and capsule), 
-                        // read<float4> payload (extend for box)
-                        // stream->read_string(buffer); // mesh guid
-                        // stream->read_string(buffer); // material guid
-
-                        switch(collider_type)
-                        {
-                            case 0: stream->read<vec4>(); break;                        // sphere:  x,y,z - pos, w - radius
-                            case 1: stream->read<vec4>(); stream->read<vec4>(); break;  // box: center(float4) + extend (float4)
-                            case 2: stream->read<vec4>(); stream->read<float>(); break; // capsule: center_radius(float4) + height(float) 
-                            case 3: stream->read_string(buffer);  break;                // mesh: guid string
-                            default: 
-                                debug::log_warning("(%s) has unknown colider type - %d", m_nodes[i].name, collider_type);
-                            break;
-                        }
-                        auto bbox_min = stream->read<vec3>();
-                } break;
-
-                default: 
-                    stream->read(size, &buffer); 
-                break;
-            }
-        }
-        
-
-  /*    auto chunk = (chunk*)stream->read(sizeof(chunk));
-        auto payload = stream->read(chunk.size);
-
-        auti node = nullptr;
-        icompomemt component = nullptr;
-        switch (chunk.type)
+            auto node = m_world->load_node(this, stream);
+            m_nodes_flat_list.emplace_back(node);
+        } 
+        else if(info.type == component_transform) 
         {
-            case component_node:        node      = m_world.allocate_node<m_nondes>(payload);     break;
+            auto component = m_world->deserialize<transform>(this, stream);
+            m_nodes_flat_list.back()->transform = *component;
+        } 
+        else if(info.type == component_renderer) 
+        {
+            auto component = m_world->deserialize<renderer>(this, stream);
+            m_nodes_flat_list.back()->renderer = *component;
 
-            case component_transform: {
-                int  id  = stream->read<int32_t>();
-                auto component = m_components.allocate<transform>(payload);
-                m_nodes[id].add_component(component);
-            } break;
-
-            case component_renderer:    component = m_world.allocate_component<renderer> (this, payload); break;
-            case component_collider:    component = m_world.allocate_component<collider> (this, payload); break;
-            case component_rigidbody:   component = m_world.allocate_component<rigidbody>(this, payload); break;
-            case component_light:       component = m_world.allocate_component<light>    (this, payload); break;
-            case component_animator:    component = m_world.allocate_component<animator> (this, payload); break;
-            case component_cinematic:   component = m_world.allocate_component<light>    (this, payload); break;
-            case component_navagent:    component = m_world.allocate_component<navagent> (this, payload); break;
-            case component_lodgroup:    component = m_world.allocate_component<lodgroup> (this, payload); break;
-            default:                    component = m_world.allocate_component<unknown>  (this, payload); break;
+            m_meshes.insert(component->mesh_guid.c_str());
+        }/**/
+        else 
+        {
+            stream->seek(info.size, 1);
         }
-        stream->seek(chunk.size, SEEK_CURR);    // anyway rewind to end of chunk
-
-        m_world.allocate_component(scene, node, component);
-        */
     }
 }
 
-void scene::save(const std::string& path)
-{
-    filestream * stream = filestream::open_wb(path.c_str());
 
-    stream->write<uint32_t>((uint32_t)m_nodes_flat_list.size());
+node* scene::create_node(interned_string name, interned_string guid)
+{
+    node * result = m_node_allocator->allocate<node>();
+    result->name = name;
+    result->guid = guid;
+    m_allocated_nodes.push_back(result);
+    return result;
+}
+
+transform * scene::create_transform()
+{
+    return m_transform_allocator->allocate<transform>();
+}
+
+
+
+void scene::save(const std::string_view& path)
+{
+    filestream * stream = filestream::open_wb(path.data());
+
+    scene_header_t header = {};
+        header.magick       = MAKEFOURCC('S', 'C', 'N', '0');
+        header.version      = 1;
+        header.node_count   = (uint32_t)m_nodes_flat_list.size();
+    stream->write(header);
+    // write meta
 
     for (uint32_t i = 0; i < m_nodes_flat_list.size(); i++)
     {
         auto & node = m_nodes_flat_list[i];
+        node->index = i;
 
-        auto chunk_size =   node->name.length() + sizeof(uint16_t) +
-                            node->guid.length() + sizeof(uint16_t) +
-                            node->tag.length()  + sizeof(uint16_t) +
-                            sizeof(uint64_t);
-
-        stream->write_chunk_info(component_node_begin, (uint16_t)chunk_size);
-        stream->write_string((uint16_t)node->name.length(), node->name.data());
-        stream->write_string((uint16_t)node->guid.length(), node->guid.data());
-        stream->write_string((uint16_t)node->tag.length(),  node->tag.data());
-        stream->write(node->flags);
-
-
-        stream->write_chunk(component_transform, sizeof(components::transform), (char*)&node->transform);
-
-        if(!node->renderer.mesh_guid.empty()) {
-            auto chunk_size =   node->renderer.mesh_guid.length() + sizeof(uint16_t) +
-                                node->renderer.material_guid.length() + sizeof(uint16_t) +
-                                node->renderer.lightmap_guid.length() + sizeof(uint16_t) +
-                                sizeof(node->renderer.lightmap_scale_offset);
-
-            stream->write_chunk_info(component_renderer, (uint16_t)chunk_size);
-            stream->write_string((uint16_t)node->renderer.mesh_guid.length(),     node->renderer.mesh_guid.data());
-            stream->write_string((uint16_t)node->renderer.material_guid.length(), node->renderer.material_guid.data());
-            stream->write_string((uint16_t)node->renderer.lightmap_guid.length(), node->renderer.lightmap_guid.data());
-            stream->write(node->renderer.lightmap_scale_offset);
-        }
-
-        stream->write_chunk(component_node_end, 0, 0);
+        m_world->save_node(node, stream);
     }
+    for (uint32_t i = 0; i < m_nodes_flat_list.size(); i++)
+    {
+        auto& node = m_nodes_flat_list[i];
+        m_world->serialize<transform>(&node->transform, stream);
+        if (!node->renderer.mesh_guid.empty())
+            m_world->serialize<renderer>(&node->renderer, stream);
+     }
 
     stream->flush();
-   // stream->write(sizeof(),)
     delete stream;
 }
 
@@ -344,27 +303,57 @@ void scene::update()
 {
 }
 
+void scene_draw_indirect(gfx_command_buffer_t* cmd, camera& camera)
+{
+    struct batch {
+        gfx_pipeline_t * pipeline;
+    };
+    std::vector<batch> m_batches;
+
+    gfx_cmd_push_marker(cmd, "scene_draw_indirect");
+
+    gfx_buffer_t * indirect_buffer = nullptr;
+    gfx_descriptor_set_t * descriptor_set_camera = nullptr;
+    gfx_descriptor_set_t * descriptor_set_instance = nullptr;
+    gfx_descriptor_set_t * descriptor_set_bindless = nullptr;
+
+    for (size_t i = 0; i < m_batches.size(); i++)
+    {
+        gfx_cmd_bind_pipeline(cmd, m_batches[i].pipeline);
+        gfx_cmd_bind_descriptor_set(cmd, 0, descriptor_set_camera);
+        gfx_cmd_bind_descriptor_set(cmd, 1, descriptor_set_instance);
+        gfx_cmd_bind_descriptor_set(cmd, 2, descriptor_set_bindless);
+
+        gfx_cmd_draw_indexed_indirect(cmd, indirect_buffer, 0, m_batches.size(), sizeof(indirect_data_t));
+    }
+
+    gfx_cmd_pop_marker(cmd);
+}
+
 void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
 {
-    gfx_cmd_push_marker(cmd, "test");
+    gfx_cmd_push_marker(cmd, "scene::draw");
     mat4 vp = camera.view_proj();
-    auto visible_renderers = cull(vp); // culling
+    auto visible_renderers = cull(camera); // culling
 
     uint64_t  mvp_location = 0;
     gfx_shader_t * shader = nullptr;
-    for(int i = 0; i < visible_renderers.size(); ++i) 
     {
-        auto & renderer = visible_renderers[i];
-        if(renderer->material->instance->shader != shader) {
-            shader = renderer->material->instance->shader;
-            mvp_location = gfx_uniform_location(shader, "mvp");
-        }
+        measure ms("uniform:update");
+        for(int i = 0; i < visible_renderers.size(); ++i) 
+        {
+            auto & renderer = visible_renderers[i];
+            if(renderer->material->instance->shader != shader) {
+                shader = renderer->material->instance->shader;
+                mvp_location = gfx_uniform_location(shader, "mvp");
+            }
 
-        mat4 mvp = math::mul(vp, renderer->transform);
-        gfx_uniform_set_buffer_data(renderer->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
+            mat4 mvp = math::mul(vp, renderer->transform);
+            gfx_uniform_set_buffer_data(renderer->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
+        }
     }
 
-    gfx_pipeline_t* pipeline = nullptr;
+ /*   gfx_pipeline_t* pipeline = nullptr;
     for (int i = 0; i < visible_renderers.size(); ++i)
     {
         auto & renderer = visible_renderers[i];
@@ -375,6 +364,59 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
         }
         draw_renderer(cmd, renderer);
     }
+*/
+
+
+    gfx_pipeline_t* pipeline = nullptr;
+    gfx_buffer_t * vertex_buffer = nullptr;
+    gfx_buffer_t * index_buffer = nullptr;
+
+    for (int i = 0; i < visible_renderers.size(); ++i)
+    {
+        auto& renderer = visible_renderers[i];
+        if (renderer->material->instance->pipeline != pipeline)
+        {
+            pipeline = renderer->material->instance->pipeline;
+            gfx_cmd_bind_pipeline(cmd, pipeline);
+        }
+
+        auto mesh = renderer->mesh;
+
+        gfx_cmd_bind_descriptor_set(cmd, 0, renderer->material->descriptor_set);
+
+        if(vertex_buffer != mesh->vertex_buffer){
+            vertex_buffer = mesh->vertex_buffer;
+            gfx_cmd_bind_vertex_buffer(cmd, 0, 0, vertex_buffer);
+        }
+
+        if(index_buffer != mesh->index_buffer)
+        {
+            index_buffer = mesh->index_buffer;
+            gfx_cmd_bind_index_buffer(cmd, mesh->index_format, 0, mesh->index_buffer);
+        }
+
+        if(mesh->index_format == gfx_index_format_32)
+        {
+            debug::log_error("fuck");
+        }
+
+        int32_t start_idx = 0;
+        int32_t vertex_offset = mesh->vertex_buffer_offset/mesh->vertex_stride;
+        int32_t index_offset = mesh->index_buffer_offset/sizeof(uint16_t);
+
+        for (size_t sub_idx = 0; sub_idx < mesh->submesh_count; sub_idx++)
+        {
+            uint32_t count = mesh->submeshes[sub_idx];
+            gfx_cmd_draw_indexed(cmd, count, index_offset + start_idx, 1, vertex_offset);
+            start_idx += mesh->submeshes[sub_idx];
+        }
+
+        if (mesh->submesh_count == 0)
+        {
+            gfx_cmd_draw_indexed(cmd, mesh->index_count, index_offset, 1, vertex_offset);
+        }
+    }
+
     gfx_cmd_pop_marker(cmd);
 }
 
@@ -403,19 +445,31 @@ struct renderer_sort
         return a->material->instance->pipeline < b->material->instance->pipeline;
     }
 };
+#include <execution>
 
-const std::vector<renderer_t*>& scene::cull(const mat4& vp)
+bool DistanceCullSphere(const vec3& camPos, const vec3& sphereCenter, float radius, float maxDistance) {
+    float distSq = math::distance_sq(camPos, sphereCenter);
+    float maxDistSq = (maxDistance + radius);// * (maxDistance + radius);
+    return distSq > maxDistSq;
+}
+
+const std::vector<renderer_t*>& scene::cull(const camera& camera)
 {
-  //  PROFILE_SAMPLE("\nscene::cull");
-
+    measure ms("scene::cull");
     m_visibles.clear();
-    frustum fr = frustum::from_view_proj(vp);
+    frustum fr = frustum::from_view_proj(camera.view_proj());
 
     for (int i = 0; i < m_renderers.size(); ++i)
     {
         auto & renderer = m_renderers[i];
-        //if(renderer.is_in_lod)
-        //  continue;
+        auto c = renderer.bounds.center();
+        auto r = math::length(renderer.bounds.extends());
+        auto d = math::distance(c, camera._pos);
+
+        float lodMetric = r / d;
+
+        if(lodMetric < 0.005)
+            continue;
 
         if (!frustum::check_bbox(fr, renderer.world_bounds))
             continue;
@@ -423,7 +477,27 @@ const std::vector<renderer_t*>& scene::cull(const mat4& vp)
         m_visibles.push_back(&renderer);
     }
 
-    std::sort(m_visibles.begin(), m_visibles.end(), renderer_sort());
+     std::sort(std::execution::par, m_visibles.begin(), m_visibles.end(), renderer_sort());
+    //std::sort(m_visibles.begin(), m_visibles.end(), renderer_sort());
+    /*
+    int batches_by_mesh = 0;
+    int batches_by_material = 0;
+    if (m_visibles.size()  > 10)
+    {
+        auto mesh = m_visibles.front()->mesh;
+        auto material = m_visibles.front()->material->instance;
+        for(int i = 0; i < m_visibles.size(); ++i)
+        {
+            if(mesh != m_visibles[i]->mesh) {
+                batches_by_mesh++;
+                mesh = m_visibles[i]->mesh;
+            }
+            if (material != m_visibles[i]->material->instance) {
+                material = m_visibles[i]->material->instance;
+                batches_by_material++;
+            }
+        }
+    }*/
 
     return m_visibles;
 

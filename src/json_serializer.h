@@ -232,7 +232,7 @@ namespace json
                    /* else if constexpr (std::is_integral_v<member_type>)             // bool, int, int16m int32...
                     {
                         object.*arg->member = (member_type)value.ToInt();
-                    }/* */
+                    } */
                     else if constexpr (detail::is_vector<member_type>::value)       // vector
                     {
                         detail::jsonread_vec2(node->value, object.*arg->member);
@@ -366,9 +366,9 @@ namespace reflection
                 base_field = arg;
             });
 
-        auto feld_type = typeid(U).name();
+        auto field_type = typeid(U).name();
 
-        if (base_field != nullptr && !strcmp(feld_type, base_field->type_name))
+        if (base_field != nullptr && !strcmp(field_type, base_field->type_name))
         {
             auto field = (json::detail::field_info_t<T, U>*)base_field;
             return property<T, U>{ obj, field };

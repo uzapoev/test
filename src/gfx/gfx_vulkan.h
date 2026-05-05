@@ -16,8 +16,10 @@
 extern "C" {
 #endif*/
 
- 
-#define   MAX_DESCRIPTOR_POOL_SET_SIZE      (1024)
+#define     MAX_TIMESTAMP_QUERIES               (128)
+#define     MAX_TIMESTAMP_NESTING_LEVEL         (16)
+
+#define     MAX_DESCRIPTOR_POOL_SET_SIZE        (1024)
 
 /**/
 struct vk_descriptor_pool_t;
@@ -30,10 +32,10 @@ typedef struct vk_context_t
 {
     gfx_context_t                       handle;
 
-    VkInstance                          instance            = nullptr;
-    VkDevice                            device              = nullptr;
-    VkPhysicalDevice                    physicaldevice      = nullptr;
-    VkSurfaceKHR                        surface             = nullptr;
+    VkInstance                          instance            = VK_NULL_HANDLE;
+    VkDevice                            device              = VK_NULL_HANDLE;
+    VkPhysicalDevice                    physicaldevice      = VK_NULL_HANDLE;
+    VkSurfaceKHR                        surface             = VK_NULL_HANDLE;
     uint32_t                            frame_idx           = 0;
     uint32_t                            frame_number        = 0;
 
@@ -211,6 +213,7 @@ typedef struct vk_descriptor_set_t {
     vk_shader_t *                       shader;
     vk_descriptor_pool_t *              pool;
     uint8_t *                           uboptr;
+    uint32_t                            ubo_offset;
 
     VkBool32                            isfree;
     VkBool32                            dirty;
@@ -220,6 +223,7 @@ typedef struct vk_descriptor_set_t {
     VkWriteDescriptorSet *              writes;
     struct vk_write_info_t *            write_infos;
 } vk_descriptor_set_t;
+
 
 
 typedef struct vk_command_buffer_t {
@@ -235,7 +239,15 @@ typedef struct vk_command_buffer_t {
     // replace to struct begin+end+name
     VkQueryPool                         time_query_pool     = VK_NULL_HANDLE;
     uint32_t                            time_query_index    = 0;
-    uint32_t                            stamp_count;
+    uint32_t                            stamp_count         = 0;
+
+    uint32_t                            time_query_stack[MAX_TIMESTAMP_NESTING_LEVEL];
+    int32_t                             time_query_stack_top = 0; // -1 if empty
+
+    uint32_t                            time_query_current_index = 0;
+    uint64_t                            time_query_results[MAX_TIMESTAMP_QUERIES];
+    const char*                         marker_names[MAX_TIMESTAMP_QUERIES];
+
 } vk_command_buffer_t;
 
 
@@ -286,7 +298,7 @@ gfx_api void     vk_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t
 
 gfx_api void     vk_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
 
-gfx_api void     vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, gfx_descriptor_set_t* descriptor);
+gfx_api void     vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
 
 gfx_api void     vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
 
@@ -294,7 +306,7 @@ gfx_api void     vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot,
 
 gfx_api void     vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
 
-gfx_api void     vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count);
+gfx_api void     vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
 
 gfx_api void     vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
