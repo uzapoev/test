@@ -1,0 +1,245 @@
+================================================================================
+ GFX HAL - STATUS (2026-05-15)
+ Backends: Vulkan | Metal | WebGPU | DX12
+ Legend: Y=impl  ~=stub/empty  N=missing  /=no-op by design
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+ API SURFACE (gfx.h)
+────────────────────────────────────────────────────────────────────────────────
+
+CONTEXT / DEVICE
+  gfx_init                         - create context (instance, device, queues)
+  gfx_get_caps                     - query gpu caps (texture compression, rt, etc.)
+
+SWAPCHAIN
+  gfx_create_swapchain             - create window surface + swapchain
+  gfx_acquire_img                  - get next backbuffer render target
+  gfx_present_img                  - present to screen
+
+RESOURCE CREATION
+  gfx_create_buffer2               - vertex / index / uniform / storage / indirect
+  gfx_create_shader2               - from spirv (vk/wgpu) or MSL source (metal)
+  gfx_create_sampler2              - filter + address mode + anisotropy
+  gfx_create_texture2              - 2d / cube / array / 3d + compressed formats
+  gfx_create_pipeline2             - raster pipeline (vs+fs + vertex layout + render states)
+  gfx_create_compute_pipeline2     - compute shader pipeline
+  gfx_create_render_target2        - offscreen render target (color + depth attachments)
+  gfx_create_descriptor_set2       - binding set per shader
+  gfx_create_cmd2                  - command buffer
+
+RESOURCE DESTRUCTION
+  gfx_destroy_buffer
+  gfx_destroy_shader
+  gfx_destroy_sampler
+  gfx_destroy_texture
+  gfx_destroy_pipeline
+  gfx_destroy_render_target
+  gfx_destroy_descriptor_set
+  gfx_destroy_cmd
+  [MISSING] gfx_destroy_compute_pipeline  -- no public API, no pfn slot
+
+BUFFER / TEXTURE UPDATES
+  gfx_update_buffer_data           - cpu -> gpu (staging copy or mapped)
+  gfx_update_image_data            - [WIP] update texture region via staging
+  gfx_texture_get_data             - [WIP] readback texture to cpu
+  gfx_texture_generate_mipmap      - [WIP] auto-generate mipmaps
+  gfx_blit_image                   - [WIP] copy / blit between textures
+
+SHADER UNIFORMS / BINDINGS
+  gfx_uniform_location             - lookup binding handle by name
+  gfx_uniform_set_buffer_data      - write ubo fields inline (mapped)
+  gfx_uniform_set_buffer           - bind storage / ubo buffer object
+  gfx_uniform_set_texture          - bind texture to set
+  gfx_uniform_set_sampler          - bind sampler to set
+  gfx_shader_get_uniforms          - enumerate shader uniforms  [BROKEN: assert(false)]
+
+COMMAND BUFFER
+  gfx_cmd_begin                    - start recording
+  gfx_cmd_begin_pass               - begin render pass
+  gfx_cmd_end_pass                 - end render pass
+  gfx_cmd_end                      - stop recording
+
+  gfx_cmd_scissor                  - set scissor rect
+  gfx_cmd_viewport                 - set viewport
+
+  gfx_cmd_bind_pipeline            - bind raster pipeline
+  gfx_cmd_bind_descriptor_set      - bind uniform/texture/sampler set
+  gfx_cmd_bind_index_buffer        - bind index buffer (16/32 bit)
+  gfx_cmd_bind_vertex_buffer       - bind vertex buffer to slot
+
+  gfx_cmd_draw                     - non-indexed draw
+  gfx_cmd_draw_indexed             - indexed draw
+  gfx_cmd_draw_indexed_indirect    - gpu-driven indexed indirect draw
+
+  gfx_cmd_dispatch_compute         - dispatch compute shader
+
+  gfx_cmd_push_marker              - debug label push (GPU timeline)
+  gfx_cmd_pop_marker               - debug label pop
+
+  gfx_cmd_buffer_barrier           - explicit buffer memory barrier
+  gfx_cmd_texture_barrier          - explicit texture layout/memory barrier
+
+  gfx_update_bindless_texture      - [MISSING] no pfn slot, no implementation
+
+SUBMIT / SYNC
+  gfx_submit_cmd                   - submit cmd with wait options (idle/fence/queue)
+  gfx_submit                       - [MISSING] submit + return fence  (declared, unimpl)
+  gfx_wait                         - [MISSING] wait on fence          (declared, unimpl)
+
+UTILITY
+  gfx_utils_thread_id
+  gfx_utils_stack_trace / stack_trace_names
+  gfx_utils_hash_16
+  gfx_utils_image_layer_size
+  gfx_utils_image_row_pitch
+  gfx_utils_align_up
+  gfx_pool_create / destroy / alloc / free / map / get_size / get_capacity
+  gfx_to_string (buffer_usage / shader_stage / texture_type / pixel_format)
+
+
+================================================================================
+ IMPLEMENTATION STATUS TABLE
+================================================================================
+
+ Function                         | Vulkan | Metal | WebGPU | DX12
+------------------------------------|--------|-------|--------|------
+ init                               |   Y    |   Y   |   Y    |  ~[1]
+ get_caps                           |   Y    |   Y   |   N[2] |  ~[1]
+ create_swapchain                   |   Y    |   Y   |   Y    |  ~[1]
+ acquire_img                        |   Y    |   Y   |   Y    |  ~[1]
+ present_img                        |   Y    |   /   |   Y    |  ~[1]
+------------------------------------|--------|-------|--------|------
+ create_buffer                      |   Y    |   Y   |   Y    |  ~[1]
+ create_shader                      |   Y    |   Y   |   Y    |  ~[1]
+ create_sampler                     |   Y    |   Y   |   Y    |  ~[1]
+ create_texture                     |   Y    |   Y   |   Y    |  ~[1]
+ create_pipeline                    |   Y    |   Y   |   Y    |  ~[1]
+ create_compute_pipeline            |   Y    |   ~   |   ~[3] |  ~[1]
+ create_render_target               |   ~[4] |   ~[4]|   ~[3] |  ~[1]
+ create_descriptor_set              |   Y    |   Y   |   Y    |  ~[1]
+ create_cmd                         |   Y    |   Y   |   Y    |  ~[1]
+------------------------------------|--------|-------|--------|------
+ destroy_buffer                     |   Y    |   Y   |   Y    |  ~[1]
+ destroy_shader                     |   Y    |   Y   |   Y    |  ~[1]
+ destroy_sampler                    |   Y    |   Y   |   Y    |  ~[1]
+ destroy_texture                    |   Y    |   Y   |   Y    |  ~[1]
+ destroy_pipeline                   |   Y    |   Y   |   Y    |  ~[1]
+ destroy_render_target              |   Y    |   ~[4]|   Y    |  ~[1]
+ destroy_descriptor_set             |   Y    |   ~[4]|   Y    |  ~[1]
+ destroy_cmd                        |   Y    |   ~[4]|   Y    |  ~[1]
+ destroy_compute_pipeline           |   N[5] |   N[5]|   N[5] |  N[5]
+------------------------------------|--------|-------|--------|------
+ update_buffer_data                 |   Y    |   Y[6]|   Y    |  ~[1]
+ update_image_data                  |   ~    |   ~   |   ~    |  ~
+ texture_get_data                   |   ~    |   ~   |   ~    |  ~
+ texture_generate_mipmap            |   Y    |   Y   |  ~[W]  |  ~
+ blit_image                         |   Y    |   Y   |   Y    |  ~
+------------------------------------|--------|-------|--------|------
+ uniform_location                   |   Y    |   Y   |   Y    |  ~[1]
+ uniform_set_buffer_data            |   Y    |   Y   |   Y    |  ~[1]
+ uniform_set_buffer                 |   Y    |  ~[7] |   Y    |  ~[1]
+ uniform_set_texture                |   Y    |   Y   |   Y    |  ~[1]
+ uniform_set_sampler                |   Y    |  ~[7] |   Y    |  ~[1]
+ shader_get_uniforms                |   N[8] |   N[8]|   N[8] |  N[8]
+------------------------------------|--------|-------|--------|------
+ cmd_begin                          |   Y    |   Y   |   Y    |  ~[1]
+ cmd_begin_pass                     |   Y    |   Y[9]|   Y    |  ~[1]
+ cmd_end_pass                       |   Y    |   Y   |   Y    |  ~[1]
+ cmd_end                            |   Y    |   Y   |   Y    |  ~[1]
+ cmd_scissor                        |   Y    |   Y   |   Y    |  ~[1]
+ cmd_viewport                       |   Y    |   Y   |   Y    |  ~[1]
+ cmd_bind_pipeline                  |   Y    |   Y   |   Y    |  ~[1]
+ cmd_bind_descriptor_set            |   Y    |   Y   |   Y    |  ~[1]
+ cmd_bind_index_buffer              |   Y    |   Y   |   Y    |  ~[1]
+ cmd_bind_vertex_buffer             |   Y    |   Y   |   Y    |  ~[1]
+ cmd_draw                           |   Y    |  Y[10]|   Y    |  ~[1]
+ cmd_draw_indexed                   |   Y    |  Y[10]|   Y    |  ~[1]
+ cmd_draw_indexed_indirect          |  N[11] |   ~   |   Y[12]|  ~[1]
+ cmd_dispatch_compute               |   Y    |   ~   |   Y    |  ~[1]
+ cmd_push_marker                    |   Y    |   Y   |   /    |  ~[1]
+ cmd_pop_marker                     |   Y    |   Y   |   /    |  ~[1]
+ cmd_buffer_barrier                 |  ~[13] |   /   |   /    |  ~[1]
+ cmd_texture_barrier                |  ~[13] |   /   |   /    |  ~[1]
+ update_bindless_texture            |   N    |   N   |   N    |  N
+------------------------------------|--------|-------|--------|------
+ submit_cmd                         |   Y    |   Y   |   Y    |  ~[1]
+ submit (fence)                     |   N    |   N   |   N    |  N
+ wait (fence)                       |   N    |   N   |   N    |  N
+
+
+================================================================================
+ NOTES
+================================================================================
+
+[1]  DX12 is scaffolding only. All functions allocate empty structs; no real
+     D3D12 calls are made. Logs "DX12 backend is stubbed" on init.
+
+[2]  wgpu_get_caps not wired up in gfx.cpp (pfn_get_caps left null for WebGPU).
+
+[3]  Logs error: "wgpu_create_compute_pipeline not implemented" /
+     "wgpu_create_render_target not implemented". Sets output to null.
+
+[4]  Metal function has empty body ({}). No resource allocated / freed.
+
+[5]  No gfx_destroy_compute_pipeline in public API and no pfn slot.
+     compute pipeline memory is leaked at shutdown.
+
+[6]  Metal update_buffer_data works only for Shared/Managed storage mode.
+     Private (GPU-only) buffer path stubs with gfx_stub_not_implemented.
+
+[7]  metal_uniform_set_buffer: validation only, no actual binding recorded.
+     metal_uniform_set_sampler: handle validated but sampler not written to set.
+
+[8]  gfx_shader_get_uniforms in gfx.cpp is assert(false). Not routed through
+     pfn table at all.
+
+[9]  metal_cmd_begin_pass has hardcoded clear color (0.3, 0.6, 0.9, 1.0).
+     Clear color should come from gfx_render_pass_desc_t.
+
+[10] metal_cmd_draw / metal_cmd_draw_indexed hardcode MTLPrimitiveTypeTriangle,
+     ignoring topology from pipeline state.
+
+[11] vk_cmd_draw_indexed_indirect not implemented in gfx_vulkan.cpp and not
+     wired in gfx.cpp. Calling it will crash (null pfn).
+
+[12] wgpu_cmd_draw_indexed_indirect emulates multi-draw via loop (N calls).
+     WebGPU spec doesn't guarantee multi-draw in one indirect call.
+
+[13] vk_cmd_buffer_barrier and vk_cmd_texture_barrier have empty bodies.
+     Actual VkPipelineBarrier calls are missing — synchronization is broken.
+
+[W]  wgpu_texture_generate_mipmap logs a warning and returns. WebGPU has no
+     native mipmap generation command. Requires a custom downsample pass per level.
+
+
+================================================================================
+ TODO PRIORITY
+================================================================================
+
+HIGH (correctness / crash risk)
+  - vk_cmd_draw_indexed_indirect: implement with vkCmdDrawIndexedIndirect
+  - vk_cmd_buffer_barrier / vk_cmd_texture_barrier: add VkPipelineBarrier calls
+  - vk_create_render_target: implement (currently empty, needed for offscreen)
+  - gfx_destroy_compute_pipeline: add public API + pfn slot + all backends
+  - metal_cmd_begin_pass: expose clear color/depth via descriptor instead of hardcode
+  - metal_cmd_draw / cmd_draw_indexed: use topology from pipeline state
+
+MEDIUM (missing features)
+  - wgpu texture_generate_mipmap: requires custom downsample render/compute pass per mip level
+  - texture_get_data: implement readback (staging + map)
+  - update_image_data: implement staging-copy path for all backends
+  - metal compute pipeline: implement metal_create_compute_pipeline
+  - wgpu compute pipeline + render target: implement
+  - metal destroy_render_target / destroy_descriptor_set / destroy_cmd: implement
+  - metal uniform_set_buffer / uniform_set_sampler: complete binding
+  - wgpu get_caps: wire pfn_get_caps = wgpu_get_caps (function exists, just unwired)
+
+LOW (API completeness)
+  - gfx_submit + gfx_wait: add pfn slots + implement per backend (timeline semaphore vk,
+                            MTLSharedEvent metal, WGPUFuture wgpu)
+  - gfx_cmd_push_constant: add pfn slot + implement (vkCmdPushConstants / metal setBytes /
+                            wgpu no native push constants - emulate via uniform buffer)
+  - gfx_update_bindless_texture: add pfn slot + implement (bindless descriptor arrays)
+  - gfx_shader_get_uniforms: implement (route through pfn, return from shader cache)
+  - DX12: real implementation (device creation, heaps, command lists, PSOs, etc.)

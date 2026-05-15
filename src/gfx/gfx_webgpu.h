@@ -208,6 +208,11 @@ gfx_api void     wgpu_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_
 gfx_api void     wgpu_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 
 gfx_api void     wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+gfx_api void     wgpu_update_image_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+gfx_api void     wgpu_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api void     wgpu_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
+gfx_api void     wgpu_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+gfx_api void     wgpu_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
 
 gfx_api uint64_t wgpu_uniform_location(gfx_shader_t* shader, const char* name);
 gfx_api void     wgpu_uniform_update_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t offset);
@@ -228,10 +233,14 @@ gfx_api void     wgpu_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_fo
 gfx_api void     wgpu_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
 gfx_api void     wgpu_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
 gfx_api void     wgpu_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+gfx_api void     wgpu_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t * buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
 gfx_api void     wgpu_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
 gfx_api void     wgpu_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker);
 gfx_api void     wgpu_cmd_pop_marker(gfx_command_buffer_t* cmd);
+
+gfx_api void     wgpu_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+gfx_api void     wgpu_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
                  
 gfx_api void     wgpu_cmd_end(gfx_command_buffer_t* cmd);
 gfx_api void     wgpu_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);

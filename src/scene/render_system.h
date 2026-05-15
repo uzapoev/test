@@ -60,6 +60,7 @@ typedef struct renderer_t {
     vec4                    sphere_bound;
 } renderer_t;
 
+
 typedef struct camera_data {
     mat4                    proj;
     mat4                    view;
@@ -70,10 +71,15 @@ typedef struct camera_data {
     vec4                    view_port;
 }camera_data;
 
+typedef struct mesh_info {
+};
+
 typedef struct instance_data {
     mat4                    model;
     vec4                    sphere_bounds;
     uint32_t                pipeline_id;
+    uint32_t                mesh_id;            // mesh id
+    uint32_t                cell_id;            // spatial struct(cell id in grid struct)
 } instance_data;
 
 

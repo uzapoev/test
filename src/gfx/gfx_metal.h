@@ -2,6 +2,7 @@
 #define __gfx_metal_h__
 
 #include "gfx.h"
+#include "gfx_stub.h"
 
 #if METAL_AVAILABLE
 #import <Foundation/Foundation.h>
@@ -560,7 +561,7 @@ void metal_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader
         NSString* src = [NSString stringWithUTF8String : (char*)desc->stages[i].data];
         id<MTLLibrary> mtllib = [mctx->device newLibraryWithSource : src options : options error : &error];
 
-        const char entry[PATH_MAX] = "";
+        char entry[PATH_MAX] = "";
         switch (stage)
         {
             case gfx_shader_vertex: {
@@ -761,6 +762,80 @@ void metal_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* de
 
 }
 
+void metal_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline)
+{
+    auto mctx = from_ctx(ctx);
+    (void)desc;
+    gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_create_compute_pipeline");
+    *out_pipeline = nullptr;
+}
+
+void metal_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
+{
+    auto mctx = from_ctx(ctx);
+    auto mbuffer = (metal_buffer_t*)buffer;
+    if (mctx == nullptr || mbuffer == nullptr || mbuffer->buffer == nullptr || data == nullptr || size == 0)
+        return;
+
+    // Only safe for shared/managed buffers. For private buffers a staging + blit is needed.
+    void* dst = [mbuffer->buffer contents];
+    if (dst == nullptr) {
+        gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_update_buffer_data (private buffer path)");
+        return;
+    }
+
+    memcpy((uint8_t*)dst + offset, data, size);
+}
+
+void metal_update_image_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+{
+    auto mctx = from_ctx(ctx);
+    gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_update_image_data");
+}
+
+void metal_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* /*texture*/, uint32_t /*idx*/)
+{
+    auto mctx = from_ctx(ctx);
+    gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_update_bindless_texture");
+}
+
+void metal_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
+{
+    auto mctx = from_ctx(ctx);
+    gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_texture_get_data");
+}
+
+void metal_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
+{
+    auto mctx = from_ctx(ctx);
+    metal_texture_t* mtex = (metal_texture_t*)texture;
+    if (mtex == nullptr || mtex->texture == nullptr) return;
+    if (mtex->texture.mipmapLevelCount <= 1) return;
+
+    id<MTLCommandBuffer> cbuf = [mctx->cmd_queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cbuf blitCommandEncoder];
+    [blit generateMipmapsForTexture:mtex->texture];
+    [blit endEncoding];
+    [cbuf commit];
+    [cbuf waitUntilCompleted];
+}
+
+void metal_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
+{
+    auto mctx = from_ctx(ctx);
+    metal_texture_t* msrc = (metal_texture_t*)src;
+    metal_texture_t* mdst = (metal_texture_t*)dst;
+    if (msrc == nullptr || mdst == nullptr) return;
+    if (msrc->texture == nullptr || mdst->texture == nullptr) return;
+
+    id<MTLCommandBuffer> cbuf = [mctx->cmd_queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cbuf blitCommandEncoder];
+    [blit copyFromTexture:msrc->texture toTexture:mdst->texture];
+    [blit endEncoding];
+    [cbuf commit];
+    [cbuf waitUntilCompleted];
+}
+
 
 void metal_create_descriptor_set_pool(metal_context_t* ctx, metal_shader_t* shader, uint32_t capacity, metal_descriptor_set_pool_t** out_pool)
 {
@@ -882,6 +957,7 @@ void metal_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)
     [mbuffer->buffer release];
 #endif
     mbuffer->buffer = nullptr;
+    free(mbuffer);
 }
 
 
@@ -1096,6 +1172,36 @@ void metal_cmd_end_pass(gfx_command_buffer_t* cmd)
     [mcmd->encoder endEncoding] ;
 }
 
+void metal_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    if (mcmd == nullptr || mcmd->encoder == nullptr)
+        return;
+
+    MTLScissorRect rc;
+    rc.x = x;
+    rc.y = y;
+    rc.width = w;
+    rc.height = h;
+    [mcmd->encoder setScissorRect:rc];
+}
+
+void metal_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    if (mcmd == nullptr || mcmd->encoder == nullptr)
+        return;
+
+    MTLViewport vp;
+    vp.originX = (double)x;
+    vp.originY = (double)y;
+    vp.width = (double)w;
+    vp.height = (double)h;
+    vp.znear = 0.0;
+    vp.zfar = 1.0;
+    [mcmd->encoder setViewport:vp];
+}
+
 
 void metal_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline)
 {
@@ -1199,6 +1305,49 @@ void metal_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint3
         indexBufferOffset : 0];
 }
 
+void metal_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride)
+{
+    // TODO: implement with MTLIndirectCommandBuffer or indirect args buffer depending on format.
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    (void)buffer; (void)offset; (void)draw_count; (void)stride;
+    gfx_stub_not_implemented((mcmd && mcmd->mctx) ? mcmd->mctx->dbglog : nullptr, "metal_cmd_draw_indexed_indirect");
+}
+
+void metal_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z)
+{
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    (void)x; (void)y; (void)z;
+    gfx_stub_not_implemented((mcmd && mcmd->mctx) ? mcmd->mctx->dbglog : nullptr, "metal_cmd_dispatch_compute");
+}
+
+void metal_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
+{
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    if (mcmd == nullptr || mcmd->encoder == nullptr || marker == nullptr)
+        return;
+    [mcmd->encoder pushDebugGroup:[NSString stringWithUTF8String:marker]];
+}
+
+void metal_cmd_pop_marker(gfx_command_buffer_t* cmd)
+{
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    if (mcmd == nullptr || mcmd->encoder == nullptr)
+        return;
+    [mcmd->encoder popDebugGroup];
+}
+
+void metal_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst)
+{
+    // Metal handles most hazards implicitly; explicit barriers depend on resource usage tracking.
+    // Stub for API parity.
+    (void)cmd; (void)buffers; (void)count; (void)src; (void)dst;
+}
+
+void metal_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst)
+{
+    (void)cmd; (void)textures; (void)count; (void)src; (void)dst;
+}
+
 void metal_cmd_end(gfx_command_buffer_t* cmd)
 {
     metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
@@ -1234,6 +1383,7 @@ inline void gfx_init_metal(gfx_api_pfn* func_table)
     func_table->pfn_create_sampler = metal_create_sampler;
     func_table->pfn_create_texture = metal_create_texture;
     func_table->pfn_create_pipeline = metal_create_pipeline;
+    func_table->pfn_create_compute_pipeline = metal_create_compute_pipeline;
     func_table->pfn_create_render_target = metal_create_render_target;
     func_table->pfn_create_descriptor_set = metal_create_descriptor_set;
     func_table->pfn_create_cmd = metal_create_cmd;
@@ -1247,6 +1397,13 @@ inline void gfx_init_metal(gfx_api_pfn* func_table)
     func_table->pfn_destroy_descriptor_set = metal_destroy_descriptor_set;
     func_table->pfn_destroy_cmd = metal_destroy_cmd;
 
+    func_table->pfn_update_buffer_data = metal_update_buffer_data;
+    func_table->pfn_update_image_data = metal_update_image_data;
+    func_table->pfn_texture_get_data = metal_texture_get_data;
+    func_table->pfn_texture_generate_mipmap = metal_texture_generate_mipmap;
+    func_table->pfn_blit_image = metal_blit_image;
+    func_table->pfn_update_bindless_texture = metal_update_bindless_texture;
+
     func_table->pfn_uniform_location = metal_uniform_location;
     func_table->pfn_uniform_set_buffer = metal_uniform_set_buffer;
     func_table->pfn_uniform_set_buffer_data = metal_uniform_set_buffer_data;
@@ -1258,15 +1415,22 @@ inline void gfx_init_metal(gfx_api_pfn* func_table)
     func_table->pfn_cmd_begin_pass = metal_cmd_begin_pass;
     func_table->pfn_cmd_end_pass = metal_cmd_end_pass;
 
-    //  void     (*pfn_cmd_scissor) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-    //  void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    func_table->pfn_cmd_scissor = metal_cmd_scissor;
+    func_table->pfn_cmd_viewport = metal_cmd_viewport;
     func_table->pfn_cmd_bind_pipeline = metal_cmd_bind_pipeline;//gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
     func_table->pfn_cmd_bind_descriptor_set = metal_cmd_bind_descriptor_set;
     func_table->pfn_cmd_bind_buffer_ib = metal_cmd_bind_buffer_ib;
     func_table->pfn_cmd_bind_buffer_vb = metal_cmd_bind_buffer_vb;
     func_table->pfn_cmd_draw = metal_cmd_draw;
     func_table->pfn_cmd_draw_indexed = metal_cmd_draw_indexed;
-    //func_table->pfn_cmd_dispatch_compute
+    func_table->pfn_cmd_draw_indexed_indirect = metal_cmd_draw_indexed_indirect;
+    func_table->pfn_cmd_dispatch_compute = metal_cmd_dispatch_compute;
+
+    func_table->pfn_cmd_push_marker = metal_cmd_push_marker;
+    func_table->pfn_cmd_pop_marker = metal_cmd_pop_marker;
+
+    func_table->pfn_cmd_buffer_barrier = metal_cmd_buffer_barrier;
+    func_table->pfn_cmd_texture_barrier = metal_cmd_texture_barrier;
 
     func_table->pfn_cmd_end = metal_cmd_end;
     func_table->pfn_submit_cmd = metal_submit_cmd;

@@ -18,7 +18,7 @@ extern "C" {
 
 #define     MAX_TIMESTAMP_QUERIES               (128)
 #define     MAX_TIMESTAMP_NESTING_LEVEL         (16)
-
+#define     MAX_BATCH_BARRIERS                  (64)
 #define     MAX_DESCRIPTOR_POOL_SET_SIZE        (1024)
 
 /**/
@@ -63,6 +63,11 @@ typedef struct vk_context_t
     } semaphores[2];
 
     VkSemaphore                         frame_timeline_semaphore;
+
+    uint32_t                            bindless_max_texture_count;
+    VkDescriptorSet                     bindless_descriptor_set;
+    VkDescriptorPool                    bindless_descriptor_pool;
+    VkDescriptorSetLayout               bindless_descriptor_set_layout;
 
     gfx_callback                        dbg_log                 = nullptr;
 
@@ -126,8 +131,9 @@ typedef struct vk_texture_t {
     VkImageView                         view;
     VkDeviceMemory                      memory;
     uint32_t                            memory_size;
-
-    //gfx_linked_list_t*                consumers; // secriptor_sets
+    uint32_t                            width;
+    uint32_t                            height;
+    uint32_t                            mip_levels;
 } vk_texture_t;
 
 
@@ -281,6 +287,13 @@ gfx_api void     vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_se
 gfx_api void     vk_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 
 gfx_api void     vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+
+// textures / mipmaps / blit (WIP)
+gfx_api void     vk_update_image_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+gfx_api void     vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api void     vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
+gfx_api void     vk_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+gfx_api void     vk_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
 
 gfx_api uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name);
 gfx_api void     vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);

@@ -111,11 +111,18 @@ set(SOURCES
     src/platform/platform.h
     src/gfx/gfx.h
     src/gfx/gfx.cpp
+    src/gfx/gfx_dx12.h
+    src/gfx/gfx_dx12.cpp
     src/gfx/gfx_memory.h
+    src/gfx/gfx_metal.h
     src/gfx/gfx_vulkan.cpp
+    src/gfx/gfx_vulkan.h
     src/gfx/gfx_webgpu.cpp
+    src/gfx/gfx_webgpu.h
     src/scene/scene.cpp
     src/scene/scene.h
+    src/scene/render_system.cpp
+    src/scene/render_system.h
     src/gason.cpp
     src/gason.h
     src/json_serializer.h

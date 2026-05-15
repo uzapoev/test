@@ -9,6 +9,7 @@
 #include <math.h>
 #include <memory.h> // memset
 #include <thread>
+#include "gfx_stub.h"
 
 #ifndef __cplusplus
     #define nullptr     NULL
@@ -199,67 +200,6 @@ size_t gfx_pool_has_free(gfx_handle_pool_t* pool) {
 
 #pragma region gfx
 
-typedef struct gfx_api_pfn 
-{
-    void     (*pfn_init) (gfx_settings_t* settings, gfx_context_t** ctx);
-    void     (*pfn_create_swapchain) (gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain);
-    
-    void     (*pfn_get_caps)(gfx_context_t* ctx, gfx_caps_t * caps);
-
-    int32_t  (*pfn_acquire_img)(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target);
-    void     (*pfn_present_img)(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx);
-
-    void     (*pfn_create_buffer) (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
-    void     (*pfn_create_shader) (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
-    void     (*pfn_create_sampler) (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
-    void     (*pfn_create_texture) (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
-    void     (*pfn_create_pipeline) (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** texture);
-    void     (*pfn_create_compute_pipeline) (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
-    void     (*pfn_create_render_target) (gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-    void     (*pfn_create_descriptor_set) (gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
-    void     (*pfn_create_cmd) (gfx_context_t* ctx, gfx_command_buffer_t** cmd);
-
-    void     (*pfn_destroy_buffer) (gfx_context_t* ctx, gfx_buffer_t* buffer);
-    void     (*pfn_destroy_shader) (gfx_context_t* ctx, gfx_shader_t* buffer);
-    void     (*pfn_destroy_sampler) (gfx_context_t* ctx, gfx_sampler_t* sampler);
-    void     (*pfn_destroy_texture) (gfx_context_t* ctx, gfx_texture_t* texture);
-    void     (*pfn_destroy_pipeline) (gfx_context_t* ctx, gfx_pipeline_t* texture);
-    void     (*pfn_destroy_render_target) (gfx_context_t* ctx, gfx_render_target_t* texture);
-    void     (*pfn_destroy_descriptor_set) (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
-    void     (*pfn_destroy_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-
-    uint64_t (*pfn_uniform_location)        (gfx_shader_t* shader, const char* name);
-    void     (*pfn_uniform_set_buffer)      (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
-    void     (*pfn_uniform_set_buffer_data) (gfx_descriptor_set_t* set, uint64_t handle, void* buffer, uint32_t size);
-    void     (*pfn_uniform_set_texture)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
-    void     (*pfn_uniform_set_sampler)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
-
-    void     (*pfn_update_buffer_data)      (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-
-    void     (*pfn_cmd_begin) (gfx_command_buffer_t* cmd);
-    void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_render_target_t* target);
-    void     (*pfn_cmd_end_pass) (gfx_command_buffer_t* cmd);
-
-    void     (*pfn_cmd_scissor) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-    void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-    void     (*pfn_cmd_bind_pipeline) (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-    void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
-    void     (*pfn_cmd_bind_buffer_ib) (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
-    void     (*pfn_cmd_bind_buffer_vb) (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
-    void     (*pfn_cmd_draw) (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-    void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
-    void     (*pfn_cmd_draw_indexed_indirect)(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
-    void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
-
-    void     (*pfn_cmd_push_marker)(gfx_command_buffer_t* cmd, const char* marker);
-    void     (*pfn_cmd_pop_marker)(gfx_command_buffer_t* cmd);
-
-    void     (*pfn_cmd_buffer_barrier)(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
-    void     (*pfn_cmd_texture_barrier)(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
-
-    void     (*pfn_cmd_end) (gfx_command_buffer_t* cmd);
-    void     (*pfn_submit_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
-} gfx_api_pfn;
 
 static gfx_api_pfn * g_tbl = nullptr;
 
@@ -271,7 +211,7 @@ extern void gfx_init_dx12(gfx_api_pfn* func_table);
 
 
 
-gfx_api gfx_backend  gfx_detect_backend(gfx_backend* backends, uint32_t size)
+gfx_api gfx_backend  gfx_detect_backend()
 {
 #if defined(GFX_PLATFORM_APPLE)
     return gfx_backend_metal;
@@ -298,7 +238,9 @@ void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
 
     gfx_backend backend = settings->backend;
     if( backend == gfx_backend_auto )
-        backend = gfx_detect_bakend(nullptr, 0);
+        backend = gfx_detect_backend();
+
+    settings->backend = backend;
 
     switch(settings->backend)
     {
@@ -600,6 +542,54 @@ void gfx_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_op
 
 #pragma endregion
 
+// ------------------------------------------------------------------
+// Textures / mipmaps / blit (WIP)
+// ------------------------------------------------------------------
+gfx_api void gfx_update_image_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset)
+{
+    if (!g_tbl || !g_tbl->pfn_update_image_data) {
+        gfx_stub_not_implemented(nullptr, "gfx_update_image_data");
+        return;
+    }
+    g_tbl->pfn_update_image_data(ctx, texture, data, size, offset);
+}
+
+gfx_api void gfx_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
+{
+    if (!g_tbl || !g_tbl->pfn_texture_get_data) {
+        gfx_stub_not_implemented(nullptr, "gfx_texture_get_data");
+        return;
+    }
+    g_tbl->pfn_texture_get_data(ctx, cmd);
+}
+
+gfx_api void gfx_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
+{
+    if (!g_tbl || !g_tbl->pfn_texture_generate_mipmap) {
+        gfx_stub_not_implemented(nullptr, "gfx_texture_generate_mipmap");
+        return;
+    }
+    g_tbl->pfn_texture_generate_mipmap(ctx, texture);
+}
+
+gfx_api void gfx_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
+{
+    if (!g_tbl || !g_tbl->pfn_blit_image) {
+        gfx_stub_not_implemented(nullptr, "gfx_blit_image");
+        return;
+    }
+    g_tbl->pfn_blit_image(ctx, src, dst);
+}
+
+gfx_api void gfx_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx)
+{
+    if (!g_tbl || !g_tbl->pfn_update_bindless_texture) {
+        gfx_stub_not_implemented(nullptr, "gfx_update_bindless_texture");
+        return;
+    }
+    g_tbl->pfn_update_bindless_texture(ctx, texture, idx);
+}
+
 
 #pragma region to sting
 const char* gfx_to_string(gfx_buffer_usage usage)
@@ -658,43 +648,41 @@ const char* gfx_to_string(gfx_pixel_format format)
 {
     switch (format)
     {
-        case gfx_pixel_format_unknown:        return "unknown";
-        case gfx_pixel_format_a8:             return "a8";
-        case gfx_pixel_format_rgba4444:       return "rgba4444";
-        case gfx_pixel_format_rgb5a1:         return "rgb5a1";
-        case gfx_pixel_format_rgb565:         return "rgb565";
-        case gfx_pixel_format_rgba8:          return "rgba8";
+        case gfx_pixel_format_unknown:      return "unknown";
+        case gfx_pixel_format_a8:           return "a8";
+        case gfx_pixel_format_rgba4444:     return "rgba4444";
+        case gfx_pixel_format_rgb5a1:       return "rgb5a1";
+        case gfx_pixel_format_rgb565:       return "rgb565";
+        case gfx_pixel_format_rgba8:        return "rgba8";
 
-        case gfx_pixel_format_etc1:           return "etc1";
-        case gfx_pixel_format_etc2_rgb8a1:    return "etc2_rgb8a1";
-        case gfx_pixel_format_etc2_rgba8:     return "etc2_rgba8";
+        case gfx_pixel_format_etc1:         return "etc1";
+        case gfx_pixel_format_etc2_rgb8a1:  return "etc2_rgb8a1";
+        case gfx_pixel_format_etc2_rgba8:   return "etc2_rgba8";
 
-        case gfx_pixel_format_pvrtc_rgb_2bpp:  return "pvrtc2_rgb";
-        case gfx_pixel_format_pvrtc_rgba_2bpp: return "pvrtc2_rgba";
-        case gfx_pixel_format_pvrtc_rgb_4bpp:  return "pvrtc4_rgb";
-        case gfx_pixel_format_pvrtc_rgba_4bpp: return "pvrtc4_rgba";
+        case gfx_pixel_format_bc1:          return "bc1";
+        case gfx_pixel_format_bc3:          return "bc3";
+        case gfx_pixel_format_bc4:          return "bc4";
+        case gfx_pixel_format_bc5:          return "bc5";
+        case gfx_pixel_format_bc6h:         return "bc6h";
+        case gfx_pixel_format_bc7:          return "bc7";
 
-        case gfx_pixel_format_bc1:              return "bc1";
-        case gfx_pixel_format_bc2:              return "bc2";
-        case gfx_pixel_format_bc3:              return "bc3";
+        case gfx_pixel_format_astc4x4:      return "astc4x4";
+        case gfx_pixel_format_astc5x5:      return "astc5x5";
+        case gfx_pixel_format_astc6x6:      return "astc6x6";
+        case gfx_pixel_format_astc8x8:      return "astc8x8";
+        case gfx_pixel_format_astc10x10:    return "astc10x10_srgb";
+        case gfx_pixel_format_astc12x12:    return "astc12x12_srgb";
 
-        case gfx_pixel_format_astc4x4:          return "astc4x4";
-        case gfx_pixel_format_astc5x5:          return "astc5x5";
-        case gfx_pixel_format_astc6x6:          return "astc6x6";
-        case gfx_pixel_format_astc8x8:          return "astc8x8";
-        case gfx_pixel_format_astc10x10:        return "astc10x10_srgb";
-        case gfx_pixel_format_astc12x12:        return "astc12x12_srgb";
+        case gfx_pixel_format_r16f:         return "r16";
+        case gfx_pixel_format_rg16f:        return "rg16";
+        case gfx_pixel_format_rgba16f:      return "rgba16";
 
-        case gfx_pixel_format_r16f:           return "r16";
-        case gfx_pixel_format_rg16f:          return "rg16";
-        case gfx_pixel_format_rgba16f:        return "rgba16";
+        case gfx_pixel_format_r32f:         return "r32";
+        case gfx_pixel_format_rg32f:        return "rg32";
+        case gfx_pixel_format_rgba32f:      return "rgba32";
 
-        case gfx_pixel_format_r32f:           return "r32";
-        case gfx_pixel_format_rg32f:          return "rg32";
-        case gfx_pixel_format_rgba32f:        return "rgba32";
-
-        case gfx_pixel_format_d24x8:          return "d24x8";
-        case gfx_pixel_format_d24s8:          return "d24s8";
+        case gfx_pixel_format_d24x8:        return "d24x8";
+        case gfx_pixel_format_d24s8:        return "d24s8";
     }
 
     return "invalid arg in gfx_to_string(gfx_pixel_format format)";
@@ -767,22 +755,16 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
 
         case gfx_pixel_format_rgba8:            return w * h * d * 4;
 
-        //( idth * height * bpp ) >> 3;
-        case gfx_pixel_format_pvrtc_rgb_2bpp:
-        case gfx_pixel_format_pvrtc_rgba_2bpp: return (width / 8) * (height / 4) * 8;
-            
-        case gfx_pixel_format_pvrtc_rgb_4bpp:
-        case gfx_pixel_format_pvrtc_rgba_4bpp: return (width / 4) * (height / 4) * 8;
-
         case gfx_pixel_format_etc1:             return (w >> 2) * (h >> 2) * 8;     //! Compresses RGB888 data without Alpha channel
         case gfx_pixel_format_etc2_rgb8a1:		return (w >> 2) * (h >> 2) * 16;    //! Compresses RGB888 data without Alpha channel
         case gfx_pixel_format_etc2_rgba8:		return (w >> 2) * (h >> 2) * 8;     //! Compresses RGBA8888 data with full alpha support
 
-        case gfx_pixel_format_bc1:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 8;
-        case gfx_pixel_format_bc2:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
-        case gfx_pixel_format_bc3:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
-        case gfx_pixel_format_bc6:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
-        case gfx_pixel_format_bc7:              return gfx_max(1, w >> 2) * gfx_max(1, h >> 2) * gfx_max(1, d >> 2) * 16;
+        case gfx_pixel_format_bc1:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
+        case gfx_pixel_format_bc4:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
+        case gfx_pixel_format_bc3:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
+        case gfx_pixel_format_bc5:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
+        case gfx_pixel_format_bc6h:             return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
+        case gfx_pixel_format_bc7:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
 
         case gfx_pixel_format_astc4x4:          return gfx_block_count(w, 4)  * gfx_block_count(h, 4)  * gfx_block_count(d, 4) * 16;
         case gfx_pixel_format_astc5x5:          return gfx_block_count(w, 5)  * gfx_block_count(h, 5)  * gfx_block_count(d, 5) * 16;
@@ -823,15 +805,12 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
         case gfx_pixel_format_etc2_rgba8:       return (gfx_max(2, (width >> 2)) * 16);
         case gfx_pixel_format_etc2_rgb8a1:      return (gfx_max(2, (width >> 2)) * 8);
 
-        case gfx_pixel_format_pvrtc_rgb_2bpp:
-        case gfx_pixel_format_pvrtc_rgba_2bpp:  return (gfx_max(2, (width >> 2)) * ((8 * 4) * 4) / 8);//! 2-bit PVRTC-compressed texture: PVRTC2
-        case gfx_pixel_format_pvrtc_rgb_4bpp:
-        case gfx_pixel_format_pvrtc_rgba_4bpp:  return (gfx_max(2, (width >> 2)) * ((4 * 4) * 4) / 8);//! 4-bit PVRTC-compressed texture: PVRTC4
 
         case gfx_pixel_format_bc1:              return gfx_max(1, width >> 2) * 8;
-        case gfx_pixel_format_bc2:              return gfx_max(1, width >> 2) * 16;
         case gfx_pixel_format_bc3:              return gfx_max(1, width >> 2) * 16;
-        case gfx_pixel_format_bc6:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc4:              return gfx_max(1, width >> 2) * 8;
+        case gfx_pixel_format_bc5:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc6h:             return gfx_max(1, width >> 2) * 16;
         case gfx_pixel_format_bc7:              return gfx_max(1, width >> 2) * 16;
 
         case gfx_pixel_format_astc4x4:          return gfx_block_count(width, 4)  * 16;
@@ -895,6 +874,11 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_destroy_cmd             = vk_destroy_cmd;
 
     func_table->pfn_update_buffer_data      = vk_update_buffer_data;
+    func_table->pfn_update_image_data       = vk_update_image_data;
+    func_table->pfn_texture_get_data        = vk_texture_get_data;
+    func_table->pfn_texture_generate_mipmap = vk_texture_generate_mipmap;
+    func_table->pfn_blit_image              = vk_blit_image;
+    func_table->pfn_update_bindless_texture = vk_update_bindless_texture;
 
     func_table->pfn_uniform_location        = vk_uniform_location;
     func_table->pfn_uniform_set_buffer      = vk_uniform_set_buffer;
@@ -969,6 +953,11 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_destroy_cmd             = wgpu_destroy_cmd;
 
     func_table->pfn_update_buffer_data      = wgpu_update_buffer_data;
+    func_table->pfn_update_image_data       = wgpu_update_image_data;
+    func_table->pfn_texture_get_data        = wgpu_texture_get_data;
+    func_table->pfn_texture_generate_mipmap = wgpu_texture_generate_mipmap;
+    func_table->pfn_blit_image              = wgpu_blit_image;
+    func_table->pfn_update_bindless_texture = wgpu_update_bindless_texture;
 
     func_table->pfn_cmd_begin               = wgpu_cmd_begin;
     func_table->pfn_cmd_begin_pass          = wgpu_cmd_begin_pass;
@@ -982,10 +971,14 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_cmd_bind_buffer_vb      = wgpu_cmd_bind_buffer_vb;
     func_table->pfn_cmd_draw                = wgpu_cmd_draw;
     func_table->pfn_cmd_draw_indexed        = wgpu_cmd_draw_indexed;
+    func_table->pfn_cmd_draw_indexed_indirect = wgpu_cmd_draw_indexed_indirect;
     func_table->pfn_cmd_dispatch_compute    = wgpu_cmd_dispatch_compute;
 
-    g_tbl->pfn_cmd_push_marker              = wgpu_cmd_push_marker;
-    g_tbl->pfn_cmd_pop_marker               = wgpu_cmd_pop_marker;
+    func_table->pfn_cmd_push_marker         = wgpu_cmd_push_marker;
+    func_table->pfn_cmd_pop_marker          = wgpu_cmd_pop_marker;
+
+    func_table->pfn_cmd_buffer_barrier      = wgpu_cmd_buffer_barrier;
+    func_table->pfn_cmd_texture_barrier     = wgpu_cmd_texture_barrier;
 
     func_table->pfn_cmd_end                 = wgpu_cmd_end;
     func_table->pfn_submit_cmd              = wgpu_submit_cmd;

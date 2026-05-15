@@ -3,6 +3,7 @@
 
 #ifdef WEBGPU_AVAILABLE
 
+#include "gfx_stub.h"
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 #endif 
@@ -51,15 +52,12 @@ static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format, bool
         case gfx_pixel_format_etc2_rgb8a1:      return WGPUTextureFormat_ETC2RGB8A1Unorm;
         case gfx_pixel_format_etc2_rgba8:       return WGPUTextureFormat_ETC2RGBA8Unorm;
 
-        case gfx_pixel_format_pvrtc_rgb_2bpp:
-        case gfx_pixel_format_pvrtc_rgba_2bpp:
-        case gfx_pixel_format_pvrtc_rgb_4bpp:
-        case gfx_pixel_format_pvrtc_rgba_4bpp:  return WGPUTextureFormat_Undefined;
 
         case gfx_pixel_format_bc1:              return srgb ? WGPUTextureFormat_BC1RGBAUnormSrgb : WGPUTextureFormat_BC1RGBAUnorm;
-        case gfx_pixel_format_bc2:              return srgb ? WGPUTextureFormat_BC2RGBAUnormSrgb : WGPUTextureFormat_BC2RGBAUnorm;
         case gfx_pixel_format_bc3:              return srgb ? WGPUTextureFormat_BC3RGBAUnormSrgb : WGPUTextureFormat_BC3RGBAUnorm;
-        case gfx_pixel_format_bc6:              return srgb ? WGPUTextureFormat_BC6HRGBUfloat    : WGPUTextureFormat_BC6HRGBFloat;
+        case gfx_pixel_format_bc4:              return srgb ? WGPUTextureFormat_BC4RSnorm        : WGPUTextureFormat_BC4RUnorm;
+        case gfx_pixel_format_bc5:              return srgb ? WGPUTextureFormat_BC5RGUnorm       : WGPUTextureFormat_BC5RGUnorm;
+        case gfx_pixel_format_bc6h:             return srgb ? WGPUTextureFormat_BC6HRGBUfloat    : WGPUTextureFormat_BC6HRGBFloat;
         case gfx_pixel_format_bc7:              return srgb ? WGPUTextureFormat_BC7RGBAUnormSrgb : WGPUTextureFormat_BC7RGBAUnorm;
 
         case gfx_pixel_format_astc4x4:          return WGPUTextureFormat_ASTC4x4Unorm;
@@ -1005,14 +1003,14 @@ void wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t * desc, gfx_text
                                  gfx_to_string(desc->type),
                                  desc->width, desc->height, desc->depth, gfx_to_string(desc->format)));
 
-    if(desc->format == gfx_pixel_format_bc6 || desc->format == gfx_pixel_format_bc7)
+    if(desc->format == gfx_pixel_format_bc6h || desc->format == gfx_pixel_format_bc7)
         printf("");
 
-    bool is_srgb = (desc->format == gfx_pixel_format_bc6 || desc->format == gfx_pixel_format_bc7);
+    bool is_srgb = (desc->format == gfx_pixel_format_bc6h || desc->format == gfx_pixel_format_bc7);
 
     WGPUTextureDescriptor texture_desc = {};
         texture_desc.label = desc->label ? desc->label : "";
-        texture_desc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+        texture_desc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc | WGPUTextureUsage_TextureBinding;
         texture_desc.dimension = WGPUTextureDimension_2D;
         texture_desc.size = { desc->width, desc->height, desc->depth == 0 ? 1 : desc->depth };
         texture_desc.format = gfx_pixel_format_2_webgpu(desc->format, is_srgb);
@@ -1377,6 +1375,66 @@ void wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* dst_buffer, void*
     wgpuQueueWriteBuffer(wctx->queue, dst_buff->buffer, offset, data, asize);
 }
 
+void wgpu_update_image_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    gfx_stub_not_implemented(wctx ? wctx->dbglog : nullptr, "wgpu_update_image_data");
+}
+
+void wgpu_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* /*texture*/, uint32_t /*idx*/)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    gfx_stub_not_implemented(wctx ? wctx->dbglog : nullptr, "wgpu_update_bindless_texture");
+}
+
+void wgpu_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    gfx_stub_not_implemented(wctx ? wctx->dbglog : nullptr, "wgpu_texture_get_data");
+}
+
+void wgpu_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* /*texture*/)
+{
+    // WebGPU has no built-in mipmap generation command. Requires a custom
+    // downsample compute/render pass per level -- not implemented yet.
+    wgpu_context_t* wctx = from_ctx(ctx);
+    if (wctx) wctx->dbglog(gfx_msg_warning, "wgpu_texture_generate_mipmap: not supported natively, use pre-generated mips");
+}
+
+void wgpu_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wgpu_texture_t* wsrc = (wgpu_texture_t*)src;
+    wgpu_texture_t* wdst = (wgpu_texture_t*)dst;
+    if (!wctx || !wsrc || !wdst) return;
+
+    WGPUImageCopyTexture src_info = {};
+    src_info.texture  = wsrc->texture;
+    src_info.mipLevel = 0;
+    src_info.aspect   = WGPUTextureAspect_All;
+
+    WGPUImageCopyTexture dst_info = {};
+    dst_info.texture  = wdst->texture;
+    dst_info.mipLevel = 0;
+    dst_info.aspect   = WGPUTextureAspect_All;
+
+    WGPUExtent3D extent = {};
+    extent.width               = wgpuTextureGetWidth(wsrc->texture);
+    extent.height              = wgpuTextureGetHeight(wsrc->texture);
+    extent.depthOrArrayLayers  = wgpuTextureGetDepthOrArrayLayers(wsrc->texture);
+
+    WGPUCommandEncoderDescriptor enc_desc = {};
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(wctx->device, &enc_desc);
+    wgpuCommandEncoderCopyTextureToTexture(encoder, &src_info, &dst_info, &extent);
+
+    WGPUCommandBufferDescriptor cmd_desc = {};
+    WGPUCommandBuffer commands = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+    wgpuQueueSubmit(wctx->queue, 1, &commands);
+
+    wgpuCommandBufferRelease(commands);
+    wgpuCommandEncoderRelease(encoder);
+}
+
 struct uniform_handle_t
 {
     static uint64_t create(uint16_t hash, uint16_t type, uint16_t idx, uint16_t field)
@@ -1693,6 +1751,22 @@ void wgpu_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint
     wgpuRenderPassEncoderDrawIndexed(wgpu_cmd->pass, index_count, instance_count, first_idx, vertex_offset, 0);
 }
 
+void wgpu_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride)
+{
+    // WebGPU supports indirect draws, but does not support multi-draw in one call in all implementations.
+    // We emulate draw_count by issuing draw_count calls, each at offset + i*stride.
+    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_buffer_t* wgpu_buffer = (wgpu_buffer_t*)buffer;
+    if (wgpu_cmd == nullptr || wgpu_cmd->pass == nullptr || wgpu_buffer == nullptr)
+        return;
+
+    for (uint32_t i = 0; i < draw_count; ++i)
+    {
+        uint64_t off = (uint64_t)offset + (uint64_t)i * (uint64_t)stride;
+        wgpuRenderPassEncoderDrawIndexedIndirect(wgpu_cmd->pass, wgpu_buffer->buffer, off);
+    }
+}
+
 
 //
 //  gfx_cmd_dispatch_compute
@@ -1708,11 +1782,24 @@ void wgpu_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y
 void wgpu_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
+    (void)wgpu_cmd; (void)marker;
 }
 
 void wgpu_cmd_pop_marker(gfx_command_buffer_t* cmd)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd; 
+    (void)wgpu_cmd;
+}
+
+void wgpu_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst)
+{
+    // WebGPU resource states are tracked by the implementation; explicit barriers are not exposed.
+    (void)cmd; (void)buffers; (void)count; (void)src; (void)dst;
+}
+
+void wgpu_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst)
+{
+    (void)cmd; (void)textures; (void)count; (void)src; (void)dst;
 }
 
 

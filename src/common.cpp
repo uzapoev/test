@@ -143,13 +143,13 @@ uint32_t hasher::murmur32(const void* key, uint32_t size, uint32_t seed)
 
 uint64_t hasher::murmur64(const void* key, uint32_t len, uint32_t seed)
 {
-    const int64_t m = 0xc6a4a7935bd1e995ull;
+    const uint64_t m = 0xc6a4a7935bd1e995ull;
     const int r = 47;
 
     uint64_t h = seed ^ (len * m);
 
-    const int64_t * data = (const int64_t *)key;
-    const int64_t * end = data + (len / 8);
+    const uint64_t * data = (const uint64_t *)key;
+    const uint64_t * end = data + (len / 8);
 
     while (data != end)
     {
@@ -433,9 +433,9 @@ struct stream_impl
     ~stream_impl()
     {
         if (m_read_buffer && !m_external_read_buffer)
-            delete m_read_buffer;
+            delete [] m_read_buffer;
 
-        if (m_write_buffer) delete m_write_buffer;
+        if (m_write_buffer) delete [] m_write_buffer;
     }
 
     size_t read(uint32_t size, char* data)

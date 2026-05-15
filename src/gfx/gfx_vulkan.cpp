@@ -5,11 +5,7 @@
 
 #include <vulkan/vk_enum_string_helper.h>
 #include <spirv_cross/spirv.h>
-
-#if __has_include(<vma/vk_mem_alloc.h>)
-    #define VMA_IMPLEMENTATION
-    #include <vma/vk_mem_alloc.h>
-#endif
+#include "gfx_stub.h"
 
 #ifdef _WIN32
     #pragma comment(lib, "../lib/vulkan-1.lib")
@@ -29,15 +25,11 @@ VkFormat gfx_pixel_format_2_vk(gfx_pixel_format format)
         case gfx_pixel_format_etc2_rgb8a1:      return VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK;
         case gfx_pixel_format_etc2_rgba8:       return VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
 
-        case gfx_pixel_format_pvrtc_rgb_2bpp:   return VK_FORMAT_PVRTC1_2BPP_UNORM_BLOCK_IMG;
-        case gfx_pixel_format_pvrtc_rgba_2bpp:  return VK_FORMAT_PVRTC1_2BPP_UNORM_BLOCK_IMG;
-        case gfx_pixel_format_pvrtc_rgb_4bpp:   return VK_FORMAT_PVRTC2_4BPP_UNORM_BLOCK_IMG;
-        case gfx_pixel_format_pvrtc_rgba_4bpp:  return VK_FORMAT_PVRTC2_4BPP_UNORM_BLOCK_IMG;
-
         case gfx_pixel_format_bc1:              return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;      //! bc1 8
-        case gfx_pixel_format_bc2:              return VK_FORMAT_BC2_UNORM_BLOCK;           //! bc2 16
         case gfx_pixel_format_bc3:              return VK_FORMAT_BC3_UNORM_BLOCK;           //! bc3 16
-        case gfx_pixel_format_bc6:              return VK_FORMAT_BC6H_UFLOAT_BLOCK;         //! bc6 16
+        case gfx_pixel_format_bc4:              return VK_FORMAT_BC4_UNORM_BLOCK;           //! bc3 16
+        case gfx_pixel_format_bc5:              return VK_FORMAT_BC5_UNORM_BLOCK;           //! bc3 16
+        case gfx_pixel_format_bc6h:             return VK_FORMAT_BC6H_UFLOAT_BLOCK;         //! bc6 16
         case gfx_pixel_format_bc7:              return VK_FORMAT_BC7_UNORM_BLOCK;           //! bc7 16
 
         case gfx_pixel_format_astc4x4:          return VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
@@ -574,8 +566,27 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     VkPhysicalDeviceFeatures features = {};
     vkGetPhysicalDeviceFeatures(physdevice, &features);
 
+
+    // 1. Set up the specific Bindless features struct to receive data
+    VkPhysicalDeviceDescriptorIndexingFeatures indexing_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+    VkPhysicalDeviceFeatures2 deviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &indexing_features };
+    vkGetPhysicalDeviceFeatures2(physdevice, &deviceFeatures2);
+    bool support_bindless = indexing_features.shaderSampledImageArrayNonUniformIndexing &&
+                            indexing_features.descriptorBindingSampledImageUpdateAfterBind &&
+                            indexing_features.descriptorBindingPartiallyBound &&
+                            indexing_features.runtimeDescriptorArray;
+
+    if(support_bindless)
+    {
+        VkPhysicalDeviceDescriptorIndexingProperties indexing_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES };
+        VkPhysicalDeviceProperties2 device_properties2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &indexing_properties };
+        vkGetPhysicalDeviceProperties2(physdevice, &device_properties2);
+        uint32_t maxSupportedSampledImages = indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages;
+    }
+
     VkDevice device = nullptr;
     VkDeviceCreateInfo create_info      = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    create_info.pNext = support_bindless ? &indexing_features :nullptr;
     create_info.queueCreateInfoCount    = separate_present_queue ? 2 : 1;
     create_info.pQueueCreateInfos       = queues;
     create_info.enabledLayerCount       = _countof(device_validation_layers);
@@ -971,26 +982,22 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     };
 
     //staging buffer
-    {
-        gfx_buffer_t* staging = nullptr;
-        gfx_buffer_desc_t descriptor = {};
-            descriptor.label    = "staging_buffer";
-            descriptor.mapped   = true;
-            descriptor.size     = cfg->limits.staging_buffer_size;
-            descriptor.usage    = gfx_buffer_usage_staging;
-        vk_create_buffer(&vctx->handle, &descriptor, &staging);
-        vctx->staging_buffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, staging->idx);
-    }
+    gfx_buffer_t* staging_buffer = nullptr;
+    gfx_buffer_desc_t staging_descriptor = {};
+    staging_descriptor.label    = "staging_buffer";
+    staging_descriptor.mapped   = true;
+    staging_descriptor.size     = cfg->limits.staging_buffer_size;
+    staging_descriptor.usage    = gfx_buffer_usage_staging;
+    vk_create_buffer(&vctx->handle, &staging_descriptor, &staging_buffer);
+    vctx->staging_buffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, staging_buffer->idx);
 
     // default sampler
-    {
-        gfx_sampler_desc_t descriptor = {};
-            descriptor.anisotropy = 1;
-            descriptor.minmag     = gfx_filter_point;
-            descriptor.mipmap     = gfx_filter_point;
-            descriptor.mode       = gfx_address_mode_repeat;
-        vk_create_sampler(&vctx->handle, &descriptor, &vctx->default_sampler);
-    }
+    gfx_sampler_desc_t sampler_descriptor = {};
+    sampler_descriptor.anisotropy = 1;
+    sampler_descriptor.minmag     = gfx_filter_point;
+    sampler_descriptor.mipmap     = gfx_filter_point;
+    sampler_descriptor.mode       = gfx_address_mode_repeat;
+    vk_create_sampler(&vctx->handle, &sampler_descriptor, &vctx->default_sampler);
     
     // default texture
     gfx_texture_t* default_texture = nullptr;
@@ -1014,6 +1021,56 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     default_texture_storage_desc.format   = gfx_pixel_format_rgba8;
     default_texture_storage_desc.storage  = 1;
     vk_create_texture(&vctx->handle, &default_texture_storage_desc, &vctx->default_storage_texture);
+
+    // bindless texture pool and set
+    if(vctx->bindless_max_texture_count > 0)
+    {
+        // 1. Define the binding for the massive texture array
+        VkDescriptorSetLayoutBinding binding = {0};
+        binding.binding             = 0;
+        binding.descriptorType      = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        binding.descriptorCount     = vctx->bindless_max_texture_count; // Must match the maximum array size
+        binding.stageFlags          = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+
+        // 2. Set specific bindless flags for this binding
+        VkDescriptorBindingFlags bindless_flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+                                                  VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                                                  VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT; // The array can be sized dynamically on allocation
+        VkDescriptorSetLayoutBindingFlagsCreateInfo extended_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+        extended_info.bindingCount  = 1;
+        extended_info.pBindingFlags = &bindless_flags;
+
+        // 3. Create the layout
+        VkDescriptorSetLayoutCreateInfo layout_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        layout_info.pNext           = &extended_info; // Pass flags via pNext chain
+        layout_info.flags           = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;// CRITICAL: Layout must be compatible with the update-after-bind pool
+        layout_info.bindingCount    = 1;
+        layout_info.pBindings       = &binding;
+        vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &vctx->bindless_descriptor_set_layout);
+
+
+        VkDescriptorPoolSize bindless_pool_size = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, vctx->bindless_max_texture_count };
+        VkDescriptorPoolCreateInfo pool_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+        pool_info.flags            = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;  // CRITICAL: Allows updating descriptors while command buffers are recording/pending execution
+        pool_info.maxSets          = 1; // We only need a single global descriptor set
+        pool_info.poolSizeCount    = 1;
+        pool_info.pPoolSizes       = &bindless_pool_size;
+        vkCreateDescriptorPool(device, &pool_info, nullptr, &vctx->bindless_descriptor_pool);
+
+        VkDescriptorSetVariableDescriptorCountAllocateInfo variable_count_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO };
+        variable_count_info.descriptorSetCount    = 1;
+        variable_count_info.pDescriptorCounts     = &vctx->bindless_max_texture_count; // Set dynamic array bounds
+
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType             = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.pNext             = &variable_count_info; // Pass variable count info via pNext
+        allocInfo.descriptorPool    = vctx->bindless_descriptor_pool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts       = &vctx->bindless_descriptor_set_layout;
+
+        VkDescriptorSet bindlessDescriptorSet;
+        vkAllocateDescriptorSets(device, &allocInfo, &vctx->bindless_descriptor_set);
+    }
     
     *out_ctx = &vctx->handle;
 }
@@ -1319,11 +1376,11 @@ void vk_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx
     vkResetFences(vctx->device, 1, &fence);
 
     VkPresentInfoKHR present_info = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    present_info.waitSemaphoreCount  = 1;
-    present_info.pWaitSemaphores     = &semaphore;
-    present_info.swapchainCount      = 1;
-    present_info.pSwapchains         = &vk_swapchain->swapchain;
-    present_info.pImageIndices       = &idx;
+        present_info.waitSemaphoreCount  = 1;
+        present_info.pWaitSemaphores     = &semaphore;
+        present_info.swapchainCount      = 1;
+        present_info.pSwapchains         = &vk_swapchain->swapchain;
+        present_info.pImageIndices       = &idx;
     auto result = vkQueuePresentKHR(vctx->present_queue.queue, &present_info);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
     {
@@ -1812,7 +1869,7 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
     extend.height = desc->height;
     extend.depth  = desc->depth;
    
-    VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     VkDeviceMemory memory   = VK_NULL_HANDLE;
     VkImage image = _vk_create_image(vctx, VK_IMAGE_TYPE_2D, extend, desc->mip_levels, format, tiling, usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memory);
 
@@ -1839,6 +1896,9 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
         texture->image       = image;
         texture->memory      = memory;
         texture->memory_size = mem_size;
+        texture->width       = desc->width;
+        texture->height      = desc->height;
+        texture->mip_levels  = desc->mip_levels;
         *out_texture = &texture->handle;
 
         vk_debug_set_texture_name(vctx, texture, desc->label);
@@ -2272,6 +2332,213 @@ void vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data,
     }
 }
 
+void vk_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* _texture, uint32_t slot_idx)
+{
+    auto vkctx = (vk_context_t*)ctx;
+
+    if(slot_idx == 0 /*|| slot_idx > vkctx->max_bindles_texture_count*/){
+        vkctx->dbg_log(gfx_msg_error, "vk_update_bindless_texture: incorrect slot index %d", slot_idx);
+        return;
+    }
+
+    if (vkctx->bindless_descriptor_set == VK_NULL_HANDLE) {
+        vkctx->dbg_log(gfx_msg_error, "vk_update_bindless_texture: bindless not supported");
+        return;
+    }
+
+    // if texture null and idx != 0, set default texture
+    uint64_t handle = _texture ? _texture->idx : vkctx->default_texture->handle.idx;
+    vk_texture_t* texture = (vk_texture_t*)gfx_pool_map(vkctx->texture_pool, handle);
+
+    VkDescriptorImageInfo image_info = { 0 };
+    image_info.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_info.imageView             = texture->view;
+    //image_info.sampler             = texture->sampler;
+
+    VkWriteDescriptorSet write  = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet            = vkctx->bindless_descriptor_set;
+        write.dstBinding        = 0;            // Target our texture array binding
+        write.dstArrayElement   = slot_idx;     // Dynamic index within the global array
+        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.descriptorCount   = 1;
+        write.pImageInfo        = &image_info;
+    vkUpdateDescriptorSets(vkctx->device, 1, &write, 0, nullptr);    // Safe to call at any time (even mid-frame) due to UpdateAfterBind flags
+}
+
+void vk_update_image_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+{
+    auto vkctx = (vk_context_t*)ctx;
+    gfx_stub_not_implemented(vkctx ? vkctx->dbg_log : nullptr, "vk_update_image_data");
+}
+
+
+void vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
+{
+    auto vkctx = (vk_context_t*)ctx;
+    gfx_stub_not_implemented(vkctx ? vkctx->dbg_log : nullptr, "vk_texture_get_data");
+}
+
+void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_texture_t* vtex = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, texture->idx);
+    if (!vtex || vtex->mip_levels <= 1) return;
+
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(vctx->physicaldevice, vtex->format, &props);
+    if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) ||
+        !(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+        vctx->dbg_log(gfx_msg_warning, "vk_texture_generate_mipmap: format does not support blit");
+        return;
+    }
+
+    gfx_command_buffer_t* cmd = nullptr;
+    vk_create_cmd(ctx, &cmd);
+    vk_cmd_begin(cmd);
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+
+    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    barrier.image                           = vtex->image;
+    barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount     = 1;
+    barrier.subresourceRange.levelCount     = 1;
+
+    int32_t mip_w = (int32_t)vtex->width;
+    int32_t mip_h = (int32_t)vtex->height;
+
+    for (uint32_t i = 1; i < vtex->mip_levels; ++i) {
+        // transition mip (i-1): SHADER_READ -> TRANSFER_SRC
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vkCmdPipelineBarrier(vk_cmd->cmd,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        // transition mip i: UNDEFINED -> TRANSFER_DST
+        barrier.subresourceRange.baseMipLevel = i;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier(vk_cmd->cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        int32_t next_w = mip_w > 1 ? mip_w / 2 : 1;
+        int32_t next_h = mip_h > 1 ? mip_h / 2 : 1;
+
+        VkImageBlit blit = {};
+        blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1 };
+        blit.srcOffsets[0]  = { 0, 0, 0 };
+        blit.srcOffsets[1]  = { mip_w, mip_h, 1 };
+        blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 };
+        blit.dstOffsets[0]  = { 0, 0, 0 };
+        blit.dstOffsets[1]  = { next_w, next_h, 1 };
+        vkCmdBlitImage(vk_cmd->cmd,
+            vtex->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            vtex->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &blit, VK_FILTER_LINEAR);
+
+        // transition mip (i-1) back to SHADER_READ
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(vk_cmd->cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        mip_w = next_w;
+        mip_h = next_h;
+    }
+
+    // transition last mip: TRANSFER_DST -> SHADER_READ
+    barrier.subresourceRange.baseMipLevel = vtex->mip_levels - 1;
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(vk_cmd->cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    gfx_cmd_end(cmd);
+    gfx_submit_cmd(ctx, cmd, gfx_submit_wait_for_fence);
+    gfx_destroy_cmd(ctx, cmd);
+}
+
+void vk_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_texture_t* vsrc = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, src->idx);
+    vk_texture_t* vdst = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, dst->idx);
+    if (!vsrc || !vdst) return;
+
+    gfx_command_buffer_t* cmd = nullptr;
+    vk_create_cmd(ctx, &cmd);
+    vk_cmd_begin(cmd);
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+
+    auto make_barrier = [](VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+                           VkAccessFlags src_access, VkAccessFlags dst_access) -> VkImageMemoryBarrier {
+        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        b.image                           = image;
+        b.oldLayout                       = old_layout;
+        b.newLayout                       = new_layout;
+        b.srcAccessMask                   = src_access;
+        b.dstAccessMask                   = dst_access;
+        b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+        b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+        b.subresourceRange                = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        return b;
+    };
+
+    VkImageMemoryBarrier pre[2] = {
+        make_barrier(vsrc->image,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT),
+        make_barrier(vdst->image,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT),
+    };
+    vkCmdPipelineBarrier(vk_cmd->cmd,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 2, pre);
+
+    VkImageBlit blit = {};
+    blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    blit.srcOffsets[1]  = { (int32_t)vsrc->width, (int32_t)vsrc->height, 1 };
+    blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    blit.dstOffsets[1]  = { (int32_t)vdst->width, (int32_t)vdst->height, 1 };
+    vkCmdBlitImage(vk_cmd->cmd,
+        vsrc->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vdst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit, VK_FILTER_LINEAR);
+
+    VkImageMemoryBarrier post[2] = {
+        make_barrier(vsrc->image,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT),
+        make_barrier(vdst->image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT),
+    };
+    vkCmdPipelineBarrier(vk_cmd->cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 2, post);
+
+    gfx_cmd_end(cmd);
+    gfx_submit_cmd(ctx, cmd, gfx_submit_wait_for_fence);
+    gfx_destroy_cmd(ctx, cmd);
+}
+
 uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name)
 {
     if(shader == nullptr || name == nullptr)
@@ -2580,12 +2847,112 @@ void vk_cmd_pop_marker(gfx_command_buffer_t* cmd)
         ctx->vk_dbg_cmd_pop_label(vkcmd->cmd);
 }
 
-void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst)
+
+typedef struct vulkan_state_mapping_t {
+    VkPipelineStageFlags2 stage;
+    VkAccessFlags2        access;
+    VkImageLayout         image_layout;
+} vulkan_state_mapping_t;
+
+
+static vulkan_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags aspect) {
+    vulkan_state_mapping_t out = { 0 };
+
+    switch (state) {
+    case gfx_barrier_transfer:
+        out.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        out.access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_GENERAL; // or TRANSFER_DST_OPTIMAL, but GENERAL univeral for RW
+        break;
+
+    case gfx_barrier_compute:
+        out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        out.access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_GENERAL;
+        break;
+
+    case gfx_barrier_graphics:
+        // enable both the Vertex and Fragment stages for full cross reading
+        out.stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        out.access = VK_ACCESS_2_SHADER_READ_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        break;
+
+    case gfx_barrier_render_target:
+        out.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        out.access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        break;
+
+    case gfx_barrier_depth_stencil:
+        // Important: depth tests occur at early and late stages of fragments 
+        out.stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        out.access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        break;
+
+    case gfx_barrier_indirect:
+        out.stage = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+        out.access = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_UNDEFINED; // buffers don't have a layout
+        break;
+
+    case gfx_barrier_present:
+        out.stage = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        out.access = VK_ACCESS_2_NONE;
+        out.image_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        break;
+
+    default:
+        out.stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+        out.access = VK_ACCESS_2_NONE;
+        out.image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        break;
+    }
+
+    return out;
+}
+
+void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier old_state, gfx_barrier new_state)
 {
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_context_t *ctx = vk_cmd->ctx;
+
+    uint32_t buffer_barrier_count = 0;
+    VkBufferMemoryBarrier2 buffer_barriers[MAX_BATCH_BARRIERS] = {};
+    for(uint32_t i = 0; i < count; ++i)
+    {
+        vk_buffer_t *vk_buffer = (vk_buffer_t*)gfx_pool_map(ctx->buffers_pool, buffers[i]->idx);
+
+        vulkan_state_mapping_t src = get_vulkan_state(old_state, 0);
+        vulkan_state_mapping_t dst = get_vulkan_state(new_state, 0);
+
+        buffer_barriers[i].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+        buffer_barriers[i].pNext = NULL;
+        buffer_barriers[i].srcStageMask = src.stage;
+        buffer_barriers[i].srcAccessMask = src.access;
+        buffer_barriers[i].dstStageMask = dst.stage;
+        buffer_barriers[i].dstAccessMask = dst.access;
+        buffer_barriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        buffer_barriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        buffer_barriers[i].buffer = vk_buffer->buffer;
+        buffer_barriers[i].offset = 0;
+        buffer_barriers[i].size = VK_WHOLE_SIZE;
+    }
+
+    VkDependencyInfo dependency_info = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dependency_info.pNext = NULL;
+    dependency_info.dependencyFlags = 0;
+    dependency_info.bufferMemoryBarrierCount = buffer_barrier_count;
+    dependency_info.pBufferMemoryBarriers = buffer_barrier_count > 0 ? buffer_barriers : NULL;
+    dependency_info.imageMemoryBarrierCount = 0;
+    dependency_info.pImageMemoryBarriers = NULL;
+    vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
 
 void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst)
 {
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 }
 
 void vk_cmd_end(gfx_command_buffer_t* cmd)

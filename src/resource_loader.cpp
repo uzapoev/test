@@ -236,7 +236,6 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
 static const uint32_t dds_magic  = 542327876;   // MAKEFOURCC('D', 'D', 'S', ' ');
 static const uint32_t astc_magic = 0x5CA1AB13;
 static const uint32_t ktx_magic  = 0x58544BAB;
-static const uint32_t pvr_magic  = 0x03525650;  // v3, legacy(0x21525650)
 
 
 #pragma pack(push, 1)
@@ -375,15 +374,18 @@ void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * d
             switch (header->dds_pixel_format.fourCC)
             {
                 case MAKEFOURCC('D', 'X', 'T', '1'): desc.format = gfx_pixel_format_bc1; break;
-                case MAKEFOURCC('D', 'X', 'T', '3'): desc.format = gfx_pixel_format_bc2; break;
                 case MAKEFOURCC('D', 'X', 'T', '5'): desc.format = gfx_pixel_format_bc3; break;
                 case MAKEFOURCC('D', 'X', '1', '0'): {
                     dds_header_dx10_t* header10 = (dds_header_dx10_t*)desc.data;
                     desc.data = (data + sizeof(dds_magic) + header->size + sizeof(dds_header_dx10_t));
-                    if (header10->dxgiFormat == 95)
-                        desc.format = gfx_pixel_format_bc6;
-                    if (header10->dxgiFormat == 98)
-                        desc.format = gfx_pixel_format_bc7;
+                    switch(header10->dxgiFormat) {
+                        case 95: desc.format = gfx_pixel_format_bc6h; break;
+                        case 98: desc.format = gfx_pixel_format_bc7; break;
+                        default:    
+                            debug::log_error("texture %s has unsupported format: %d", name? name: "nullptr", header10->dxgiFormat);
+                            debug::breakpoint();// wtf
+                            break;
+                     }
                 }break;
 
                 default: assert(false); break;
@@ -393,23 +395,6 @@ void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * d
             desc.height     = header->height;
             desc.depth      = header->depth == 0? 1: header->depth;
             desc.mip_levels = header->mipmap_count;
-        } break;
-
-        case pvr_magic: {
-            pvr_header_t* header = (pvr_header_t*)(data);
-            desc.data = (data + sizeof(pvr_header_t) + header->meta_data_size);
-            switch (header->pixel_format)
-            {
-                case 0: desc.format = gfx_pixel_format_pvrtc_rgb_2bpp;   break;
-                case 1: desc.format = gfx_pixel_format_pvrtc_rgba_2bpp;  break;
-                case 2: desc.format = gfx_pixel_format_pvrtc_rgb_4bpp;   break;
-                case 3: desc.format = gfx_pixel_format_pvrtc_rgba_4bpp;  break;
-                case 23:desc.format = gfx_pixel_format_etc2_rgba8;       break;
-            };
-            desc.width       = header->width;
-            desc.height      = header->height;
-            desc.depth       = header->depth;
-            desc.mip_levels  = header->mipmap_count;
         } break;
 
         case ktx_magic: {
