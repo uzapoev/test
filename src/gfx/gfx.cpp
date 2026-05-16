@@ -898,6 +898,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_cmd_bind_buffer_vb      = vk_cmd_bind_buffer_vb;
     func_table->pfn_cmd_draw                = vk_cmd_draw;
     func_table->pfn_cmd_draw_indexed        = vk_cmd_draw_indexed;
+    func_table->pfn_cmd_draw_indexed_indirect = vk_cmd_draw_indexed_indirect;
     func_table->pfn_cmd_dispatch_compute    = vk_cmd_dispatch_compute;
 
     func_table->pfn_cmd_push_marker         = vk_cmd_push_marker;

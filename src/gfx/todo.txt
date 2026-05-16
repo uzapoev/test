@@ -1,7 +1,24 @@
 ================================================================================
- GFX HAL - STATUS (2026-05-15)
+ GFX HAL - STATUS (2026-05-16)
  Backends: Vulkan | Metal | WebGPU | DX12
- Legend: Y=impl  ~=stub/empty  N=missing  /=no-op by design
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+ LEGEND
+────────────────────────────────────────────────────────────────────────────────
+
+  Y        Implemented and functional.
+  ~        Stub — function exists and is wired, but does nothing useful.
+             Calls gfx_stub_not_implemented() or is an empty scaffolding body.
+             Safe to call (no crash), but has no effect.
+  N        Missing — no implementation exists and pfn slot is null.
+             Calling the public API will crash (null function pointer).
+  /        No-op by design — the concept does not apply to this backend.
+             E.g. explicit barriers are not needed in Metal / WebGPU.
+  [n]      Footnote — see NOTES section for details on the deviation.
+  [W]      Warning logged at runtime, operation skipped.
+  ~[1]     Stub AND subject to footnote [1] (DX12 scaffolding-only backend).
+
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -155,13 +172,13 @@ UTILITY
  cmd_bind_vertex_buffer             |   Y    |   Y   |   Y    |  ~[1]
  cmd_draw                           |   Y    |  Y[10]|   Y    |  ~[1]
  cmd_draw_indexed                   |   Y    |  Y[10]|   Y    |  ~[1]
- cmd_draw_indexed_indirect          |  N[11] |   ~   |   Y[12]|  ~[1]
+ cmd_draw_indexed_indirect          |   Y    |   ~   |   Y[12]|  ~[1]
  cmd_dispatch_compute               |   Y    |   ~   |   Y    |  ~[1]
  cmd_push_marker                    |   Y    |   Y   |   /    |  ~[1]
  cmd_pop_marker                     |   Y    |   Y   |   /    |  ~[1]
- cmd_buffer_barrier                 |  ~[13] |   /   |   /    |  ~[1]
- cmd_texture_barrier                |  ~[13] |   /   |   /    |  ~[1]
- update_bindless_texture            |   N    |   N   |   N    |  N
+ cmd_buffer_barrier                 |   Y    |   /   |   /    |  ~[1]
+ cmd_texture_barrier                |   Y    |   /   |   /    |  ~[1]
+ update_bindless_texture            |   ~    |   ~   |   ~    |  ~[1]
 ------------------------------------|--------|-------|--------|------
  submit_cmd                         |   Y    |   Y   |   Y    |  ~[1]
  submit (fence)                     |   N    |   N   |   N    |  N
@@ -200,14 +217,15 @@ UTILITY
 [10] metal_cmd_draw / metal_cmd_draw_indexed hardcode MTLPrimitiveTypeTriangle,
      ignoring topology from pipeline state.
 
-[11] vk_cmd_draw_indexed_indirect not implemented in gfx_vulkan.cpp and not
-     wired in gfx.cpp. Calling it will crash (null pfn).
+[11] vk_cmd_draw_indexed_indirect implemented via vkCmdDrawIndexedIndirect.
+     Wired in gfx.cpp Vulkan table.
 
 [12] wgpu_cmd_draw_indexed_indirect emulates multi-draw via loop (N calls).
      WebGPU spec doesn't guarantee multi-draw in one indirect call.
 
-[13] vk_cmd_buffer_barrier and vk_cmd_texture_barrier have empty bodies.
-     Actual VkPipelineBarrier calls are missing — synchronization is broken.
+[13] vk_cmd_buffer_barrier and vk_cmd_texture_barrier implemented using
+     vkCmdPipelineBarrier2 (Vulkan 1.3 synchronization2). Uses get_vulkan_state()
+     to map gfx_barrier enum to VkPipelineStageFlags2 / VkAccessFlags2 / VkImageLayout.
 
 [W]  wgpu_texture_generate_mipmap logs a warning and returns. WebGPU has no
      native mipmap generation command. Requires a custom downsample pass per level.
@@ -218,8 +236,6 @@ UTILITY
 ================================================================================
 
 HIGH (correctness / crash risk)
-  - vk_cmd_draw_indexed_indirect: implement with vkCmdDrawIndexedIndirect
-  - vk_cmd_buffer_barrier / vk_cmd_texture_barrier: add VkPipelineBarrier calls
   - vk_create_render_target: implement (currently empty, needed for offscreen)
   - gfx_destroy_compute_pipeline: add public API + pfn slot + all backends
   - metal_cmd_begin_pass: expose clear color/depth via descriptor instead of hardcode

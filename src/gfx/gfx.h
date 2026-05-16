@@ -399,8 +399,10 @@ typedef struct { uint64_t idx; } gfx_texture_t;
 typedef struct { uint64_t idx; } gfx_sampler_t;
 typedef struct { uint64_t idx; } gfx_shader_t;  
 typedef struct { uint64_t idx; } gfx_descriptor_set_t;
-typedef struct { uint64_t idx; } gfx_pipeline_t;
-typedef struct { uint64_t idx; } gfx_pipeline_compute_t;
+typedef struct { uint64_t idx; } gfx_pipeline_t;            // vertex + fragment
+typedef struct { uint64_t idx; } gfx_pipeline_compute_t;    // compute
+typedef struct { uint64_t idx; } gfx_pipeline_mesh_t;       // task + mesh + fragment
+typedef struct { uint64_t idx; } gfx_pipeline_ray_trace_t;  // ray tracing
 typedef struct { uint64_t idx; } gfx_render_target_t;
 typedef struct { uint64_t idx; } gfx_command_buffer_t;
 typedef struct { uint64_t idx; } gfx_fence_t;
@@ -653,6 +655,13 @@ typedef struct gfx_compute_pipeline_desc_t {
     gfx_shader_t* shader;
 } gfx_compute_pipeline_desc_t;
 
+// todo: for future mesh shading
+typedef struct gfx_mesh_pipeline_desc_t {
+} gfx_mesh_pipeline_desc_t;
+
+// todo: for raytracing
+typedef struct gfx_ray_trace_pipeline_desc_t {
+} gfx_ray_trace_pipeline_desc_t;
 
 typedef struct gfx_render_pass_desc_t {
     uint32_t                    clear_color;
@@ -772,7 +781,7 @@ gfx_api void                    gfx_wait(gfx_context_t* ctx, gfx_fence_t * fence
 //         uint32_t            count = 0;
 //         bool                array_of_pointers = false;
 //     } instances;
-// } gfx_acceleration_struct;
+// } gfx_rt_acceleration_struct;
 
 
 //

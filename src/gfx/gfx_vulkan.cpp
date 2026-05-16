@@ -2800,6 +2800,13 @@ void vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t
     vkCmdDrawIndexed(vk_cmd->cmd, idx_count, instance_count, first_idx, vertex_offset, 0);
 }
 
+void vk_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride)
+{
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_pool_map(vk_cmd->ctx->buffers_pool, buffer->idx);
+    vkCmdDrawIndexedIndirect(vk_cmd->cmd, vkbuffer->buffer, offset, draw_count, stride);
+}
+
 void vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z)
 {
     vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
@@ -2937,22 +2944,17 @@ void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, ui
         buffer_barriers[i].buffer = vk_buffer->buffer;
         buffer_barriers[i].offset = 0;
         buffer_barriers[i].size = VK_WHOLE_SIZE;
+        buffer_barrier_count++;
     }
 
-    VkDependencyInfo dependency_info = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-    dependency_info.pNext = NULL;
-    dependency_info.dependencyFlags = 0;
+    VkDependencyInfo dependency_info = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO, NULL };
     dependency_info.bufferMemoryBarrierCount = buffer_barrier_count;
     dependency_info.pBufferMemoryBarriers = buffer_barrier_count > 0 ? buffer_barriers : NULL;
-    dependency_info.imageMemoryBarrierCount = 0;
-    dependency_info.pImageMemoryBarriers = NULL;
     vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
 
 void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier old_state, gfx_barrier new_state)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
     vk_context_t* ctx = vk_cmd->ctx;
 
@@ -2982,12 +2984,12 @@ void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures,
         image_barriers[i].subresourceRange.levelCount       = vk_texture->mip_levels;
         image_barriers[i].subresourceRange.baseArrayLayer   = 0;//vk_texture->base_layer;
         image_barriers[i].subresourceRange.layerCount       = 1;//vk_texture->layer_count;
+        image_barrier_count++;
     }
 
     VkDependencyInfo dependency_info = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO, NULL };
-    dependency_info.dependencyFlags = 0;
     dependency_info.imageMemoryBarrierCount = image_barrier_count;
-    dependency_info.pImageMemoryBarriers = image_barrier_count > 0 ? image_barriers : NULL;;
+    dependency_info.pImageMemoryBarriers    = image_barrier_count > 0 ? image_barriers : NULL;;
     vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
 
