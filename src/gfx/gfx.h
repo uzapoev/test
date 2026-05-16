@@ -660,8 +660,8 @@ typedef struct gfx_mesh_pipeline_desc_t {
 } gfx_mesh_pipeline_desc_t;
 
 // todo: for raytracing
-typedef struct gfx_ray_trace_pipeline_desc_t {
-} gfx_ray_trace_pipeline_desc_t;
+typedef struct gfx_raytrace_pipeline_desc_t {
+} gfx_raytrace_pipeline_desc_t;
 
 typedef struct gfx_render_pass_desc_t {
     uint32_t                    clear_color;
@@ -718,9 +718,9 @@ gfx_api gfx_pipeline_compute_t* gfx_compute_pipeline_create(gfx_context_t* ctx, 
 gfx_api void                    gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
 gfx_api gfx_pipeline_mesh_t*    gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc);
-gfx_api void                    gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc);
+gfx_api void                    gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
 
-gfx_api gfx_pipeline_raytrace_t*gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc);
+gfx_api gfx_pipeline_raytrace_t*gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc);
 gfx_api void                    gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* desc);
 
 
@@ -884,10 +884,10 @@ typedef struct gfx_api_pfn
     void     (*pfn_create_pipeline)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
     void     (*pfn_create_compute_pipeline)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
     void     (*pfn_create_mesh_pipeline)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
-    void     (*pfn_create_raytrace_pipeline) (gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+    void     (*pfn_create_raytrace_pipeline) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
     void     (*pfn_destroy_pipeline)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
     void     (*pfn_destroy_compute_pipeline) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
-    void     (*pfn_destroy_mesh_pipeline)    (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc);
+    void     (*pfn_destroy_mesh_pipeline)    (gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
     void     (*pfn_destroy_raytrace_pipeline)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
     // RENDER TARGET

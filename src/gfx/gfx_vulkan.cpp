@@ -2478,13 +2478,13 @@ void vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc,
     gfx_stub_not_implemented(vctx->dbg_log, "vk_create_mesh_pipeline");
 }
 
-void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
+void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
 {
     vk_context_t* vctx = from_ctx(ctx);
     gfx_stub_not_implemented(vctx->dbg_log, "vk_create_raytrace_pipeline");
 }
 
-void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc)
+void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* desc)
 {
 }
 

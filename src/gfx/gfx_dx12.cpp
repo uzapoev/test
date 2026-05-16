@@ -117,6 +117,23 @@ extern "C" void dx12_create_compute_pipeline(gfx_context_t* /*ctx*/, gfx_compute
     *out_pipeline = p ? &p->handle : nullptr;
 }
 
+
+extern "C" void dx12_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc, gfx_pipeline_mesh_t **out_pipeline)
+{
+}
+extern "C" void dx12_destroy_mesh_pipeline(gfx_context_t * ctx, gfx_pipeline_mesh_t * pipeline)
+{
+}
+
+extern "C" void dx12_create_raytrace_pipeline(gfx_context_t * ctx, gfx_raytrace_pipeline_desc_t * desc, gfx_pipeline_raytrace_t **out_pipeline)
+{
+}
+
+extern "C" void dx12_destroy_raytrace_pipeline(gfx_context_t * ctx, gfx_pipeline_raytrace_t* pipeline)
+{
+}
+
+
 extern "C" void dx12_create_render_target(gfx_context_t* /*ctx*/, gfx_render_target_desc_t* /*desc*/, gfx_render_target_t** out_target)
 {
     dx12_render_target_t* t = (dx12_render_target_t*)calloc(1, sizeof(dx12_render_target_t));

@@ -1352,13 +1352,13 @@ void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* des
     wctx->dbglog(gfx_msg_error, "wgpu_create_mesh_pipeline not implemented");
 }
 
-void wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
+void wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
     wctx->dbglog(gfx_msg_error, "wgpu_create_raytrace_pipeline not implemented");
 }
 
-void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc)
+void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline)
 {
 }
 

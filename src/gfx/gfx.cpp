@@ -386,11 +386,11 @@ gfx_api gfx_pipeline_mesh_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_me
     g_tbl->pfn_create_mesh_pipeline(ctx, desc, &result);
     return result;
 }
-gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc) {
+gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline) {
     if (!g_tbl || !g_tbl->pfn_destroy_mesh_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_mesh_destroy"); return; }
-    g_tbl->pfn_destroy_mesh_pipeline(ctx, desc);
+    g_tbl->pfn_destroy_mesh_pipeline(ctx, pipeline);
 }
-gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc) {
+gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc) {
     gfx_pipeline_raytrace_t* result = nullptr;
     if (!g_tbl || !g_tbl->pfn_create_raytrace_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_create"); return result; }
     g_tbl->pfn_create_raytrace_pipeline(ctx, desc, &result);
