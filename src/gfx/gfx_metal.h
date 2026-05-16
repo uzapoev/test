@@ -787,7 +787,7 @@ void metal_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* da
     memcpy((uint8_t*)dst + offset, data, size);
 }
 
-void metal_update_image_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+void metal_update_texture_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
 {
     auto mctx = from_ctx(ctx);
     gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_update_image_data");
@@ -1370,69 +1370,81 @@ void metal_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_
 
 inline void gfx_init_metal(gfx_api_pfn* func_table)
 {
-    func_table->pfn_init = metal_init;
-    func_table->pfn_create_swapchain = metal_create_swapchain;
-
+    // CONTEXT
+    func_table->pfn_init     = metal_init;
     func_table->pfn_get_caps = metal_get_caps;
 
-    func_table->pfn_acquire_img = metal_acquire_img;
-    func_table->pfn_present_img = metal_present_img;
+    // SWAPCHAIN
+    func_table->pfn_create_swapchain = metal_create_swapchain;
+    func_table->pfn_acquire_img      = metal_acquire_img;
+    func_table->pfn_present_img      = metal_present_img;
 
-    func_table->pfn_create_buffer = metal_create_buffer;
-    func_table->pfn_create_shader = metal_create_shader;
-    func_table->pfn_create_sampler = metal_create_sampler;
-    func_table->pfn_create_texture = metal_create_texture;
-    func_table->pfn_create_pipeline = metal_create_pipeline;
-    func_table->pfn_create_compute_pipeline = metal_create_compute_pipeline;
-    func_table->pfn_create_render_target = metal_create_render_target;
-    func_table->pfn_create_descriptor_set = metal_create_descriptor_set;
-    func_table->pfn_create_cmd = metal_create_cmd;
+    // BUFFER
+    func_table->pfn_create_buffer      = metal_create_buffer;
+    func_table->pfn_update_buffer_data = metal_update_buffer_data;
+    func_table->pfn_destroy_buffer     = metal_destroy_buffer;
 
-    func_table->pfn_destroy_buffer = metal_destroy_buffer;
-    func_table->pfn_destroy_shader = metal_destroy_shader;
+    // SHADER
+    func_table->pfn_create_shader    = metal_create_shader;
+    func_table->pfn_uniform_location = metal_uniform_location;
+    func_table->pfn_destroy_shader   = metal_destroy_shader;
+
+    // SAMPLER
+    func_table->pfn_create_sampler  = metal_create_sampler;
     func_table->pfn_destroy_sampler = metal_destroy_sampler;
-    func_table->pfn_destroy_texture = metal_destroy_texture;
-    func_table->pfn_destroy_pipeline = metal_destroy_pipeline;
+
+    // TEXTURE
+    func_table->pfn_create_texture          = metal_create_texture;
+    func_table->pfn_update_image_data       = metal_update_image_data;
+    func_table->pfn_update_bindless_texture = metal_update_bindless_texture;
+    func_table->pfn_texture_generate_mipmap = metal_texture_generate_mipmap;
+    func_table->pfn_blit_image              = metal_blit_image;
+    func_table->pfn_texture_get_data        = metal_texture_get_data;
+    func_table->pfn_destroy_texture         = metal_destroy_texture;
+
+    // PIPELINE
+    func_table->pfn_create_pipeline         = metal_create_pipeline;
+    func_table->pfn_create_compute_pipeline = metal_create_compute_pipeline;
+    func_table->pfn_destroy_pipeline        = metal_destroy_pipeline;
+
+    // RENDER TARGET
+    func_table->pfn_create_render_target  = metal_create_render_target;
     func_table->pfn_destroy_render_target = metal_destroy_render_target;
-    func_table->pfn_destroy_descriptor_set = metal_destroy_descriptor_set;
+
+    // DESCRIPTOR SET
+    func_table->pfn_create_descriptor_set   = metal_create_descriptor_set;
+    func_table->pfn_uniform_set_buffer      = metal_uniform_set_buffer;
+    func_table->pfn_uniform_set_buffer_data = metal_uniform_set_buffer_data;
+    func_table->pfn_uniform_set_texture     = metal_uniform_set_texture;
+    func_table->pfn_uniform_set_sampler     = metal_uniform_set_sampler;
+    func_table->pfn_destroy_descriptor_set  = metal_destroy_descriptor_set;
+
+    // COMMAND BUFFER
+    func_table->pfn_create_cmd = metal_create_cmd;
     func_table->pfn_destroy_cmd = metal_destroy_cmd;
 
-    func_table->pfn_update_buffer_data = metal_update_buffer_data;
-    func_table->pfn_update_image_data = metal_update_image_data;
-    func_table->pfn_texture_get_data = metal_texture_get_data;
-    func_table->pfn_texture_generate_mipmap = metal_texture_generate_mipmap;
-    func_table->pfn_blit_image = metal_blit_image;
-    func_table->pfn_update_bindless_texture = metal_update_bindless_texture;
-
-    func_table->pfn_uniform_location = metal_uniform_location;
-    func_table->pfn_uniform_set_buffer = metal_uniform_set_buffer;
-    func_table->pfn_uniform_set_buffer_data = metal_uniform_set_buffer_data;
-    func_table->pfn_uniform_set_texture = metal_uniform_set_texture;
-    func_table->pfn_uniform_set_sampler = metal_uniform_set_sampler;
-
-
-    func_table->pfn_cmd_begin = metal_cmd_begin;
+    func_table->pfn_cmd_begin      = metal_cmd_begin;
     func_table->pfn_cmd_begin_pass = metal_cmd_begin_pass;
-    func_table->pfn_cmd_end_pass = metal_cmd_end_pass;
+    func_table->pfn_cmd_end_pass   = metal_cmd_end_pass;
 
-    func_table->pfn_cmd_scissor = metal_cmd_scissor;
-    func_table->pfn_cmd_viewport = metal_cmd_viewport;
-    func_table->pfn_cmd_bind_pipeline = metal_cmd_bind_pipeline;//gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-    func_table->pfn_cmd_bind_descriptor_set = metal_cmd_bind_descriptor_set;
-    func_table->pfn_cmd_bind_buffer_ib = metal_cmd_bind_buffer_ib;
-    func_table->pfn_cmd_bind_buffer_vb = metal_cmd_bind_buffer_vb;
-    func_table->pfn_cmd_draw = metal_cmd_draw;
-    func_table->pfn_cmd_draw_indexed = metal_cmd_draw_indexed;
+    func_table->pfn_cmd_scissor               = metal_cmd_scissor;
+    func_table->pfn_cmd_viewport              = metal_cmd_viewport;
+    func_table->pfn_cmd_bind_pipeline         = metal_cmd_bind_pipeline;
+    func_table->pfn_cmd_bind_descriptor_set   = metal_cmd_bind_descriptor_set;
+    func_table->pfn_cmd_bind_buffer_ib        = metal_cmd_bind_buffer_ib;
+    func_table->pfn_cmd_bind_buffer_vb        = metal_cmd_bind_buffer_vb;
+    func_table->pfn_cmd_draw                  = metal_cmd_draw;
+    func_table->pfn_cmd_draw_indexed          = metal_cmd_draw_indexed;
     func_table->pfn_cmd_draw_indexed_indirect = metal_cmd_draw_indexed_indirect;
-    func_table->pfn_cmd_dispatch_compute = metal_cmd_dispatch_compute;
+    func_table->pfn_cmd_dispatch_compute      = metal_cmd_dispatch_compute;
 
     func_table->pfn_cmd_push_marker = metal_cmd_push_marker;
-    func_table->pfn_cmd_pop_marker = metal_cmd_pop_marker;
+    func_table->pfn_cmd_pop_marker  = metal_cmd_pop_marker;
 
-    func_table->pfn_cmd_buffer_barrier = metal_cmd_buffer_barrier;
+    func_table->pfn_cmd_buffer_barrier  = metal_cmd_buffer_barrier;
     func_table->pfn_cmd_texture_barrier = metal_cmd_texture_barrier;
 
-    func_table->pfn_cmd_end = metal_cmd_end;
+    func_table->pfn_cmd_end    = metal_cmd_end;
     func_table->pfn_submit_cmd = metal_submit_cmd;
 }
 

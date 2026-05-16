@@ -117,7 +117,7 @@ void texture_manager_prototype::clear()
         {
             debug::log_error("texture_manager::clear() try to unload used texture %s  %s", tex->name().data(), tex->guid().data());
         }
-        gfx_destroy_texture(m_ctx, tex->texture_handle());
+        gfx_texture_destroy(m_ctx, tex->texture_handle());
         delete tex;
     }
     m_textures.clear();
@@ -193,7 +193,7 @@ void resource_manager::init()
         piplene_desc.render_states.blend.enable = false;
         piplene_desc.render_states.blend.color_src = gfx_blend_mode_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
         piplene_desc.render_states.blend.color_dst = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
-    m_default_pipeline = gfx_create_pipeline2(m_ctx, &piplene_desc);
+    m_default_pipeline = gfx_pipeline_create(m_ctx, &piplene_desc);
 
     m_meshes.reserve(1024);
     m_textures.reserve(1024);
@@ -288,7 +288,7 @@ std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * nam
 
     auto material = std::make_shared<gfx_material_t>();
     material->instance = instance;
-    material->descriptor_set = gfx_create_descriptor_set2(m_ctx, instance->shader);
+    material->descriptor_set = gfx_descriptor_set_create(m_ctx, instance->shader);
     
     for(size_t i = 0; i < _countof(instance->textures); ++i)
     {

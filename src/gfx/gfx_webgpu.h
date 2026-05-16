@@ -208,7 +208,7 @@ gfx_api void     wgpu_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_
 gfx_api void     wgpu_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 
 gfx_api void     wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-gfx_api void     wgpu_update_image_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+gfx_api void     wgpu_update_texture_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
 gfx_api void     wgpu_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 gfx_api void     wgpu_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
 gfx_api void     wgpu_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);

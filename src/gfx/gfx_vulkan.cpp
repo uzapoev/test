@@ -767,8 +767,8 @@ static void _vk_image_transition(vk_context_t* ctx, VkImage image, uint16_t mips
     vkCmdPipelineBarrier(vk_cmd->cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier );
 
     gfx_cmd_end(cmd);
-    gfx_submit_cmd(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_destroy_cmd(&ctx->handle, cmd);
+    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    gfx_cmd_destroy(&ctx->handle, cmd);
 }
 
 static void _vk_copy_buffer_to(vk_context_t* ctx, VkBuffer src, vk_copy_info_t * dst_info)
@@ -808,8 +808,8 @@ static void _vk_copy_buffer_to(vk_context_t* ctx, VkBuffer src, vk_copy_info_t *
         vkCmdCopyBufferToImage(vk_cmd->cmd, src, dst_info->dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dst_info->dst_image_mips, regions);
     }
     gfx_cmd_end(cmd);
-    gfx_submit_cmd(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_destroy_cmd(&ctx->handle, cmd);
+    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    gfx_cmd_destroy(&ctx->handle, cmd);
 }
 
 static void _vk_copy_buffer_to_image(vk_context_t* ctx, VkBuffer src, VkImage image, uint32_t mips, gfx_pixel_format format, VkExtent3D extend)
@@ -842,8 +842,8 @@ static void _vk_copy_buffer_to_image(vk_context_t* ctx, VkBuffer src, VkImage im
     vkCmdCopyBufferToImage(vk_cmd->cmd, src, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mips, regions);
 
     gfx_cmd_end(cmd);
-    gfx_submit_cmd(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_destroy_cmd(&ctx->handle, cmd);
+    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    gfx_cmd_destroy(&ctx->handle, cmd);
 }
 
 static void _vk_copy_buffer_to_buffer(vk_context_t* ctx, VkBuffer src, VkBuffer dst_buffer, VkDeviceSize dst_buffer_offset, VkDeviceSize dst_buffer_size)
@@ -860,8 +860,8 @@ static void _vk_copy_buffer_to_buffer(vk_context_t* ctx, VkBuffer src, VkBuffer 
     vkCmdCopyBuffer(vk_cmd->cmd, src, dst_buffer, 1, &region);
 
     gfx_cmd_end(cmd);
-    gfx_submit_cmd(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_destroy_cmd(&ctx->handle, cmd);
+    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    gfx_cmd_destroy(&ctx->handle, cmd);
 }
 
 uint32_t gfx_gpu_ram_usage(gfx_context_t* ctx)
@@ -899,7 +899,9 @@ static void vk_gpu_memstatus(gfx_context_t * ctx)
     vkctx->dbg_log(gfx_msg_info, "gpu memory usage: %10d Kb  budget: %10d Mb", device_memory_total_usage/1024, device_memory_total_budget/1024/1024);
 }
 
-// vulkan
+
+// --- CONTEXT ---
+
 void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
 {
     assert(cfg && out_ctx);
@@ -1074,6 +1076,10 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     *out_ctx = &vctx->handle;
 }
 
+void vk_get_caps(gfx_context_t* ctx, gfx_caps_t *caps)
+{
+}
+
 void vk_destroy_renderer(gfx_context_t * ctx)
 {
     assert(ctx);
@@ -1094,6 +1100,10 @@ void vk_destroy_renderer(gfx_context_t * ctx)
 
     free(vctx);
 }
+
+
+
+// --- SWAPCHAIN ---
 
 void vk_create_renderpass(gfx_context_t* ctx, VkFormat colorformat, VkFormat depthformat, VkRenderPass* renderpass)
 {
@@ -1391,6 +1401,8 @@ void vk_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx
 }
 
 
+// --- BUFFER ---
+
 // create render stuff
 void vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
 {
@@ -1448,6 +1460,88 @@ void vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
     *out_buffer = &buffer->handle;
     vk_gpu_memstatus(ctx);
 }
+
+
+void vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
+{
+    auto vkctx = (vk_context_t*)(ctx);
+    auto vkbuf = (vk_buffer_t*)gfx_pool_map(vkctx->buffers_pool, buffer->idx);
+    //assert(data != nullptr);
+    //assert(size == 0);
+
+    if(vkbuf->mapped)
+    {
+        if(vkbuf->data_ptr == nullptr)
+            vkMapMemory(vkctx->device, vkbuf->memory, offset, size, 0, &vkbuf->data_ptr);
+
+        if(size > 0 && data != nullptr)
+            memcpy(vkbuf->data_ptr, (char*)data + offset, size);
+    }
+    else if(data != nullptr)
+    {
+        auto staging = vkctx->staging_buffer;
+        if (size < staging->buffer_size )
+        {
+            if (staging->data_ptr == nullptr)
+                vkMapMemory(vkctx->device, staging->memory, 0, staging->buffer_size, 0, &staging->data_ptr);
+            memcpy(staging->data_ptr, data, size);
+            // vkUnmapMemory(ctx->device, s_staging.memory);
+             //vkFlushMappedMemoryRanges();
+
+            vk_copy_info_t info = { };
+                info.dst_buffer = vkbuf->buffer;
+                info.dst_buffer_size = (uint32_t)size;
+                info.dst_buffer_offset = offset;
+            _vk_copy_buffer_to(vkctx, vkctx->staging_buffer->buffer, &info);
+        }
+        else
+        {
+            vk_buffer_t staging = {};
+            auto memflag = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+            _vk_create_buffer(vkctx, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, memflag, &staging);
+
+            if (data)
+            {
+                vkMapMemory(vkctx->device, staging.memory, 0, size, 0, &staging.data_ptr);
+                memcpy(staging.data_ptr, data, size);
+                vkUnmapMemory(vkctx->device, staging.memory);
+                staging.data_ptr = nullptr;
+            }
+
+            vk_copy_info_t info = { };
+            info.dst_buffer = vkbuf->buffer;
+            info.dst_buffer_size = (uint32_t)size;
+            _vk_copy_buffer_to(vkctx, staging.buffer, &info);
+
+            vkDestroyBuffer(vkctx->device, staging.buffer, nullptr);
+            vkFreeMemory(vkctx->device, staging.memory, nullptr);
+        }
+    }
+}
+
+
+void vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, buffer->idx);
+    if(vkbuffer)
+    {
+        if (vkbuffer->mapped && vkbuffer->buffer != nullptr)
+            vkUnmapMemory(vctx->device, vkbuffer->memory);
+
+        if (vkbuffer->buffer != nullptr)
+            vkDestroyBuffer(vctx->device, vkbuffer->buffer, nullptr);
+
+        if (vkbuffer->memory != nullptr)
+            vkFreeMemory(vctx->device, vkbuffer->memory, nullptr);
+
+        gfx_pool_free(vctx->buffers_pool, vkbuffer->handle.idx);
+    }
+}
+
+
+
+// --- SHADER ---
 
 void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t capacity, vk_descriptor_pool_t** out_pool)
 {
@@ -1590,6 +1684,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
 
     vk_gpu_memstatus(&ctx->handle);
 }
+
 
 
 void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader)
@@ -1735,38 +1830,55 @@ void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
  //   gfx_pool_create(sizeof(vk_descriptor_set_t), MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->descriptor_set_pool);
 }
 
-void vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** out_set)
+
+uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name)
 {
-    assert(ctx && shader && out_set);
+    if(shader == nullptr || name == nullptr)
+        return 0;
 
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_shader_t* vk_shader = (vk_shader_t*)shader;
+    vk_shader_t * vkshader = (vk_shader_t*)shader;
+    uint16_t  hash = vkshader->hash;
 
-    if(vk_shader->pool == nullptr)
+    for (uint32_t uniform_id = 0; uniform_id < vkshader->uniform_count; ++uniform_id)
     {
-        vk_create_descriptor_pool(vctx, vk_shader, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
-    }
+        gfx_uniform_t* uniform = &vkshader->uniforms[uniform_id];
 
-    if(vk_shader->pool->free_set_count == 0)
-    {
-        vk_create_descriptor_pool(vctx, vk_shader, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
-    }
+        if(uniform->type == gfx_uniform_ubo)
+        {
+            for (int16_t field_id = 0; field_id < uniform->buffer.field_count; ++field_id)
+            {
+                if (strcmp(name, uniform->buffer.fields[field_id].name))
+                    continue;
 
-    uint32_t next_free = vk_shader->pool->next_free;
+                return  (uint64_t)(hash & 0xFFFF) |
+                        (((uint64_t)uniform_id & 0xFFFF) << 16) |
+                        (((uint64_t)field_id & 0xFFFF) << 32);
+            }
+        }
 
-    for(uint32_t i = next_free; i < vk_shader->pool->capacity; ++i)
-    {
-        if(!vk_shader->pool->sets[i].isfree)
+        if (strcmp(name, uniform->name))
             continue;
 
-        vk_shader->pool->sets[i].isfree = false;
-        vk_shader->pool->free_set_count--;
-        vk_shader->pool->next_free = i + 1;
-
-        *out_set = &vk_shader->pool->sets[i].handle;
-        break;
+        return  (hash & 0xFFFF) | 
+                (uniform_id & 0xFFFF) << 16;
     }
+    return 0;
 }
+
+
+void vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* _shader)
+{
+    vk_context_t* vkctx = from_ctx(ctx);
+
+    vk_shader_t * shader = (vk_shader_t*)gfx_pool_map(vkctx->shaders_pool, _shader->idx);
+   // shader->pool
+
+    //destroy all pools and pool datas
+}
+
+
+
+// --- SAMPLER ---
 
 void vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler)
 {
@@ -1813,6 +1925,19 @@ void vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler
     sampler->handle = { handle };
     *out_sampler = &sampler->handle;
 }
+
+
+void vk_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_sampler_t* vks = (vk_sampler_t*)sampler;
+
+    vkDestroySampler(vctx->device, vks->sampler, nullptr);
+}
+
+
+
+// --- TEXTURE ---
 
 void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
 {
@@ -1904,6 +2029,241 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
     }
     vk_gpu_memstatus(ctx);
 }
+
+
+void vk_update_texture_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+{
+    auto vkctx = (vk_context_t*)ctx;
+    gfx_stub_not_implemented(vkctx ? vkctx->dbg_log : nullptr, "vk_update_image_data");
+}
+
+
+
+void vk_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* _texture, uint32_t slot_idx)
+{
+    auto vkctx = (vk_context_t*)ctx;
+
+    if(slot_idx == 0 /*|| slot_idx > vkctx->max_bindles_texture_count*/){
+        vkctx->dbg_log(gfx_msg_error, "vk_update_bindless_texture: incorrect slot index %d", slot_idx);
+        return;
+    }
+
+    if (vkctx->bindless_descriptor_set == VK_NULL_HANDLE) {
+        vkctx->dbg_log(gfx_msg_error, "vk_update_bindless_texture: bindless not supported");
+        return;
+    }
+
+    // if texture null and idx != 0, set default texture
+    uint64_t handle = _texture ? _texture->idx : vkctx->default_texture->handle.idx;
+    vk_texture_t* texture = (vk_texture_t*)gfx_pool_map(vkctx->texture_pool, handle);
+
+    VkDescriptorImageInfo image_info = { 0 };
+    image_info.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_info.imageView             = texture->view;
+    //image_info.sampler             = texture->sampler;
+
+    VkWriteDescriptorSet write  = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet            = vkctx->bindless_descriptor_set;
+        write.dstBinding        = 0;            // Target our texture array binding
+        write.dstArrayElement   = slot_idx;     // Dynamic index within the global array
+        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.descriptorCount   = 1;
+        write.pImageInfo        = &image_info;
+    vkUpdateDescriptorSets(vkctx->device, 1, &write, 0, nullptr);    // Safe to call at any time (even mid-frame) due to UpdateAfterBind flags
+}
+
+
+void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_texture_t* vtex = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, texture->idx);
+    if (!vtex || vtex->mip_levels <= 1) return;
+
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(vctx->physicaldevice, vtex->format, &props);
+    if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) ||
+        !(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+        vctx->dbg_log(gfx_msg_warning, "vk_texture_generate_mipmap: format does not support blit");
+        return;
+    }
+
+    gfx_command_buffer_t* cmd = nullptr;
+    vk_create_cmd(ctx, &cmd);
+    vk_cmd_begin(cmd);
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+
+    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    barrier.image                           = vtex->image;
+    barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount     = 1;
+    barrier.subresourceRange.levelCount     = 1;
+
+    int32_t mip_w = (int32_t)vtex->width;
+    int32_t mip_h = (int32_t)vtex->height;
+
+    for (uint32_t i = 1; i < vtex->mip_levels; ++i) {
+        // transition mip (i-1): SHADER_READ -> TRANSFER_SRC
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vkCmdPipelineBarrier(vk_cmd->cmd,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        // transition mip i: UNDEFINED -> TRANSFER_DST
+        barrier.subresourceRange.baseMipLevel = i;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier(vk_cmd->cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        int32_t next_w = mip_w > 1 ? mip_w / 2 : 1;
+        int32_t next_h = mip_h > 1 ? mip_h / 2 : 1;
+
+        VkImageBlit blit = {};
+        blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1 };
+        blit.srcOffsets[0]  = { 0, 0, 0 };
+        blit.srcOffsets[1]  = { mip_w, mip_h, 1 };
+        blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 };
+        blit.dstOffsets[0]  = { 0, 0, 0 };
+        blit.dstOffsets[1]  = { next_w, next_h, 1 };
+        vkCmdBlitImage(vk_cmd->cmd,
+            vtex->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            vtex->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &blit, VK_FILTER_LINEAR);
+
+        // transition mip (i-1) back to SHADER_READ
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(vk_cmd->cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        mip_w = next_w;
+        mip_h = next_h;
+    }
+
+    // transition last mip: TRANSFER_DST -> SHADER_READ
+    barrier.subresourceRange.baseMipLevel = vtex->mip_levels - 1;
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(vk_cmd->cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    gfx_cmd_end(cmd);
+    gfx_cmd_submit(ctx, cmd, gfx_submit_wait_for_fence);
+    gfx_cmd_destroy(ctx, cmd);
+}
+
+
+void vk_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_texture_t* vsrc = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, src->idx);
+    vk_texture_t* vdst = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, dst->idx);
+    if (!vsrc || !vdst) return;
+
+    gfx_command_buffer_t* cmd = nullptr;
+    vk_create_cmd(ctx, &cmd);
+    vk_cmd_begin(cmd);
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+
+    auto make_barrier = [](VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+                           VkAccessFlags src_access, VkAccessFlags dst_access) -> VkImageMemoryBarrier {
+        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        b.image                           = image;
+        b.oldLayout                       = old_layout;
+        b.newLayout                       = new_layout;
+        b.srcAccessMask                   = src_access;
+        b.dstAccessMask                   = dst_access;
+        b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+        b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+        b.subresourceRange                = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        return b;
+    };
+
+    VkImageMemoryBarrier pre[2] = {
+        make_barrier(vsrc->image,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT),
+        make_barrier(vdst->image,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT),
+    };
+    vkCmdPipelineBarrier(vk_cmd->cmd,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 2, pre);
+
+    VkImageBlit blit = {};
+    blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    blit.srcOffsets[1]  = { (int32_t)vsrc->width, (int32_t)vsrc->height, 1 };
+    blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    blit.dstOffsets[1]  = { (int32_t)vdst->width, (int32_t)vdst->height, 1 };
+    vkCmdBlitImage(vk_cmd->cmd,
+        vsrc->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vdst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit, VK_FILTER_LINEAR);
+
+    VkImageMemoryBarrier post[2] = {
+        make_barrier(vsrc->image,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT),
+        make_barrier(vdst->image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT),
+    };
+    vkCmdPipelineBarrier(vk_cmd->cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 2, post);
+
+    gfx_cmd_end(cmd);
+    gfx_cmd_submit(ctx, cmd, gfx_submit_wait_for_fence);
+    gfx_cmd_destroy(ctx, cmd);
+}
+
+void vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
+{
+    auto vkctx = (vk_context_t*)ctx;
+    gfx_stub_not_implemented(vkctx ? vkctx->dbg_log : nullptr, "vk_texture_get_data");
+}
+
+
+void vk_destroy_texture(gfx_context_t* ctx, gfx_texture_t* _texture)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+
+    vk_texture_t* texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, _texture->idx);
+    if(texture != nullptr)
+    {
+        vkDestroyImageView(vctx->device, texture->view, nullptr);
+        vkDestroyImage(vctx->device, texture->image, nullptr);
+        vkFreeMemory(vctx->device, texture->memory, nullptr);
+
+        texture->view     = VK_NULL_HANDLE;
+        texture->image    = VK_NULL_HANDLE;
+        texture->memory   = VK_NULL_HANDLE;
+
+        gfx_pool_free(vctx->texture_pool, _texture->idx);
+    }
+}
+
+
+
+// --- PIPELINE ---
 
 void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline)
 {
@@ -2032,6 +2392,7 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     *out_pipeline = &vkpipeline->handle;
 }
 
+
 void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline)
 {
     assert(ctx);
@@ -2084,10 +2445,198 @@ void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t*
     *out_pipeline = &vk_pipeline->handle;
 }
 
+
+void vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
+{
+    if(!ctx || !pipeline)
+        return;
+
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_pipeline_t * vkpipeline = (vk_pipeline_t*)pipeline;
+    vkDestroyPipeline(vctx->device, vkpipeline->pipeline, nullptr);
+
+    vctx_free(ctx, vkpipeline);
+}
+
+
+
+// --- RENDER TARGET ---
+
 void vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target)
 {
     vk_context_t* vctx = from_ctx(ctx);
 }
+
+
+void vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* target)
+{
+    if (!ctx || !target)
+        return;
+
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_render_target_t *vkrt = (vk_render_target_t*)target;
+
+    vkDestroyRenderPass(vctx->device, vkrt->renderpass, nullptr);
+    vkDestroyFramebuffer(vctx->device, vkrt->framebuffer, nullptr);
+
+    vctx_free(ctx, vkrt);
+}
+
+
+
+// --- DESCRIPTOR SET ---
+
+void vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** out_set)
+{
+    assert(ctx && shader && out_set);
+
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_shader_t* vk_shader = (vk_shader_t*)shader;
+
+    if(vk_shader->pool == nullptr)
+    {
+        vk_create_descriptor_pool(vctx, vk_shader, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
+    }
+
+    if(vk_shader->pool->free_set_count == 0)
+    {
+        vk_create_descriptor_pool(vctx, vk_shader, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
+    }
+
+    uint32_t next_free = vk_shader->pool->next_free;
+
+    for(uint32_t i = next_free; i < vk_shader->pool->capacity; ++i)
+    {
+        if(!vk_shader->pool->sets[i].isfree)
+            continue;
+
+        vk_shader->pool->sets[i].isfree = false;
+        vk_shader->pool->free_set_count--;
+        vk_shader->pool->next_free = i + 1;
+
+        *out_set = &vk_shader->pool->sets[i].handle;
+        break;
+    }
+}
+
+
+void vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size)
+{
+    if (set == NULL || handle == 0)
+        return;
+
+    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
+    vk_shader_t* vkshader = (vk_shader_t*)vkset->shader;
+
+    uint16_t hash       = (handle >> 00) & 0xFFFF;
+    uint16_t unform_id  = (handle >> 16) & 0xFFFF;
+    uint16_t child_id   = (handle >> 32) & 0xFFFF;
+
+    if(vkshader->hash != hash)
+        return;
+
+  //  const spirvflect_uniform_t* uniform = unform_id < vkset->shader->binding_count ? &vkset->shader->uniforms[unform_id] : nullptr;
+    const gfx_uniform_t* uniform = unform_id < vkset->shader->uniform_count ? &vkset->shader->uniforms[unform_id] : nullptr;
+/*
+    if(_uniform == nullptr)
+        return;
+
+    if (_uniform->type != gfx_uniform_ubo)
+    {
+        vkshader->ctx->dbg_log(gfx_msg_error, "uniform_set_buffer_data() incorrect type for %s uniform name", _uniform->name);
+        return;
+    }*/
+
+    if ((uniform != nullptr) && (uniform->type == gfx_uniform_ubo) && (child_id < uniform->buffer.field_count))
+    {
+        uint32_t offset = uniform->buffer.fields[child_id].offset;
+        memcpy(vkset->uboptr + offset, data, size);
+    }
+}
+
+
+void vk_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset)
+{
+}
+
+
+void vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)
+{
+    if (set == NULL || handle == 0)
+        return;
+
+    // TODO: need refactor
+    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
+
+    vk_shader_t * vkshader      = (vk_shader_t*)vkset->shader;
+    vk_context_t* vkctx         = vkshader->ctx;
+    vk_texture_t* vktexture     = texture?(vk_texture_t*)gfx_pool_map(vkctx->texture_pool, texture->idx) : vkctx->default_texture;
+
+    uint16_t hash               = (handle) & 0xFFFF;
+    uint16_t unform_id          = (handle >> 16) & 0xFFFF;
+    uint16_t child_id           = (handle >> 32) & 0xFFFF;
+
+    if (vkshader->hash != hash)
+        return;
+
+    vkset->write_infos[unform_id].image_info.imageView = texture?vktexture->view : vkctx->default_texture->view;
+    vkset->dirty = true;
+
+
+    VkDescriptorImageInfo imageInfo = {0};
+    imageInfo.imageView = texture ? vktexture->view : vkctx->default_texture->view;;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    //imageInfo.sampler = texture.sampler;
+
+    VkWriteDescriptorSet write{};
+    write.dstSet = vkset->descriptor_set;
+    write.dstBinding = 0;
+    write.dstArrayElement = 0; //
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(vkctx->device, vkshader->uniform_count, vkset->writes, 0, NULL);
+}
+
+
+void vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)
+{
+    if (set == NULL || handle == 0)
+        return;
+
+    vk_descriptor_set_t* vkset  = (vk_descriptor_set_t*)set;
+    vk_shader_t*    vkshader    = (vk_shader_t*)vkset->shader;
+    vk_sampler_t*   vksampler   = (vk_sampler_t*)sampler;
+    vk_context_t*   vkctx       = vkshader->ctx;
+
+    uint16_t hash = handle & 0xFFFF;
+    uint16_t unform_id = (handle >> 16) & 0xFFFF;
+    uint16_t child_id = (handle >> 32) & 0xFFFF;
+
+    vkset->write_infos[unform_id].image_info.sampler = vksampler->sampler;
+    vkset->dirty = true;
+
+    vkUpdateDescriptorSets(vkctx->device, vkshader->uniform_count, vkset->writes, 0, NULL);
+}
+
+
+void vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)
+{
+    if (!ctx || !descriptor)
+        return;
+
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_descriptor_set_t * vkset = (vk_descriptor_set_t*)descriptor;
+
+    vkset->isfree = true;
+    vkset->pool->next_free = vkset->index_in_pool;
+    vkset->pool->free_set_count++;
+}
+
+
+
+// --- COMMAND BUFFER ---
 
 void vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
 {
@@ -2155,101 +2704,6 @@ void vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
 }
 
 
-// destroy render stuff
-void vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)
-{
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, buffer->idx);
-    if(vkbuffer)
-    {
-        if (vkbuffer->mapped && vkbuffer->buffer != nullptr)
-            vkUnmapMemory(vctx->device, vkbuffer->memory);
-
-        if (vkbuffer->buffer != nullptr)
-            vkDestroyBuffer(vctx->device, vkbuffer->buffer, nullptr);
-
-        if (vkbuffer->memory != nullptr)
-            vkFreeMemory(vctx->device, vkbuffer->memory, nullptr);
-
-        gfx_pool_free(vctx->buffers_pool, vkbuffer->handle.idx);
-    }
-}
-
-void vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* _shader)
-{
-    vk_context_t* vkctx = from_ctx(ctx);
-
-    vk_shader_t * shader = (vk_shader_t*)gfx_pool_map(vkctx->shaders_pool, _shader->idx);
-   // shader->pool
-
-    //destroy all pools and pool datas
-}
-
-void vk_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler)
-{
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_sampler_t* vks = (vk_sampler_t*)sampler;
-
-    vkDestroySampler(vctx->device, vks->sampler, nullptr);
-}
-
-void vk_destroy_texture(gfx_context_t* ctx, gfx_texture_t* _texture)
-{
-    vk_context_t* vctx = from_ctx(ctx);
-
-    vk_texture_t* texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, _texture->idx);
-    if(texture != nullptr)
-    {
-        vkDestroyImageView(vctx->device, texture->view, nullptr);
-        vkDestroyImage(vctx->device, texture->image, nullptr);
-        vkFreeMemory(vctx->device, texture->memory, nullptr);
-
-        texture->view     = VK_NULL_HANDLE;
-        texture->image    = VK_NULL_HANDLE;
-        texture->memory   = VK_NULL_HANDLE;
-
-        gfx_pool_free(vctx->texture_pool, _texture->idx);
-    }
-}
-
-void vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
-{
-    if(!ctx || !pipeline)
-        return;
-
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_pipeline_t * vkpipeline = (vk_pipeline_t*)pipeline;
-    vkDestroyPipeline(vctx->device, vkpipeline->pipeline, nullptr);
-
-    vctx_free(ctx, vkpipeline);
-}
-
-void vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* target)
-{
-    if (!ctx || !target)
-        return;
-
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_render_target_t *vkrt = (vk_render_target_t*)target;
-
-    vkDestroyRenderPass(vctx->device, vkrt->renderpass, nullptr);
-    vkDestroyFramebuffer(vctx->device, vkrt->framebuffer, nullptr);
-
-    vctx_free(ctx, vkrt);
-}
-
-void vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)
-{
-    if (!ctx || !descriptor)
-        return;
-
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_descriptor_set_t * vkset = (vk_descriptor_set_t*)descriptor;
-
-    vkset->isfree = true;
-    vkset->pool->next_free = vkset->index_in_pool;
-    vkset->pool->free_set_count++;
-}
 
 void vk_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
 {
@@ -2274,403 +2728,6 @@ void vk_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
     vkDestroyCommandPool(vctx->device, vkcmd->pool, nullptr);
 }
 
-void vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
-{
-    auto vkctx = (vk_context_t*)(ctx);
-    auto vkbuf = (vk_buffer_t*)gfx_pool_map(vkctx->buffers_pool, buffer->idx);
-    //assert(data != nullptr);
-    //assert(size == 0);
-
-    if(vkbuf->mapped)
-    {
-        if(vkbuf->data_ptr == nullptr)
-            vkMapMemory(vkctx->device, vkbuf->memory, offset, size, 0, &vkbuf->data_ptr);
-
-        if(size > 0 && data != nullptr)
-            memcpy(vkbuf->data_ptr, (char*)data + offset, size);
-    }
-    else if(data != nullptr)
-    {
-        auto staging = vkctx->staging_buffer;
-        if (size < staging->buffer_size )
-        {
-            if (staging->data_ptr == nullptr)
-                vkMapMemory(vkctx->device, staging->memory, 0, staging->buffer_size, 0, &staging->data_ptr);
-            memcpy(staging->data_ptr, data, size);
-            // vkUnmapMemory(ctx->device, s_staging.memory);
-             //vkFlushMappedMemoryRanges();
-
-            vk_copy_info_t info = { };
-                info.dst_buffer = vkbuf->buffer;
-                info.dst_buffer_size = (uint32_t)size;
-                info.dst_buffer_offset = offset;
-            _vk_copy_buffer_to(vkctx, vkctx->staging_buffer->buffer, &info);
-        }
-        else
-        {
-            vk_buffer_t staging = {};
-            auto memflag = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-            _vk_create_buffer(vkctx, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, memflag, &staging);
-
-            if (data)
-            {
-                vkMapMemory(vkctx->device, staging.memory, 0, size, 0, &staging.data_ptr);
-                memcpy(staging.data_ptr, data, size);
-                vkUnmapMemory(vkctx->device, staging.memory);
-                staging.data_ptr = nullptr;
-            }
-
-            vk_copy_info_t info = { };
-            info.dst_buffer = vkbuf->buffer;
-            info.dst_buffer_size = (uint32_t)size;
-            _vk_copy_buffer_to(vkctx, staging.buffer, &info);
-
-            vkDestroyBuffer(vkctx->device, staging.buffer, nullptr);
-            vkFreeMemory(vkctx->device, staging.memory, nullptr);
-        }
-    }
-}
-
-void vk_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* _texture, uint32_t slot_idx)
-{
-    auto vkctx = (vk_context_t*)ctx;
-
-    if(slot_idx == 0 /*|| slot_idx > vkctx->max_bindles_texture_count*/){
-        vkctx->dbg_log(gfx_msg_error, "vk_update_bindless_texture: incorrect slot index %d", slot_idx);
-        return;
-    }
-
-    if (vkctx->bindless_descriptor_set == VK_NULL_HANDLE) {
-        vkctx->dbg_log(gfx_msg_error, "vk_update_bindless_texture: bindless not supported");
-        return;
-    }
-
-    // if texture null and idx != 0, set default texture
-    uint64_t handle = _texture ? _texture->idx : vkctx->default_texture->handle.idx;
-    vk_texture_t* texture = (vk_texture_t*)gfx_pool_map(vkctx->texture_pool, handle);
-
-    VkDescriptorImageInfo image_info = { 0 };
-    image_info.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    image_info.imageView             = texture->view;
-    //image_info.sampler             = texture->sampler;
-
-    VkWriteDescriptorSet write  = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        write.dstSet            = vkctx->bindless_descriptor_set;
-        write.dstBinding        = 0;            // Target our texture array binding
-        write.dstArrayElement   = slot_idx;     // Dynamic index within the global array
-        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        write.descriptorCount   = 1;
-        write.pImageInfo        = &image_info;
-    vkUpdateDescriptorSets(vkctx->device, 1, &write, 0, nullptr);    // Safe to call at any time (even mid-frame) due to UpdateAfterBind flags
-}
-
-void vk_update_image_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
-{
-    auto vkctx = (vk_context_t*)ctx;
-    gfx_stub_not_implemented(vkctx ? vkctx->dbg_log : nullptr, "vk_update_image_data");
-}
-
-
-void vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
-{
-    auto vkctx = (vk_context_t*)ctx;
-    gfx_stub_not_implemented(vkctx ? vkctx->dbg_log : nullptr, "vk_texture_get_data");
-}
-
-void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
-{
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_texture_t* vtex = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, texture->idx);
-    if (!vtex || vtex->mip_levels <= 1) return;
-
-    VkFormatProperties props;
-    vkGetPhysicalDeviceFormatProperties(vctx->physicaldevice, vtex->format, &props);
-    if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) ||
-        !(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
-        vctx->dbg_log(gfx_msg_warning, "vk_texture_generate_mipmap: format does not support blit");
-        return;
-    }
-
-    gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(ctx, &cmd);
-    vk_cmd_begin(cmd);
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-
-    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-    barrier.image                           = vtex->image;
-    barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount     = 1;
-    barrier.subresourceRange.levelCount     = 1;
-
-    int32_t mip_w = (int32_t)vtex->width;
-    int32_t mip_h = (int32_t)vtex->height;
-
-    for (uint32_t i = 1; i < vtex->mip_levels; ++i) {
-        // transition mip (i-1): SHADER_READ -> TRANSFER_SRC
-        barrier.subresourceRange.baseMipLevel = i - 1;
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        vkCmdPipelineBarrier(vk_cmd->cmd,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        // transition mip i: UNDEFINED -> TRANSFER_DST
-        barrier.subresourceRange.baseMipLevel = i;
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(vk_cmd->cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        int32_t next_w = mip_w > 1 ? mip_w / 2 : 1;
-        int32_t next_h = mip_h > 1 ? mip_h / 2 : 1;
-
-        VkImageBlit blit = {};
-        blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1 };
-        blit.srcOffsets[0]  = { 0, 0, 0 };
-        blit.srcOffsets[1]  = { mip_w, mip_h, 1 };
-        blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 };
-        blit.dstOffsets[0]  = { 0, 0, 0 };
-        blit.dstOffsets[1]  = { next_w, next_h, 1 };
-        vkCmdBlitImage(vk_cmd->cmd,
-            vtex->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            vtex->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &blit, VK_FILTER_LINEAR);
-
-        // transition mip (i-1) back to SHADER_READ
-        barrier.subresourceRange.baseMipLevel = i - 1;
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(vk_cmd->cmd,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        mip_w = next_w;
-        mip_h = next_h;
-    }
-
-    // transition last mip: TRANSFER_DST -> SHADER_READ
-    barrier.subresourceRange.baseMipLevel = vtex->mip_levels - 1;
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    vkCmdPipelineBarrier(vk_cmd->cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    gfx_cmd_end(cmd);
-    gfx_submit_cmd(ctx, cmd, gfx_submit_wait_for_fence);
-    gfx_destroy_cmd(ctx, cmd);
-}
-
-void vk_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
-{
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_texture_t* vsrc = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, src->idx);
-    vk_texture_t* vdst = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, dst->idx);
-    if (!vsrc || !vdst) return;
-
-    gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(ctx, &cmd);
-    vk_cmd_begin(cmd);
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-
-    auto make_barrier = [](VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
-                           VkAccessFlags src_access, VkAccessFlags dst_access) -> VkImageMemoryBarrier {
-        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-        b.image                           = image;
-        b.oldLayout                       = old_layout;
-        b.newLayout                       = new_layout;
-        b.srcAccessMask                   = src_access;
-        b.dstAccessMask                   = dst_access;
-        b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-        b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-        b.subresourceRange                = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        return b;
-    };
-
-    VkImageMemoryBarrier pre[2] = {
-        make_barrier(vsrc->image,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT),
-        make_barrier(vdst->image,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT),
-    };
-    vkCmdPipelineBarrier(vk_cmd->cmd,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 0, nullptr, 0, nullptr, 2, pre);
-
-    VkImageBlit blit = {};
-    blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    blit.srcOffsets[1]  = { (int32_t)vsrc->width, (int32_t)vsrc->height, 1 };
-    blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    blit.dstOffsets[1]  = { (int32_t)vdst->width, (int32_t)vdst->height, 1 };
-    vkCmdBlitImage(vk_cmd->cmd,
-        vsrc->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        vdst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1, &blit, VK_FILTER_LINEAR);
-
-    VkImageMemoryBarrier post[2] = {
-        make_barrier(vsrc->image,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT),
-        make_barrier(vdst->image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT),
-    };
-    vkCmdPipelineBarrier(vk_cmd->cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 2, post);
-
-    gfx_cmd_end(cmd);
-    gfx_submit_cmd(ctx, cmd, gfx_submit_wait_for_fence);
-    gfx_destroy_cmd(ctx, cmd);
-}
-
-uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name)
-{
-    if(shader == nullptr || name == nullptr)
-        return 0;
-
-    vk_shader_t * vkshader = (vk_shader_t*)shader;
-    uint16_t  hash = vkshader->hash;
-
-    for (uint32_t uniform_id = 0; uniform_id < vkshader->uniform_count; ++uniform_id)
-    {
-        gfx_uniform_t* uniform = &vkshader->uniforms[uniform_id];
-
-        if(uniform->type == gfx_uniform_ubo)
-        {
-            for (int16_t field_id = 0; field_id < uniform->buffer.field_count; ++field_id)
-            {
-                if (strcmp(name, uniform->buffer.fields[field_id].name))
-                    continue;
-
-                return  (uint64_t)(hash & 0xFFFF) |
-                        (((uint64_t)uniform_id & 0xFFFF) << 16) |
-                        (((uint64_t)field_id & 0xFFFF) << 32);
-            }
-        }
-
-        if (strcmp(name, uniform->name))
-            continue;
-
-        return  (hash & 0xFFFF) | 
-                (uniform_id & 0xFFFF) << 16;
-    }
-    return 0;
-}
-
-void vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size)
-{
-    if (set == NULL || handle == 0)
-        return;
-
-    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
-    vk_shader_t* vkshader = (vk_shader_t*)vkset->shader;
-
-    uint16_t hash       = (handle >> 00) & 0xFFFF;
-    uint16_t unform_id  = (handle >> 16) & 0xFFFF;
-    uint16_t child_id   = (handle >> 32) & 0xFFFF;
-
-    if(vkshader->hash != hash)
-        return;
-
-  //  const spirvflect_uniform_t* uniform = unform_id < vkset->shader->binding_count ? &vkset->shader->uniforms[unform_id] : nullptr;
-    const gfx_uniform_t* uniform = unform_id < vkset->shader->uniform_count ? &vkset->shader->uniforms[unform_id] : nullptr;
-/*
-    if(_uniform == nullptr)
-        return;
-
-    if (_uniform->type != gfx_uniform_ubo)
-    {
-        vkshader->ctx->dbg_log(gfx_msg_error, "uniform_set_buffer_data() incorrect type for %s uniform name", _uniform->name);
-        return;
-    }*/
-
-    if ((uniform != nullptr) && (uniform->type == gfx_uniform_ubo) && (child_id < uniform->buffer.field_count))
-    {
-        uint32_t offset = uniform->buffer.fields[child_id].offset;
-        memcpy(vkset->uboptr + offset, data, size);
-    }
-}
-
-void vk_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset)
-{
-}
-
-void vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)
-{
-    if (set == NULL || handle == 0)
-        return;
-
-    // TODO: need refactor
-    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
-
-    vk_shader_t * vkshader      = (vk_shader_t*)vkset->shader;
-    vk_context_t* vkctx         = vkshader->ctx;
-    vk_texture_t* vktexture     = texture?(vk_texture_t*)gfx_pool_map(vkctx->texture_pool, texture->idx) : vkctx->default_texture;
-
-    uint16_t hash               = (handle) & 0xFFFF;
-    uint16_t unform_id          = (handle >> 16) & 0xFFFF;
-    uint16_t child_id           = (handle >> 32) & 0xFFFF;
-
-    if (vkshader->hash != hash)
-        return;
-
-    vkset->write_infos[unform_id].image_info.imageView = texture?vktexture->view : vkctx->default_texture->view;
-    vkset->dirty = true;
-
-
-    VkDescriptorImageInfo imageInfo = {0};
-    imageInfo.imageView = texture ? vktexture->view : vkctx->default_texture->view;;
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    //imageInfo.sampler = texture.sampler;
-
-    VkWriteDescriptorSet write{};
-    write.dstSet = vkset->descriptor_set;
-    write.dstBinding = 0;
-    write.dstArrayElement = 0; //
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    write.pImageInfo = &imageInfo;
-
-    vkUpdateDescriptorSets(vkctx->device, vkshader->uniform_count, vkset->writes, 0, NULL);
-}
-
-void vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)
-{
-    if (set == NULL || handle == 0)
-        return;
-
-    vk_descriptor_set_t* vkset  = (vk_descriptor_set_t*)set;
-    vk_shader_t*    vkshader    = (vk_shader_t*)vkset->shader;
-    vk_sampler_t*   vksampler   = (vk_sampler_t*)sampler;
-    vk_context_t*   vkctx       = vkshader->ctx;
-
-    uint16_t hash = handle & 0xFFFF;
-    uint16_t unform_id = (handle >> 16) & 0xFFFF;
-    uint16_t child_id = (handle >> 32) & 0xFFFF;
-
-    vkset->write_infos[unform_id].image_info.sampler = vksampler->sampler;
-    vkset->dirty = true;
-
-    vkUpdateDescriptorSets(vkctx->device, vkshader->uniform_count, vkset->writes, 0, NULL);
-}
-
-
-// rendering 
 
 void vk_cmd_begin(gfx_command_buffer_t* cmd)
 {
@@ -2685,6 +2742,7 @@ void vk_cmd_begin(gfx_command_buffer_t* cmd)
         vk_cmd->ctx->dbg_log(gfx_msg_error, "vkBeginCommandBuffer failed!(s)", err_str);
     }
 }
+
 
 void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target)
 {
@@ -2834,6 +2892,7 @@ void vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
     vkcmd->time_query_current_index += 2; // reserve pair (start, end)
 }
 
+
 void vk_cmd_pop_marker(gfx_command_buffer_t* cmd)
 {
     vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
@@ -2854,12 +2913,12 @@ void vk_cmd_pop_marker(gfx_command_buffer_t* cmd)
 }
 
 
+
 typedef struct vulkan_state_mapping_t {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2        access;
     VkImageLayout         image_layout;
 } vulkan_state_mapping_t;
-
 
 static vulkan_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags aspect) {
     vulkan_state_mapping_t out = { 0 };
@@ -2953,6 +3012,7 @@ void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, ui
     vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
 
+
 void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier old_state, gfx_barrier new_state)
 {
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
@@ -2992,6 +3052,7 @@ void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures,
     dependency_info.pImageMemoryBarriers    = image_barrier_count > 0 ? image_barriers : NULL;;
     vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
+
 
 void vk_cmd_end(gfx_command_buffer_t* cmd)
 {
@@ -3085,7 +3146,9 @@ void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
 
 
 
-//////////////////////////////// utils /////////////////////////////////////////////////
+
+
+// --- DEBUG ---
 
 void vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name)
 {
@@ -3111,7 +3174,6 @@ void vk_debug_set_buffer_name(vk_context_t* ctx, vk_buffer_t* buffer, const char
     vk_debug_set_name(ctx, (uint64_t)buffer->buffer, VK_OBJECT_TYPE_BUFFER, name);
 }
 
-
 void vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char* name)
 {
     for (uint32_t i = 0; i < shader->stages_count; ++i)
@@ -3119,5 +3181,6 @@ void vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char
         vk_debug_set_name(ctx, (uint64_t)shader->stages[i].module, VK_OBJECT_TYPE_SHADER_MODULE, name);
     }
 }
+
 
 #endif

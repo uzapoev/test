@@ -115,7 +115,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
         vb.mapped   = false;
         vb.size     = vertex_buffer_size;
         vb.usage    = gfx_buffer_usage_vertex;
-    pool->vertex_buffer = gfx_create_buffer2(ctx, &vb);
+    pool->vertex_buffer = gfx_buffer_create(ctx, &vb);
     pool->vertex_buffer_size = vertex_buffer_size;
 
     gfx_buffer_desc_t ib = {};
@@ -123,7 +123,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
         ib.mapped   = false;
         ib.size     = index_buffer_size;
         ib.usage    = gfx_buffer_usage_index;
-    pool->index_buffer = gfx_create_buffer2(ctx, &ib);
+    pool->index_buffer = gfx_buffer_create(ctx, &ib);
     pool->index_buffer_size = index_buffer_size;
 }
 
@@ -173,7 +173,7 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
             out_mesh->vertex_buffer = pool->vertex_buffer;
             out_mesh->vertex_buffer_offset = offset_vb;
 
-            gfx_update_buffer_data(ctx, pool->vertex_buffer, vertex_data_ptr, vertex_buffer_size, offset_vb);
+            gfx_buffer_update_data(ctx, pool->vertex_buffer, vertex_data_ptr, vertex_buffer_size, offset_vb);
         }
         else
         {
@@ -185,7 +185,7 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
             out_mesh->index_buffer = pool->index_buffer;
             out_mesh->index_buffer_offset = offset_ib;
 
-            gfx_update_buffer_data(ctx, pool->index_buffer, index_data_ptr, index_buffer_size, offset_ib);
+            gfx_buffer_update_data(ctx, pool->index_buffer, index_data_ptr, index_buffer_size, offset_ib);
         }
         else
         {
@@ -200,7 +200,7 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
             vb_desc.usage = gfx_buffer_usage_vertex;
             vb_desc.data = (uint8_t*)vertex_data_ptr;
             vb_desc.size = header->vertex_stride * header->vertex_count;
-        out_mesh->vertex_buffer = gfx_create_buffer2(ctx, &vb_desc);
+        out_mesh->vertex_buffer = gfx_buffer_create(ctx, &vb_desc);
     }
 
     if(out_mesh->index_buffer == nullptr)
@@ -210,7 +210,7 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
             ib_desc.usage = gfx_buffer_usage_index;
             ib_desc.data = (uint8_t*)index_data_ptr;
             ib_desc.size = header->index_stride * header->index_count;
-        out_mesh->index_buffer = gfx_create_buffer2(ctx, &ib_desc);
+        out_mesh->index_buffer = gfx_buffer_create(ctx, &ib_desc);
     }
 
     out_mesh->index_format = header->index_stride == 2 ? gfx_index_format_16 : gfx_index_format_32;
@@ -472,7 +472,7 @@ void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * d
             desc.data = (char*)desc.data + offset;
         }
         desc.type = gfx_texture2d;
-        gfx_texture_t* texture = gfx_create_texture2(ctx, &desc);
+        gfx_texture_t* texture = gfx_texture_create(ctx, &desc);
         *out_texture = texture;
     }
 
@@ -631,7 +631,7 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
         shader_desc.uniforms = uniforms;
         shader_desc.uniform_count = uniform_count;
 
-    *out_shader = gfx_create_shader2(ctx, &shader_desc);
+    *out_shader = gfx_shader_create(ctx, &shader_desc);
 }
 
 void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct gfx_material_instance_t** material)

@@ -156,7 +156,7 @@ extern "C" void dx12_uniform_set_buffer_data(gfx_descriptor_set_t* /*set*/, uint
 extern "C" void dx12_uniform_set_texture(gfx_descriptor_set_t* /*set*/, uint64_t /*handle*/, gfx_texture_t* /*texture*/) {}
 extern "C" void dx12_uniform_set_sampler(gfx_descriptor_set_t* /*set*/, uint64_t /*handle*/, gfx_sampler_t* /*sampler*/) {}
 
-extern "C" void dx12_update_image_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+extern "C" void dx12_update_texture_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
 {
     dx12_context_t* dctx = from_ctx(ctx);
     gfx_stub_not_implemented(dctx ? dctx->dbglog : nullptr, "dx12_update_image_data");
@@ -211,64 +211,82 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
 {
     memset(func_table, 0, sizeof(*func_table));
 
-    func_table->pfn_init                    = dx12_init;
-    func_table->pfn_create_swapchain        = dx12_create_swapchain;
-    func_table->pfn_get_caps                = dx12_get_caps;
+    // CONTEXT
+    func_table->pfn_init     = dx12_init;
+    func_table->pfn_get_caps = dx12_get_caps;
 
-    func_table->pfn_acquire_img             = dx12_acquire_img;
-    func_table->pfn_present_img             = dx12_present_img;
+    // SWAPCHAIN
+    func_table->pfn_create_swapchain = dx12_create_swapchain;
+    func_table->pfn_acquire_img      = dx12_acquire_img;
+    func_table->pfn_present_img      = dx12_present_img;
 
-    func_table->pfn_create_buffer           = dx12_create_buffer;
-    func_table->pfn_create_shader           = dx12_create_shader;
-    func_table->pfn_create_sampler          = dx12_create_sampler;
+    // BUFFER
+    func_table->pfn_create_buffer      = dx12_create_buffer;
+    func_table->pfn_update_buffer_data = dx12_update_buffer_data;
+    func_table->pfn_destroy_buffer     = dx12_destroy_buffer;
+
+    // SHADER
+    func_table->pfn_create_shader    = dx12_create_shader;
+    func_table->pfn_uniform_location = dx12_uniform_location;
+    func_table->pfn_destroy_shader   = dx12_destroy_shader;
+
+    // SAMPLER
+    func_table->pfn_create_sampler  = dx12_create_sampler;
+    func_table->pfn_destroy_sampler = dx12_destroy_sampler;
+
+    // TEXTURE
     func_table->pfn_create_texture          = dx12_create_texture;
-    func_table->pfn_create_pipeline         = dx12_create_pipeline;
-    func_table->pfn_create_compute_pipeline = dx12_create_compute_pipeline;
-    func_table->pfn_create_render_target    = dx12_create_render_target;
-    func_table->pfn_create_descriptor_set   = dx12_create_descriptor_set;
-    func_table->pfn_create_cmd              = dx12_create_cmd;
-
-    func_table->pfn_destroy_buffer          = dx12_destroy_buffer;
-    func_table->pfn_destroy_shader          = dx12_destroy_shader;
-    func_table->pfn_destroy_sampler         = dx12_destroy_sampler;
-    func_table->pfn_destroy_texture         = dx12_destroy_texture;
-    func_table->pfn_destroy_pipeline        = dx12_destroy_pipeline;
-    func_table->pfn_destroy_render_target   = dx12_destroy_render_target;
-    func_table->pfn_destroy_descriptor_set  = dx12_destroy_descriptor_set;
-    func_table->pfn_destroy_cmd             = dx12_destroy_cmd;
-
-    func_table->pfn_update_buffer_data      = dx12_update_buffer_data;
-    func_table->pfn_update_image_data       = dx12_update_image_data;
-    func_table->pfn_texture_get_data        = dx12_texture_get_data;
+    func_table->pfn_update_texture_data     = dx12_update_texture_data;
+    func_table->pfn_update_bindless_texture = dx12_update_bindless_texture;
     func_table->pfn_texture_generate_mipmap = dx12_texture_generate_mipmap;
     func_table->pfn_blit_image              = dx12_blit_image;
-    func_table->pfn_update_bindless_texture = dx12_update_bindless_texture;
+    func_table->pfn_texture_get_data        = dx12_texture_get_data;
+    func_table->pfn_destroy_texture         = dx12_destroy_texture;
 
-    func_table->pfn_uniform_location        = dx12_uniform_location;
+    // PIPELINE
+    func_table->pfn_create_pipeline         = dx12_create_pipeline;
+    func_table->pfn_create_compute_pipeline = dx12_create_compute_pipeline;
+    func_table->pfn_destroy_pipeline        = dx12_destroy_pipeline;
+
+    // RENDER TARGET
+    func_table->pfn_create_render_target  = dx12_create_render_target;
+    func_table->pfn_destroy_render_target = dx12_destroy_render_target;
+
+    // DESCRIPTOR SET
+    func_table->pfn_create_descriptor_set   = dx12_create_descriptor_set;
     func_table->pfn_uniform_set_buffer      = dx12_uniform_set_buffer;
     func_table->pfn_uniform_set_buffer_data = dx12_uniform_set_buffer_data;
     func_table->pfn_uniform_set_texture     = dx12_uniform_set_texture;
     func_table->pfn_uniform_set_sampler     = dx12_uniform_set_sampler;
+    func_table->pfn_destroy_descriptor_set  = dx12_destroy_descriptor_set;
 
-    func_table->pfn_cmd_begin               = dx12_cmd_begin;
-    func_table->pfn_cmd_begin_pass          = dx12_cmd_begin_pass;
-    func_table->pfn_cmd_end_pass            = dx12_cmd_end_pass;
-    func_table->pfn_cmd_scissor             = dx12_cmd_scissor;
-    func_table->pfn_cmd_viewport            = dx12_cmd_viewport;
-    func_table->pfn_cmd_bind_pipeline       = dx12_cmd_bind_pipeline;
-    func_table->pfn_cmd_bind_descriptor_set = dx12_cmd_bind_descriptor_set;
-    func_table->pfn_cmd_bind_buffer_ib      = dx12_cmd_bind_buffer_ib;
-    func_table->pfn_cmd_bind_buffer_vb      = dx12_cmd_bind_buffer_vb;
-    func_table->pfn_cmd_draw                = dx12_cmd_draw;
-    func_table->pfn_cmd_draw_indexed        = dx12_cmd_draw_indexed;
+    // COMMAND BUFFER
+    func_table->pfn_create_cmd = dx12_create_cmd;
+    func_table->pfn_destroy_cmd = dx12_destroy_cmd;
+
+    func_table->pfn_cmd_begin      = dx12_cmd_begin;
+    func_table->pfn_cmd_begin_pass = dx12_cmd_begin_pass;
+    func_table->pfn_cmd_end_pass   = dx12_cmd_end_pass;
+
+    func_table->pfn_cmd_scissor               = dx12_cmd_scissor;
+    func_table->pfn_cmd_viewport              = dx12_cmd_viewport;
+    func_table->pfn_cmd_bind_pipeline         = dx12_cmd_bind_pipeline;
+    func_table->pfn_cmd_bind_descriptor_set   = dx12_cmd_bind_descriptor_set;
+    func_table->pfn_cmd_bind_buffer_ib        = dx12_cmd_bind_buffer_ib;
+    func_table->pfn_cmd_bind_buffer_vb        = dx12_cmd_bind_buffer_vb;
+    func_table->pfn_cmd_draw                  = dx12_cmd_draw;
+    func_table->pfn_cmd_draw_indexed          = dx12_cmd_draw_indexed;
     func_table->pfn_cmd_draw_indexed_indirect = dx12_cmd_draw_indexed_indirect;
-    func_table->pfn_cmd_dispatch_compute    = dx12_cmd_dispatch_compute;
-    func_table->pfn_cmd_push_marker         = dx12_cmd_push_marker;
-    func_table->pfn_cmd_pop_marker          = dx12_cmd_pop_marker;
-    func_table->pfn_cmd_buffer_barrier      = dx12_cmd_buffer_barrier;
-    func_table->pfn_cmd_texture_barrier     = dx12_cmd_texture_barrier;
-    func_table->pfn_cmd_end                 = dx12_cmd_end;
-    func_table->pfn_submit_cmd              = dx12_submit_cmd;
+    func_table->pfn_cmd_dispatch_compute      = dx12_cmd_dispatch_compute;
+
+    func_table->pfn_cmd_push_marker = dx12_cmd_push_marker;
+    func_table->pfn_cmd_pop_marker  = dx12_cmd_pop_marker;
+
+    func_table->pfn_cmd_buffer_barrier  = dx12_cmd_buffer_barrier;
+    func_table->pfn_cmd_texture_barrier = dx12_cmd_texture_barrier;
+
+    func_table->pfn_cmd_end    = dx12_cmd_end;
+    func_table->pfn_submit_cmd = dx12_submit_cmd;
 }
 
 #endif // DX12_AVAILABLE
