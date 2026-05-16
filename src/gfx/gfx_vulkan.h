@@ -293,8 +293,8 @@ gfx_api void    vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, 
 gfx_api void    vk_update_texture_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
 gfx_api void    vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 gfx_api void    vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
-gfx_api void    vk_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
-gfx_api void    vk_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
+gfx_api void    vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+gfx_api void    vk_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
 
 gfx_api uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name);
 gfx_api void    vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);

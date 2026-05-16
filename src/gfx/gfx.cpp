@@ -762,9 +762,9 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     // TEXTURE
     func_table->pfn_create_texture          = vk_create_texture;
     func_table->pfn_update_texture_data     = vk_update_texture_data;
-    func_table->pfn_update_bindless_texture = vk_update_bindless_texture;
+    func_table->pfn_update_bindless_texture = vk_texture_update_bindless;
     func_table->pfn_texture_generate_mipmap = vk_texture_generate_mipmap;
-    func_table->pfn_blit_image              = vk_blit_image;
+    func_table->pfn_blit_image              = vk_texture_blit;
     func_table->pfn_texture_get_data        = vk_texture_get_data;
     func_table->pfn_destroy_texture         = vk_destroy_texture;
 

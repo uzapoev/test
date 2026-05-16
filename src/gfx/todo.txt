@@ -35,33 +35,33 @@ SWAPCHAIN
   gfx_present_img                  - present to screen
 
 RESOURCE CREATION
-  gfx_create_buffer2               - vertex / index / uniform / storage / indirect
-  gfx_create_shader2               - from spirv (vk/wgpu) or MSL source (metal)
-  gfx_create_sampler2              - filter + address mode + anisotropy
-  gfx_create_texture2              - 2d / cube / array / 3d + compressed formats
-  gfx_create_pipeline2             - raster pipeline (vs+fs + vertex layout + render states)
-  gfx_create_compute_pipeline2     - compute shader pipeline
-  gfx_create_render_target2        - offscreen render target (color + depth attachments)
-  gfx_create_descriptor_set2       - binding set per shader
-  gfx_create_cmd2                  - command buffer
+  gfx_buffer_create                - vertex / index / uniform / storage / indirect
+  gfx_shader_create                - from spirv (vk/wgpu) or MSL source (metal)
+  gfx_sampler_create               - filter + address mode + anisotropy
+  gfx_texture_create               - 2d / cube / array / 3d + compressed formats
+  gfx_pipeline_create              - raster pipeline (vs+fs + vertex layout + render states)
+  gfx_compute_pipeline_create      - compute shader pipeline
+  gfx_render_target_create         - offscreen render target (color + depth attachments)
+  gfx_descriptor_set_create        - binding set per shader
+  gfx_cmd_create                   - command buffer
 
 RESOURCE DESTRUCTION
-  gfx_destroy_buffer
-  gfx_destroy_shader
-  gfx_destroy_sampler
-  gfx_destroy_texture
-  gfx_destroy_pipeline
-  gfx_destroy_render_target
-  gfx_destroy_descriptor_set
-  gfx_destroy_cmd
-  [MISSING] gfx_destroy_compute_pipeline  -- no public API, no pfn slot
+  gfx_buffer_destroy
+  gfx_shader_destroy
+  gfx_sampler_destroy
+  gfx_texture_destroy
+  gfx_pipeline_destroy
+  gfx_render_target_destroy
+  gfx_descriptor_set_destroy
+  gfx_cmd_destroy
+  [MISSING] gfx_compute_pipeline_destroy  -- no public API, no pfn slot
 
 BUFFER / TEXTURE UPDATES
-  gfx_update_buffer_data           - cpu -> gpu (staging copy or mapped)
-  gfx_update_image_data            - [WIP] update texture region via staging
+  gfx_buffer_update_data           - cpu -> gpu (staging copy or mapped)
+  gfx_texture_update_data          - [WIP] update texture region via staging
   gfx_texture_get_data             - [WIP] readback texture to cpu
   gfx_texture_generate_mipmap      - [WIP] auto-generate mipmaps
-  gfx_blit_image                   - [WIP] copy / blit between textures
+  gfx_texture_blit                 - [WIP] copy / blit between textures
 
 SHADER UNIFORMS / BINDINGS
   gfx_uniform_location             - lookup binding handle by name
@@ -97,10 +97,10 @@ COMMAND BUFFER
   gfx_cmd_buffer_barrier           - explicit buffer memory barrier
   gfx_cmd_texture_barrier          - explicit texture layout/memory barrier
 
-  gfx_update_bindless_texture      - [MISSING] no pfn slot, no implementation
+  gfx_texture_update_bindless      - [WIP] update bindless descriptor table entry
 
 SUBMIT / SYNC
-  gfx_submit_cmd                   - submit cmd with wait options (idle/fence/queue)
+  gfx_cmd_submit                   - submit cmd with wait options (idle/fence/queue)
   gfx_submit                       - [MISSING] submit + return fence  (declared, unimpl)
   gfx_wait                         - [MISSING] wait on fence          (declared, unimpl)
 
@@ -147,11 +147,11 @@ UTILITY
  destroy_cmd                        |   Y    |   ~[4]|   Y    |  ~[1]
  destroy_compute_pipeline           |   N[5] |   N[5]|   N[5] |  N[5]
 ------------------------------------|--------|-------|--------|------
- update_buffer_data                 |   Y    |   Y[6]|   Y    |  ~[1]
- update_image_data                  |   ~    |   ~   |   ~    |  ~
+ buffer_update_data                 |   Y    |   Y[6]|   Y    |  ~[1]
+ texture_update_data                |   ~    |   ~   |   ~    |  ~
  texture_get_data                   |   ~    |   ~   |   ~    |  ~
  texture_generate_mipmap            |   Y    |   Y   |  ~[W]  |  ~
- blit_image                         |   Y    |   Y   |   Y    |  ~
+ texture_blit                       |   Y    |   Y   |   Y    |  ~
 ------------------------------------|--------|-------|--------|------
  uniform_location                   |   Y    |   Y   |   Y    |  ~[1]
  uniform_set_buffer_data            |   Y    |   Y   |   Y    |  ~[1]
@@ -178,9 +178,9 @@ UTILITY
  cmd_pop_marker                     |   Y    |   Y   |   /    |  ~[1]
  cmd_buffer_barrier                 |   Y    |   /   |   /    |  ~[1]
  cmd_texture_barrier                |   Y    |   /   |   /    |  ~[1]
- update_bindless_texture            |   ~    |   ~   |   ~    |  ~[1]
+ texture_update_bindless            |   ~    |   ~   |   ~    |  ~[1]
 ------------------------------------|--------|-------|--------|------
- submit_cmd                         |   Y    |   Y   |   Y    |  ~[1]
+ cmd_submit                         |   Y    |   Y   |   Y    |  ~[1]
  submit (fence)                     |   N    |   N   |   N    |  N
  wait (fence)                       |   N    |   N   |   N    |  N
 
@@ -199,7 +199,7 @@ UTILITY
 
 [4]  Metal function has empty body ({}). No resource allocated / freed.
 
-[5]  No gfx_destroy_compute_pipeline in public API and no pfn slot.
+[5]  No gfx_compute_pipeline_destroy in public API and no pfn slot.
      compute pipeline memory is leaked at shutdown.
 
 [6]  Metal update_buffer_data works only for Shared/Managed storage mode.
@@ -237,14 +237,14 @@ UTILITY
 
 HIGH (correctness / crash risk)
   - vk_create_render_target: implement (currently empty, needed for offscreen)
-  - gfx_destroy_compute_pipeline: add public API + pfn slot + all backends
+  - gfx_compute_pipeline_destroy: add public API + pfn slot + all backends
   - metal_cmd_begin_pass: expose clear color/depth via descriptor instead of hardcode
   - metal_cmd_draw / cmd_draw_indexed: use topology from pipeline state
 
 MEDIUM (missing features)
   - wgpu texture_generate_mipmap: requires custom downsample render/compute pass per mip level
   - texture_get_data: implement readback (staging + map)
-  - update_image_data: implement staging-copy path for all backends
+  - texture_update_data: implement staging-copy path for all backends
   - metal compute pipeline: implement metal_create_compute_pipeline
   - wgpu compute pipeline + render target: implement
   - metal destroy_render_target / destroy_descriptor_set / destroy_cmd: implement
@@ -256,6 +256,6 @@ LOW (API completeness)
                             MTLSharedEvent metal, WGPUFuture wgpu)
   - gfx_cmd_push_constant: add pfn slot + implement (vkCmdPushConstants / metal setBytes /
                             wgpu no native push constants - emulate via uniform buffer)
-  - gfx_update_bindless_texture: add pfn slot + implement (bindless descriptor arrays)
+  - gfx_texture_update_bindless: add pfn slot + implement (bindless descriptor arrays)
   - gfx_shader_get_uniforms: implement (route through pfn, return from shader cache)
   - DX12: real implementation (device creation, heaps, command lists, PSOs, etc.)

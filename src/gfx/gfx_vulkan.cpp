@@ -2039,7 +2039,7 @@ void vk_update_texture_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void
 
 
 
-void vk_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* _texture, uint32_t slot_idx)
+void vk_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* _texture, uint32_t slot_idx)
 {
     auto vkctx = (vk_context_t*)ctx;
 
@@ -2170,7 +2170,7 @@ void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
 }
 
 
-void vk_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
+void vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
 {
     vk_context_t* vctx = from_ctx(ctx);
     vk_texture_t* vsrc = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, src->idx);
