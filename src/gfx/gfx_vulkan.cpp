@@ -1048,7 +1048,6 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         layout_info.pBindings       = &binding;
         vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &vctx->bindless_descriptor_set_layout);
 
-
         VkDescriptorPoolSize bindless_pool_size = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, vctx->bindless_max_texture_count };
         VkDescriptorPoolCreateInfo pool_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         pool_info.flags            = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;  // CRITICAL: Allows updating descriptors while command buffers are recording/pending execution
@@ -2950,9 +2949,46 @@ void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, ui
     vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
 
-void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst)
+void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier old_state, gfx_barrier new_state)
 {
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+
+    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* ctx = vk_cmd->ctx;
+
+    uint32_t image_barrier_count = 0;
+    VkImageMemoryBarrier2 image_barriers[MAX_BATCH_BARRIERS] = {};
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        vk_texture_t* vk_texture = (vk_texture_t*)gfx_pool_map(ctx->texture_pool, textures[i]->idx);
+
+        VkImageAspectFlags aspect_mask = determine_aspect_mask(vk_texture->format);
+        vulkan_state_mapping_t src = get_vulkan_state(old_state, aspect_mask);
+        vulkan_state_mapping_t dst = get_vulkan_state(new_state, aspect_mask);
+
+        image_barriers[i].sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        image_barriers[i].pNext         = NULL;
+        image_barriers[i].srcStageMask  = src.stage;
+        image_barriers[i].srcAccessMask = src.access;
+        image_barriers[i].dstStageMask  = dst.stage;
+        image_barriers[i].dstAccessMask = dst.access;
+        image_barriers[i].oldLayout     = src.image_layout;
+        image_barriers[i].newLayout     = dst.image_layout;
+        image_barriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        image_barriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        image_barriers[i].image         = vk_texture->image;
+        image_barriers[i].subresourceRange.aspectMask       = aspect_mask;
+        image_barriers[i].subresourceRange.baseMipLevel     = 0;//vk_texture->base_mip;
+        image_barriers[i].subresourceRange.levelCount       = vk_texture->mip_levels;
+        image_barriers[i].subresourceRange.baseArrayLayer   = 0;//vk_texture->base_layer;
+        image_barriers[i].subresourceRange.layerCount       = 1;//vk_texture->layer_count;
+    }
+
+    VkDependencyInfo dependency_info = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO, NULL };
+    dependency_info.dependencyFlags = 0;
+    dependency_info.imageMemoryBarrierCount = image_barrier_count;
+    dependency_info.pImageMemoryBarriers = image_barrier_count > 0 ? image_barriers : NULL;;
+    vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
 
 void vk_cmd_end(gfx_command_buffer_t* cmd)

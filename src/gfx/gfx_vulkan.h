@@ -302,7 +302,9 @@ gfx_api void     vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t hand
 gfx_api void     vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
 
 gfx_api void     vk_cmd_begin(gfx_command_buffer_t* cmd);
+
 gfx_api void     vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+
 gfx_api void     vk_cmd_end_pass(gfx_command_buffer_t* cmd);
 
 gfx_api void     vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
@@ -331,8 +333,8 @@ gfx_api void     vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char * mark
 
 gfx_api void     vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
 
-
 gfx_api void     vk_cmd_end(gfx_command_buffer_t* cmd);
+
 gfx_api void     vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
 
