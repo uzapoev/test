@@ -376,6 +376,30 @@ gfx_api gfx_pipeline_compute_t* gfx_compute_pipeline_create(gfx_context_t* ctx, 
 void gfx_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline) {
     g_tbl->pfn_destroy_pipeline(ctx, pipeline);
 }
+void gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline) {
+    if (!g_tbl || !g_tbl->pfn_destroy_compute_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_compute_pipeline_destroy"); return; }
+    g_tbl->pfn_destroy_compute_pipeline(ctx, pipeline);
+}
+gfx_api gfx_pipeline_mesh_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc) {
+    gfx_pipeline_mesh_t* result = nullptr;
+    if (!g_tbl || !g_tbl->pfn_create_mesh_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_mesh_create"); return result; }
+    g_tbl->pfn_create_mesh_pipeline(ctx, desc, &result);
+    return result;
+}
+gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc) {
+    if (!g_tbl || !g_tbl->pfn_destroy_mesh_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_mesh_destroy"); return; }
+    g_tbl->pfn_destroy_mesh_pipeline(ctx, desc);
+}
+gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc) {
+    gfx_pipeline_raytrace_t* result = nullptr;
+    if (!g_tbl || !g_tbl->pfn_create_raytrace_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_create"); return result; }
+    g_tbl->pfn_create_raytrace_pipeline(ctx, desc, &result);
+    return result;
+}
+gfx_api void gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline) {
+    if (!g_tbl || !g_tbl->pfn_destroy_raytrace_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_destroy"); return; }
+    g_tbl->pfn_destroy_raytrace_pipeline(ctx, pipeline);
+}
 
 // --- RENDER TARGET ---
 gfx_api gfx_render_target_t* gfx_render_target_create(gfx_context_t* ctx, gfx_render_target_desc_t* desc) {
@@ -770,8 +794,13 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 
     // PIPELINE
     func_table->pfn_create_pipeline         = vk_create_pipeline;
-    func_table->pfn_create_compute_pipeline = vk_create_compute_pipeline;
-    func_table->pfn_destroy_pipeline        = vk_destroy_pipeline;
+    func_table->pfn_create_compute_pipeline  = vk_create_compute_pipeline;
+    func_table->pfn_create_mesh_pipeline     = vk_create_mesh_pipeline;
+    func_table->pfn_create_raytrace_pipeline = vk_create_raytrace_pipeline;
+    func_table->pfn_destroy_pipeline         = vk_destroy_pipeline;
+    func_table->pfn_destroy_compute_pipeline = vk_destroy_compute_pipeline;
+    func_table->pfn_destroy_mesh_pipeline    = vk_destroy_mesh_pipeline;
+    func_table->pfn_destroy_raytrace_pipeline= vk_destroy_raytrace_pipeline;
 
     // RENDER TARGET
     func_table->pfn_create_render_target    = vk_create_render_target;
@@ -858,8 +887,13 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
 
     // PIPELINE
     func_table->pfn_create_pipeline         = wgpu_create_pipeline;
-    func_table->pfn_create_compute_pipeline = wgpu_create_compute_pipeline;
-    func_table->pfn_destroy_pipeline        = wgpu_destroy_pipeline;
+    func_table->pfn_create_compute_pipeline  = wgpu_create_compute_pipeline;
+    func_table->pfn_create_mesh_pipeline     = wgpu_create_mesh_pipeline;
+    func_table->pfn_create_raytrace_pipeline = wgpu_create_raytrace_pipeline;
+    func_table->pfn_destroy_pipeline         = wgpu_destroy_pipeline;
+    func_table->pfn_destroy_compute_pipeline = wgpu_destroy_compute_pipeline;
+    func_table->pfn_destroy_mesh_pipeline    = wgpu_destroy_mesh_pipeline;
+    func_table->pfn_destroy_raytrace_pipeline= wgpu_destroy_raytrace_pipeline;
 
     // RENDER TARGET
     func_table->pfn_create_render_target    = wgpu_create_render_target;

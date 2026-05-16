@@ -140,6 +140,7 @@ extern "C" void dx12_destroy_shader(gfx_context_t* /*ctx*/, gfx_shader_t* shader
 extern "C" void dx12_destroy_sampler(gfx_context_t* /*ctx*/, gfx_sampler_t* sampler) { free(sampler); }
 extern "C" void dx12_destroy_texture(gfx_context_t* /*ctx*/, gfx_texture_t* texture) { free(texture); }
 extern "C" void dx12_destroy_pipeline(gfx_context_t* /*ctx*/, gfx_pipeline_t* pipeline) { free(pipeline); }
+extern "C" void dx12_destroy_compute_pipeline(gfx_context_t* /*ctx*/, gfx_pipeline_compute_t* pipeline) { free(pipeline); }
 extern "C" void dx12_destroy_render_target(gfx_context_t* /*ctx*/, gfx_render_target_t* target) { free(target); }
 extern "C" void dx12_destroy_descriptor_set(gfx_context_t* /*ctx*/, gfx_descriptor_set_t* descriptor) { free(descriptor); }
 extern "C" void dx12_destroy_cmd(gfx_context_t* /*ctx*/, gfx_command_buffer_t* cmd) { free(cmd); }
@@ -244,9 +245,14 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
     func_table->pfn_destroy_texture         = dx12_destroy_texture;
 
     // PIPELINE
-    func_table->pfn_create_pipeline         = dx12_create_pipeline;
-    func_table->pfn_create_compute_pipeline = dx12_create_compute_pipeline;
-    func_table->pfn_destroy_pipeline        = dx12_destroy_pipeline;
+    func_table->pfn_create_pipeline          = dx12_create_pipeline;
+    func_table->pfn_create_compute_pipeline  = dx12_create_compute_pipeline;
+    func_table->pfn_create_mesh_pipeline     = dx12_create_mesh_pipeline;
+    func_table->pfn_create_raytrace_pipeline = dx12_create_raytrace_pipeline;
+    func_table->pfn_destroy_pipeline         = dx12_destroy_pipeline;
+    func_table->pfn_destroy_compute_pipeline = dx12_destroy_compute_pipeline;
+    func_table->pfn_destroy_mesh_pipeline    = dx12_destroy_mesh_pipeline;
+    func_table->pfn_destroy_raytrace_pipeline= dx12_destroy_raytrace_pipeline;
 
     // RENDER TARGET
     func_table->pfn_create_render_target  = dx12_create_render_target;

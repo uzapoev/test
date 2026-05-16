@@ -172,6 +172,7 @@ gfx_api void     metal_destroy_shader(gfx_shader_t* buffer);
 gfx_api void     metal_destroy_sampler(gfx_sampler_t* sampler);
 gfx_api void     metal_destroy_texture(gfx_texture_t* texture);
 gfx_api void     metal_destroy_pipeline(gfx_pipeline_t* pipeline);
+gfx_api void     metal_destroy_compute_pipeline(gfx_pipeline_compute_t* pipeline);
 gfx_api void     metal_destroy_render_target(gfx_render_target_t* _target);
 gfx_api void     metal_destroy_descriptor_set(gfx_descriptor_set_t* descriptor);
 gfx_api void     metal_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
@@ -1003,6 +1004,11 @@ void metal_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
     free(mpipeline);
 }
 
+void metal_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline)
+{
+    // metal_create_compute_pipeline is stubbed — nothing allocated to free
+}
+
 
 void metal_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target)
 {
@@ -1403,9 +1409,14 @@ inline void gfx_init_metal(gfx_api_pfn* func_table)
     func_table->pfn_destroy_texture         = metal_destroy_texture;
 
     // PIPELINE
-    func_table->pfn_create_pipeline         = metal_create_pipeline;
-    func_table->pfn_create_compute_pipeline = metal_create_compute_pipeline;
-    func_table->pfn_destroy_pipeline        = metal_destroy_pipeline;
+    func_table->pfn_create_pipeline          = metal_create_pipeline;
+    func_table->pfn_create_compute_pipeline  = metal_create_compute_pipeline;
+    func_table->pfn_create_mesh_pipeline     = metal_create_mesh_pipeline;
+    func_table->pfn_create_raytrace_pipeline = metal_create_raytrace_pipeline;
+    func_table->pfn_destroy_pipeline         = metal_destroy_pipeline;
+    func_table->pfn_destroy_compute_pipeline = metal_destroy_compute_pipeline;
+    func_table->pfn_destroy_mesh_pipeline    = metal_destroy_mesh_pipeline;
+    func_table->pfn_destroy_raytrace_pipeline= metal_destroy_raytrace_pipeline;
 
     // RENDER TARGET
     func_table->pfn_create_render_target  = metal_create_render_target;

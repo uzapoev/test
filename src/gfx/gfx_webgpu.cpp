@@ -1341,6 +1341,31 @@ void wgpu_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
     wgpuRenderPipelineRelease(wgpu_pipeline->pipeline);
 }
 
+void wgpu_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline)
+{
+    // wgpu_create_compute_pipeline is not yet implemented — nothing to release
+}
+
+void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wctx->dbglog(gfx_msg_error, "wgpu_create_mesh_pipeline not implemented");
+}
+
+void wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wctx->dbglog(gfx_msg_error, "wgpu_create_raytrace_pipeline not implemented");
+}
+
+void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc)
+{
+}
+
+void wgpu_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline)
+{
+}
+
 // --- RENDER TARGET ---
 
 void wgpu_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** out_target)

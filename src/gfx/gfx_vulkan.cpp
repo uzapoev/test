@@ -2458,6 +2458,39 @@ void vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
     vctx_free(ctx, vkpipeline);
 }
 
+void vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline)
+{
+    if (!ctx || !pipeline)
+        return;
+
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_compute_pipeline_t* vkpipeline = (vk_compute_pipeline_t*)gfx_pool_map(vctx->compute_pipeline_pool, pipeline->idx);
+    if (vkpipeline)
+    {
+        vkDestroyPipeline(vctx->device, vkpipeline->pipeline, nullptr);
+        gfx_pool_free(vctx->compute_pipeline_pool, vkpipeline->handle.idx);
+    }
+}
+
+void vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    gfx_stub_not_implemented(vctx->dbg_log, "vk_create_mesh_pipeline");
+}
+
+void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    gfx_stub_not_implemented(vctx->dbg_log, "vk_create_raytrace_pipeline");
+}
+
+void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc)
+{
+}
+
+void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline)
+{
+}
 
 
 // --- RENDER TARGET ---

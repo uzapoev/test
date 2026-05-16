@@ -274,6 +274,8 @@ gfx_api void    vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, 
 gfx_api void    vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
 gfx_api void    vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
 gfx_api void    vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
+gfx_api void    vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
+gfx_api void    vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_ray_trace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
 gfx_api void    vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
 gfx_api void    vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
 gfx_api void    vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
@@ -283,6 +285,9 @@ gfx_api void    vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);
 gfx_api void    vk_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler);
 gfx_api void    vk_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture);
 gfx_api void    vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
+gfx_api void    vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
+gfx_api void    vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc);
+gfx_api void    vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 gfx_api void    vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
 gfx_api void    vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
 gfx_api void    vk_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);

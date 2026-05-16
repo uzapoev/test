@@ -54,7 +54,7 @@ RESOURCE DESTRUCTION
   gfx_render_target_destroy
   gfx_descriptor_set_destroy
   gfx_cmd_destroy
-  [MISSING] gfx_compute_pipeline_destroy  -- no public API, no pfn slot
+  gfx_compute_pipeline_destroy
 
 BUFFER / TEXTURE UPDATES
   gfx_buffer_update_data           - cpu -> gpu (staging copy or mapped)
@@ -145,7 +145,7 @@ UTILITY
  destroy_render_target              |   Y    |   ~[4]|   Y    |  ~[1]
  destroy_descriptor_set             |   Y    |   ~[4]|   Y    |  ~[1]
  destroy_cmd                        |   Y    |   ~[4]|   Y    |  ~[1]
- destroy_compute_pipeline           |   N[5] |   N[5]|   N[5] |  N[5]
+ destroy_compute_pipeline           |   Y    |   ~   |   ~    |  ~[1]
 ------------------------------------|--------|-------|--------|------
  buffer_update_data                 |   Y    |   Y[6]|   Y    |  ~[1]
  texture_update_data                |   ~    |   ~   |   ~    |  ~
@@ -199,8 +199,9 @@ UTILITY
 
 [4]  Metal function has empty body ({}). No resource allocated / freed.
 
-[5]  No gfx_compute_pipeline_destroy in public API and no pfn slot.
-     compute pipeline memory is leaked at shutdown.
+[5]  gfx_compute_pipeline_destroy implemented. Vulkan: real cleanup via gfx_pool_free
+     + vkDestroyPipeline. Metal/WebGPU: stubs (create is unimplemented, nothing to free).
+     DX12: free() stub consistent with other DX12 scaffolding.
 
 [6]  Metal update_buffer_data works only for Shared/Managed storage mode.
      Private (GPU-only) buffer path stubs with gfx_stub_not_implemented.
@@ -237,7 +238,7 @@ UTILITY
 
 HIGH (correctness / crash risk)
   - vk_create_render_target: implement (currently empty, needed for offscreen)
-  - gfx_compute_pipeline_destroy: add public API + pfn slot + all backends
+  - metal_destroy_compute_pipeline: release MTLComputePipelineState when metal compute is implemented
   - metal_cmd_begin_pass: expose clear color/depth via descriptor instead of hardcode
   - metal_cmd_draw / cmd_draw_indexed: use topology from pipeline state
 
