@@ -17,7 +17,7 @@ typedef struct dx12_context_t {
     gfx_allocator_t* allocator;
 } dx12_context_t;
 
-typedef struct dx12_swapchain_t { gfx_swapchain_t handle; } dx12_swapchain_t;
+
 typedef struct dx12_buffer_t { gfx_buffer_t handle; uint32_t size; } dx12_buffer_t;
 typedef struct dx12_texture_t { gfx_texture_t handle; uint32_t width, height, depth; gfx_pixel_format fmt; } dx12_texture_t;
 typedef struct dx12_sampler_t { gfx_sampler_t handle; } dx12_sampler_t;
@@ -48,12 +48,6 @@ extern "C" void dx12_init(gfx_settings_t* settings, gfx_context_t** out_ctx)
     dx12_stub_log(*out_ctx, gfx_msg_warning, "DX12 backend is stubbed (no device created).");
 }
 
-extern "C" void dx12_create_swapchain(gfx_context_t* ctx, intptr_t /*handle*/, gfx_swapchain_t** out_swapchain)
-{
-    (void)ctx;
-    dx12_swapchain_t* sc = (dx12_swapchain_t*)calloc(1, sizeof(dx12_swapchain_t));
-    *out_swapchain = sc ? &sc->handle : nullptr;
-}
 
 extern "C" void dx12_get_caps(gfx_context_t* ctx, gfx_caps_t* caps)
 {
@@ -63,16 +57,7 @@ extern "C" void dx12_get_caps(gfx_context_t* ctx, gfx_caps_t* caps)
     (void)ctx;
 }
 
-extern "C" int32_t dx12_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* /*swapchain*/, gfx_render_target_t** out_target)
-{
-    (void)ctx;
-    static dx12_render_target_t s_target = {};
-    if (out_target) *out_target = &s_target.handle;
-    // Return 0 as "image index".
-    return 0;
-}
 
-extern "C" void dx12_present_img(gfx_context_t* /*ctx*/, gfx_swapchain_t* /*swapchain*/, uint32_t /*idx*/) {}
 
 extern "C" void dx12_create_buffer(gfx_context_t* /*ctx*/, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
 {
@@ -233,10 +218,6 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
     func_table->pfn_init     = dx12_init;
     func_table->pfn_get_caps = dx12_get_caps;
 
-    // SWAPCHAIN
-    func_table->pfn_create_swapchain = dx12_create_swapchain;
-    func_table->pfn_acquire_img      = dx12_acquire_img;
-    func_table->pfn_present_img      = dx12_present_img;
 
     // BUFFER
     func_table->pfn_create_buffer      = dx12_create_buffer;

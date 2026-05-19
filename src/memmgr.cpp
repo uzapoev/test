@@ -144,13 +144,13 @@ struct bitmask {
         return false;
     }
 
-    size_t first_free_index() {
+    int first_free_index() {
         for (uint16_t i = 0; i < _word_count; ++i) {
             uint64_t inv = ~_bitmask[i];
             if (inv != 0)
                 return 64 * i + ctz(inv);
         }
-        return 0;
+        return -1;
     }
 
     static uint32_t ctz(uint64_t x) {
@@ -315,7 +315,7 @@ void* paged_pool_allocator::allocate(size_t size, size_t alignment)
         m_page_current = newpage;
     }
 
-    size_t index = m_page_current->_bitmask.first_free_index();
+    int index = m_page_current->_bitmask.first_free_index();
     m_page_current->_bitmask.set(index, true);
 
     return m_page_current->_data + m_allocation_size * index;

@@ -68,6 +68,10 @@
     #define GFX_VERBOSE_IF(cond, exp)   {}
 #endif
 
+typedef enum gfx_result {
+    gfx_ok,
+    gfx_error
+} gfx_result;
 
 
 typedef enum gfx_options {
@@ -393,7 +397,12 @@ typedef struct gfx_context_t {
 } gfx_context_t;
 
 
-typedef struct { uint64_t idx; } gfx_swapchain_t;
+typedef struct { uint64_t idx; } gfx_surface_t;
+
+typedef struct { uint64_t idx; } gfx_swapchain_t; // deprecated
+
+
+
 typedef struct { uint64_t idx; } gfx_buffer_t;
 typedef struct { uint64_t idx; } gfx_texture_t;
 typedef struct { uint64_t idx; } gfx_sampler_t;
@@ -402,10 +411,9 @@ typedef struct { uint64_t idx; } gfx_descriptor_set_t;
 typedef struct { uint64_t idx; } gfx_pipeline_t;            // vertex + fragment
 typedef struct { uint64_t idx; } gfx_pipeline_compute_t;    // compute
 typedef struct { uint64_t idx; } gfx_pipeline_mesh_t;       // task + mesh + fragment
-typedef struct { uint64_t idx; } gfx_pipeline_raytrace_t;  // ray tracing
+typedef struct { uint64_t idx; } gfx_pipeline_raytrace_t;   // ray tracing
 typedef struct { uint64_t idx; } gfx_render_target_t;
 typedef struct { uint64_t idx; } gfx_command_buffer_t;
-typedef struct { uint64_t idx; } gfx_fence_t;
 
 
 
@@ -469,6 +477,17 @@ typedef struct gfx_caps_t {
     uint8_t                 support_mesh_amplification_shader;
 } gfx_caps_t;
 
+
+typedef struct gfx_surface_desc_t {
+    const char*         label;                  // "Main Window", "Scene Viewport"
+    intptr_t            window_handle;          // Required: HWND, NSWindow*, ANativeWindow*
+    bool                vsync;                  // default = true
+    bool                enable_hdr;             // future
+    
+    gfx_pixel_format    preferred_format;       // gfx_pixel_format_rgba8
+    gfx_sample_count    sample_count;           // gfx_sample_1x
+} gfx_surface_desc_t;
+
  
 typedef struct gfx_sampler_desc_t {
     gfx_filter              minmag;
@@ -503,7 +522,9 @@ typedef struct gfx_buffer_desc_t {
     void *                  data;
 } gfx_buffer_desc_t;
 
-
+/// <summary>
+/// gfx_uniform_t - get by shader reflection;
+/// </summary>
 typedef struct gfx_uniform_t {
     char                    name[32];
     gfx_uniform_type        type;
@@ -677,14 +698,25 @@ typedef struct indirect_data_t {
     uint32_t first_instance;    // base instance id
 } indirect_data_t;
 
+
+typedef struct gfx_frame_t {    
+    gfx_context_t*              ctx;
+    uint32_t                    frame_index;            // frame index 0,1,2,3...n
+    uint32_t                    swapchain_image_index;  //
+    gfx_surface_t*              surface;                //
+    gfx_render_target_t*        target;                 //
+    gfx_command_buffer_t*       cmd;                    //
+} gfx_frame_t;
+
 // --- CONTEXT ---
 gfx_api void                    gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
 gfx_api void                    gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
-// --- SWAPCHAIN ---
-gfx_api void                    gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain);
-gfx_api int32_t                 gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target);
-gfx_api void                    gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx);
+gfx_api gfx_surface_t           gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t * desc);
+gfx_api void                    gfx_surface_destroy(gfx_surface_t surface);
+
+gfx_api gfx_frame_t*            gfx_begin_frame(gfx_context_t* ctx, gfx_surface_t *surface);
+gfx_api gfx_result              gfx_end_frame(gfx_frame_t* frame);
 
 // --- BUFFER ---
 gfx_api gfx_buffer_t*           gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc);
@@ -737,13 +769,16 @@ gfx_api void                    gfx_uniform_set_sampler(gfx_descriptor_set_t* se
 gfx_api void                    gfx_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
 
 // --- COMMAND BUFFER ---
-gfx_api gfx_command_buffer_t*   gfx_cmd_create(gfx_context_t* ctx);
-gfx_api void                    gfx_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+ gfx_api [[deprecated]]gfx_command_buffer_t*   gfx_cmd_create(gfx_context_t* ctx);
+ gfx_api [[deprecated]]void     gfx_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+
+ gfx_api[[deprecated]] void     gfx_cmd_begin(gfx_command_buffer_t* cmd);
+ gfx_api[[deprecated]] void     gfx_cmd_end(gfx_command_buffer_t* cmd);
+ gfx_api[[deprecated]] void     gfx_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
 gfx_api void                    gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker);
 gfx_api void                    gfx_cmd_pop_marker(gfx_command_buffer_t* cmd);
 
-gfx_api void                    gfx_cmd_begin(gfx_command_buffer_t* cmd);
 gfx_api void                    gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
 gfx_api void                    gfx_cmd_end_pass(gfx_command_buffer_t* cmd);
 
@@ -761,12 +796,7 @@ gfx_api void                    gfx_cmd_dispatch_compute(gfx_command_buffer_t* c
 gfx_api void                    gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
 gfx_api void                    gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
 
-gfx_api void                    gfx_cmd_end(gfx_command_buffer_t* cmd);
-gfx_api void                    gfx_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
-// --- FENCE ---
-gfx_api void                    gfx_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_fence_t** fence);
-gfx_api void                    gfx_wait(gfx_context_t* ctx, gfx_fence_t* fence);
 
 
 // https://www.khronos.org/blog/understanding-vulkan-synchronization
@@ -853,9 +883,11 @@ typedef struct gfx_api_pfn
     void     (*pfn_get_caps) (gfx_context_t* ctx, gfx_caps_t* caps);
 
     // SWAPCHAIN
-    void     (*pfn_create_swapchain) (gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain);
-    int32_t  (*pfn_acquire_img)      (gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target);
-    void     (*pfn_present_img)      (gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx);
+    void     (*pfn_surface_create)(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t ** out_surface);
+    void     (*pfn_surface_destroy)(gfx_context_t* ctx, gfx_surface_t * surface);
+
+    void     (*pfn_frame_begin) (gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t ** out_frame);
+    void     (*pfn_frame_end) (gfx_frame_t* frame);
 
     // BUFFER
     void     (*pfn_create_buffer)      (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
@@ -903,10 +935,13 @@ typedef struct gfx_api_pfn
     void     (*pfn_destroy_descriptor_set)  (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
 
     // COMMAND BUFFER
-    void     (*pfn_create_cmd) (gfx_context_t* ctx, gfx_command_buffer_t** cmd);
-    void     (*pfn_destroy_cmd)(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+    [[deprecated]] void     (*pfn_create_cmd) (gfx_context_t* ctx, gfx_command_buffer_t** cmd);
+    [[deprecated]] void     (*pfn_destroy_cmd)(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
 
-    void     (*pfn_cmd_begin)      (gfx_command_buffer_t* cmd);
+    [[deprecated]] void     (*pfn_cmd_begin)    (gfx_command_buffer_t* cmd);
+    [[deprecated]] void     (*pfn_cmd_end)    (gfx_command_buffer_t* cmd);
+    [[deprecated]] void     (*pfn_submit_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+
     void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_render_target_t* target);
     void     (*pfn_cmd_end_pass)   (gfx_command_buffer_t* cmd);
 
@@ -921,20 +956,12 @@ typedef struct gfx_api_pfn
     void     (*pfn_cmd_draw_indexed_indirect)(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
     void     (*pfn_cmd_dispatch_compute)    (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
-    void     (*pfn_cmd_push_marker) (gfx_command_buffer_t* cmd, const char* marker);
-    void     (*pfn_cmd_pop_marker)  (gfx_command_buffer_t* cmd);
+    void     (*pfn_cmd_push_marker)         (gfx_command_buffer_t* cmd, const char* marker);
+    void     (*pfn_cmd_pop_marker)          (gfx_command_buffer_t* cmd);
 
     void     (*pfn_cmd_buffer_barrier)  (gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
     void     (*pfn_cmd_texture_barrier) (gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
-
-    void     (*pfn_cmd_end)    (gfx_command_buffer_t* cmd);
-    void     (*pfn_submit_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 } gfx_api_pfn;
 
-/*
-* gfx_handle_pool_t* pool = gfx_pool_create(sizeof(vk_buffer_t), capacity);
-* vk_buffer_t * buffer = gfx_pool_allocate(pool);
-* 
-*/
 
 #endif // __gfx_webgpu_h__

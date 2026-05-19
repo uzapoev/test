@@ -15,7 +15,7 @@
 #ifdef __cplusplus 
 extern "C" {
 #endif*/
-
+#define     MAX_FRAME_IN_FLIGHT                 (2)
 #define     MAX_TIMESTAMP_QUERIES               (128)
 #define     MAX_TIMESTAMP_NESTING_LEVEL         (16)
 #define     MAX_BATCH_BARRIERS                  (64)
@@ -37,7 +37,6 @@ typedef struct vk_context_t
     VkPhysicalDevice                    physicaldevice      = VK_NULL_HANDLE;
     VkSurfaceKHR                        surface             = VK_NULL_HANDLE;
     uint32_t                            frame_idx           = 0;
-    uint32_t                            frame_number        = 0;
 
     gfx_allocator_t                     allocator;
 
@@ -86,6 +85,8 @@ typedef struct vk_context_t
 
     vk_command_buffer_t*                cmd_buffer_pool[32];
     uint32_t                            cmd_pool_size;
+    gfx_handle_pool_t*                  surface_pool;
+    gfx_handle_pool_t*                  render_target_pool;
 
     gfx_handle_pool_t*                  cmd_pool;
     gfx_handle_pool_t*                  sampler_pool;
@@ -95,17 +96,48 @@ typedef struct vk_context_t
     gfx_handle_pool_t *                 pipeline_pool;
     gfx_handle_pool_t *                 compute_pipeline_pool;
 
+
     PFN_vkSetDebugUtilsObjectNameEXT    vk_dbg_set_object_name;
     PFN_vkCmdBeginDebugUtilsLabelEXT    vk_dbg_cmd_push_label;
     PFN_vkCmdEndDebugUtilsLabelEXT      vk_dbg_cmd_pop_label;
 } vk_context_t;
 
 
+typedef struct vk_surface_t {
+    gfx_surface_t                       handle;
+
+    intptr_t                            window_handle;
+    uint32_t                            width;
+    uint32_t                            height;
+    VkBool32                            vsync;
+
+    gfx_pixel_format                    format;
+    gfx_sample_count                    sample_count;
+
+    VkFormat                            depth_format;
+
+    VkSurfaceKHR                        surface;
+    VkSwapchainKHR                      swapchain;
+    VkRenderPass                        renderpass;
+
+    VkFence                             fences[MAX_FRAME_IN_FLIGHT];
+    VkSemaphore                         semaphore_image_available[MAX_FRAME_IN_FLIGHT];        // Wait Semaphores
+    VkSemaphore                         semaphore_rendering_finished[MAX_FRAME_IN_FLIGHT];     // Signal Semaphores
+
+    uint32_t                            frame_index;
+    uint32_t                            swapchain_image_index;
+    
+    gfx_frame_t                         frames[MAX_FRAME_IN_FLIGHT];
+
+    struct vk_render_target_t*          targets[MAX_FRAME_IN_FLIGHT];
+} vk_surface_t;
+
+
 typedef struct vk_pipeline_t {
     gfx_pipeline_t                      handle;
 
     struct vk_shader_t*                 shader;
-//  render_states_t                     states;
+
     VkPipelineBindPoint                 bind_point;
     VkPipeline                          pipeline;
 } vk_pipeline_t;
@@ -176,7 +208,7 @@ typedef struct vk_render_target_t {
     VkFormat                            depth_format;
 
     uint32_t                            color_attachment_count;
-    vk_texture_t                        color_attachments[16];  // max attachment
+    vk_texture_t                        color_attachments[8];  // max attachment
     vk_texture_t                        depth_attachments;
     vk_texture_t                        resolve_attachments;    // surface swapchain if msaa
 
@@ -187,7 +219,8 @@ typedef struct vk_render_target_t {
 } vk_render_target_t;
 
 
-typedef struct vk_swapchain_t{
+
+typedef struct vk_swapchain_t {
     gfx_swapchain_t                     handle;
 
     intptr_t                            window_handle;
@@ -197,7 +230,6 @@ typedef struct vk_swapchain_t{
     VkExtent2D                          extend;
     vk_render_target_t                  target;
 } vk_swapchain_t;
-
 
 typedef struct vk_descriptor_pool_t {
     VkDescriptorPool                    pool;
@@ -258,15 +290,19 @@ typedef struct vk_command_buffer_t {
 
 
 gfx_api void    vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** ctx);
-gfx_api void    vk_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 gfx_api void    vk_destroy_renderer(gfx_context_t* ctx);
 
-gfx_api void    vk_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain); // todo: add prefered options for surface format
-gfx_api void    vk_destroy_swapchain(gfx_context_t* ctx, gfx_swapchain_t* swapchain); // todo: add prefered options for surface format
-gfx_api void    vk_create_renderpass(gfx_context_t* ctx, VkFormat format, VkFormat depthformat, VkRenderPass * renderpass);
+gfx_api void    vk_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
-gfx_api int32_t vk_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target);
-gfx_api void    vk_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx);
+gfx_api void    vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** surface);
+gfx_api void    vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface);
+
+void            vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
+void            vk_frame_end(gfx_frame_t* surface);
+
+
+// todo: add prefered options for surface format
+gfx_api void    vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkFormat depthformat, VkRenderPass * renderpass);
 
 gfx_api void    vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
 gfx_api void    vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);

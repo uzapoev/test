@@ -131,6 +131,10 @@ VkFrontFace gfx_face_2_vk(gfx_face face)
 static void* _gfx_alloc(vk_context_t* ctx, size_t size) {
     return ctx->allocator.gfx_alloc(size, ctx);
 }
+static void _gfx_free(vk_context_t* ctx, void * ptr) {
+    ctx->allocator.gfx_free(ptr, ctx);
+}
+
 
 VkIndexType          vk_index[]   = { VK_INDEX_TYPE_UINT16,             VK_INDEX_TYPE_UINT32 };
 VkPrimitiveTopology  vk_topology[]= { VK_PRIMITIVE_TOPOLOGY_POINT_LIST, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_PRIMITIVE_TOPOLOGY_LINE_STRIP, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP };
@@ -259,6 +263,71 @@ typedef struct vk_copy_info_t
 }vk_copy_info_t;
 
 
+typedef struct vulkan_state_mapping_t {
+    VkPipelineStageFlags2 stage;
+    VkAccessFlags2        access;
+    VkImageLayout         image_layout;
+} vulkan_state_mapping_t;
+
+static vulkan_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags aspect) {
+    vulkan_state_mapping_t out = { 0 };
+
+    switch (state) {
+    case gfx_barrier_transfer:
+        out.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        out.access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_GENERAL; // or TRANSFER_DST_OPTIMAL, but GENERAL univeral for RW
+        break;
+
+    case gfx_barrier_compute:
+        out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        out.access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_GENERAL;
+        break;
+
+    case gfx_barrier_graphics:
+        // enable both the Vertex and Fragment stages for full cross reading
+        out.stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        out.access = VK_ACCESS_2_SHADER_READ_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        break;
+
+    case gfx_barrier_render_target:
+        out.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        out.access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        break;
+
+    case gfx_barrier_depth_stencil:
+        // Important: depth tests occur at early and late stages of fragments 
+        out.stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        out.access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        break;
+
+    case gfx_barrier_indirect:
+        out.stage = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+        out.access = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_UNDEFINED; // buffers don't have a layout
+        break;
+
+    case gfx_barrier_present:
+        out.stage = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        out.access = VK_ACCESS_2_NONE;
+        out.image_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        break;
+
+    default:
+        out.stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+        out.access = VK_ACCESS_2_NONE;
+        out.image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        break;
+    }
+
+    return out;
+}
+
+
 static void gfx_default_log(gfx_msg type, const char * msg, ...)
 {
     va_list args;
@@ -273,7 +342,6 @@ static vk_context_t* from_ctx(gfx_context_t* ctx)
 {
     return (vk_context_t*)ctx;
 }
-
 
 
 
@@ -307,8 +375,6 @@ VkAllocationCallbacks *vk_default_allocation_callbacks()
 
     return &cb;
 }
-
-#define LOG_ERROR(msg, ...) gfx_default_log(gfx_msg_error, msg, __VA_ARGS__)
 
 
 // The callback returns a VkBool32 that indicates to the calling layer if the Vulkan call should be aborted or not. 
@@ -516,8 +582,14 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     for (uint32_t i = 0; i < queue_properties_count; i++)
     {
         vkGetPhysicalDeviceSurfaceSupportKHR(physdevice, i, surface, &supports_present[i]);
-        bool support_grpaphics = (queue_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
-        bool support_compute   = (queue_properties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+        bool support_grpaphics  = (queue_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+        bool support_compute    = (queue_properties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+        bool support_transfer   = (queue_properties[i].queueFlags & VK_QUEUE_TRANSFER_BIT) != 0;
+        bool support_sparse     = (queue_properties[i].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) != 0;
+        bool support_protected  = (queue_properties[i].queueFlags & VK_QUEUE_PROTECTED_BIT) != 0;
+        bool support_video_dec  = (queue_properties[i].queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) != 0;
+        bool support_video_enc  = (queue_properties[i].queueFlags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR) != 0;
+        bool support_optical    = (queue_properties[i].queueFlags & VK_QUEUE_OPTICAL_FLOW_BIT_NV) != 0;
 
         if (support_grpaphics && graphics_queue_index == UINT32_MAX) {
             graphics_queue_index = i;
@@ -526,7 +598,7 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
         if(support_grpaphics && support_compute && supports_present[i]) {
             graphics_queue_index = i;
             present_queue_index = i;
-            break;
+           break;
         }
     }
 
@@ -543,7 +615,7 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
 
     // Generate error if could not find both a graphics and a present queue
     if (graphics_queue_index == UINT32_MAX || present_queue_index == UINT32_MAX) {
-        LOG_ERROR("Swapchain Initialization Failure: Could not find both graphics and present queues");
+        gfx_default_log(gfx_msg_error, "Swapchain Initialization Failure: Could not find both graphics and present queues");
         return VK_NULL_HANDLE;
     }
 
@@ -597,7 +669,7 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     VkResult result = vkCreateDevice(physdevice, &create_info, NULL, &device);
     if (result != VK_SUCCESS)
     {
-        LOG_ERROR("Vk: Error in vkCreateDevice(%d)", result);
+        gfx_default_log(gfx_msg_error, "Vk: Error in vkCreateDevice(%d)", result);
     }
 
     return device;
@@ -717,7 +789,6 @@ static VkImageView _vk_create_image_view(vk_context_t* ctx, VkImageViewType type
 
     VkImageView image_view = VK_NULL_HANDLE;
     if (vkCreateImageView(ctx->device, &create_info, nullptr, &image_view) != VK_SUCCESS) {
-
         ctx->dbg_log(gfx_msg_error, "failed to create texture image view!");
         return nullptr;
     }
@@ -864,6 +935,22 @@ static void _vk_copy_buffer_to_buffer(vk_context_t* ctx, VkBuffer src, VkBuffer 
     gfx_cmd_destroy(&ctx->handle, cmd);
 }
 
+void _destroy_vk_texture(vk_context_t * ctx, vk_texture_t* texture)
+{
+    if(texture->view)
+        vkDestroyImageView(ctx->device, texture->view, nullptr);
+
+    if (texture->image)
+        vkDestroyImage(ctx->device, texture->image, nullptr);
+
+    if (texture->memory)
+        vkFreeMemory(ctx->device, texture->memory, nullptr);
+
+    texture->view = VK_NULL_HANDLE;
+    texture->image = VK_NULL_HANDLE;
+    texture->memory = VK_NULL_HANDLE;
+}
+
 uint32_t gfx_gpu_ram_usage(gfx_context_t* ctx)
 {
     auto vkctx = from_ctx(ctx);
@@ -955,14 +1042,15 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         vctx->semaphores[i].image_available = _vk_create_semaphore(vctx->device);
         vctx->semaphores[i].rendering_finished = _vk_create_semaphore(vctx->device);
 
-        vk_debug_set_name(vctx, (uint64_t)vctx->semaphores[i].image_available, VK_OBJECT_TYPE_SEMAPHORE, "image_available_sem");
-        vk_debug_set_name(vctx, (uint64_t)vctx->semaphores[i].rendering_finished, VK_OBJECT_TYPE_SEMAPHORE, "rendering_finished_sem");
-
         VkFenceCreateInfo fenceInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
             fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         vkCreateFence(vctx->device, &fenceInfo, nullptr, &vctx->semaphores[i].wait_fence);
-        vkResetFences(vctx->device, 1, &vctx->semaphores[i].wait_fence);
+      //  vkResetFences(vctx->device, 1, &vctx->semaphores[i].wait_fence);
     }
+
+    
+    gfx_pool_create(sizeof(vk_surface_t), 16, &vctx->surface_pool, &vctx->allocator);
+    gfx_pool_create(sizeof(vk_render_target_t), 256, &vctx->render_target_pool, &vctx->allocator);
 
     gfx_pool_create(sizeof(vk_sampler_t),        128,  &vctx->sampler_pool, &vctx->allocator);
     gfx_pool_create(sizeof(vk_command_buffer_t), 512,  &vctx->cmd_pool,     &vctx->allocator);
@@ -1017,8 +1105,8 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     // default texture storage
     gfx_texture_desc_t default_texture_storage_desc = { 0 };
     default_texture_storage_desc.label    = "_default_texture_storage";
-    default_texture_storage_desc.width    = 4;
-    default_texture_storage_desc.height   = 4;
+    default_texture_storage_desc.width    = 32;
+    default_texture_storage_desc.height   = 32;
     default_texture_storage_desc.depth    = 1;
     default_texture_storage_desc.format   = gfx_pixel_format_rgba8;
     default_texture_storage_desc.storage  = 1;
@@ -1101,15 +1189,278 @@ void vk_destroy_renderer(gfx_context_t * ctx)
     free(vctx);
 }
 
+static vk_texture_t _vk_create_target_texture(vk_context_t* ctx, VkExtent3D extend, VkFormat format, VkImageUsageFlags usage, VkSampleCountFlagBits samples)
+{
+    vk_texture_t result = {};
+
+    result.image = _vk_create_image(ctx, VK_IMAGE_TYPE_2D, extend, 1, format, VK_IMAGE_TILING_OPTIMAL, usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+                                    &result.memory, 
+                                    samples);
+
+    result.view = _vk_create_image_view(ctx, VK_IMAGE_VIEW_TYPE_2D, result.image, format, 1);
+
+    return result;
+}
+
+void _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
+{
+    uint32_t format_count = 0;
+    VkSurfaceFormatKHR formats[32] = {};
+    vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->physicaldevice, surface->surface, &format_count, NULL);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->physicaldevice, surface->surface, &format_count, formats);
+
+    uint32_t present_mode_count = 0;
+    VkPresentModeKHR present_modes[8] = {};
+    vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physicaldevice, surface->surface, &present_mode_count, NULL);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physicaldevice, surface->surface, &present_mode_count, present_modes);
+
+    VkSurfaceCapabilitiesKHR capabilities = { 0 };
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->physicaldevice, surface->surface, &capabilities);
+
+    uint32_t image_count = MAX_FRAME_IN_FLIGHT;
+    surface->width = capabilities.currentExtent.width;
+    surface->height = capabilities.currentExtent.height;
+
+    VkSwapchainKHR prev_swapchain = surface->swapchain;
+    VkSurfaceFormatKHR surface_format = formats[0];
+    VkSwapchainCreateInfoKHR info   = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+        info.surface                = surface->surface;
+        info.minImageCount          = image_count;
+        info.imageFormat            = surface_format.format;
+        info.imageColorSpace        = surface_format.colorSpace;
+        info.imageExtent            = capabilities.currentExtent;
+        info.imageArrayLayers       = 1;
+        info.imageUsage             = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;// | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        info.imageSharingMode       = VK_SHARING_MODE_EXCLUSIVE;
+        info.queueFamilyIndexCount  = 0;
+        info.pQueueFamilyIndices    = NULL;
+        info.preTransform           = capabilities.currentTransform; //VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+        info.compositeAlpha         = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        info.presentMode            = surface->vsync? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_IMMEDIATE_KHR;
+        info.presentMode            = VK_PRESENT_MODE_MAILBOX_KHR;
+        info.clipped                = VK_TRUE;
+        info.oldSwapchain           = prev_swapchain;
+    VkResult result = vkCreateSwapchainKHR(ctx->device, &info, NULL, &surface->swapchain);
+
+    // destroy old swapchain and attachment if resized
+    if (prev_swapchain != VK_NULL_HANDLE){
+        vkDestroySwapchainKHR(ctx->device, prev_swapchain, nullptr);
+        for(int i = 0; i < image_count; ++i) {
+            
+            vk_render_target_t * target = surface->targets[i];
+            _destroy_vk_texture(ctx, &target->depth_attachments);
+            _destroy_vk_texture(ctx, &target->resolve_attachments);
+
+            vkDestroyFramebuffer(ctx->device, target->framebuffer, nullptr);
+
+            for(int j = 0; j < target->color_attachment_count; ++j)
+                _destroy_vk_texture(ctx, &target->color_attachments[j]);
+         }
+    }
+
+    //depth attachment
+    VkExtent3D extend = { surface->width, surface->height, 1 };
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+    auto depth_target = _vk_create_target_texture(ctx, extend, surface->depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, samples);
+
+    // render pass
+    if (surface->renderpass == VK_NULL_HANDLE)
+        vk_create_renderpass(ctx, surface_format.format, surface->depth_format, &surface->renderpass);
+
+    // color attachments
+    VkImage images[8] = {};
+    vkGetSwapchainImagesKHR(ctx->device, surface->swapchain, &image_count, NULL);
+    vkGetSwapchainImagesKHR(ctx->device, surface->swapchain, &image_count, images);
+    for (uint32_t i = 0; i < image_count; ++i)
+    {
+        vk_render_target_t* target = surface->targets[i];
+
+        VkImageView color_view = _vk_create_image_view(ctx, VK_IMAGE_VIEW_TYPE_2D, images[i], surface_format.format, 1);
+
+        VkImageView  attachments [] = { 
+            color_view, 
+            depth_target.view
+        };
+
+        VkFramebufferCreateInfo info = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+        info.renderPass         = surface->renderpass;
+        info.attachmentCount    = _countof(attachments);
+        info.pAttachments       = attachments;
+        info.width              = extend.width;
+        info.height             = extend.height;
+        info.layers             = 1;
+        result = vkCreateFramebuffer(ctx->device, &info, nullptr, &target->framebuffer);
+
+        target->renderpass = surface->renderpass;
+        target->extend = { surface->width, surface->height };
+        target->depth_format = surface->depth_format;
+        target->color_format = surface_format.format;
+
+        target->color_attachment_count = 1;
+        target->color_attachments[0].view = color_view;
+        target->color_attachments[0].format = surface_format.format;
+    }
+    //surface->target.depth_attachments = depth_target;
+}
+
+void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface)
+{
+    vk_context_t * vctx = from_ctx(ctx);
+
+    uint64_t handle = gfx_pool_alloc(vctx->surface_pool);
+    vk_surface_t * surface = (vk_surface_t*)gfx_pool_map(vctx->surface_pool, handle);
+
+    // create semaphores and fences
+    for (int i = 0; i < MAX_FRAME_IN_FLIGHT; ++i)
+    {
+        VkFenceCreateInfo fence_ci = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT };
+        vkCreateFence(vctx->device, &fence_ci, nullptr, &surface->fences[i]);
+
+        surface->semaphore_image_available[i] = _vk_create_semaphore(vctx->device);
+        surface->semaphore_rendering_finished[i] = _vk_create_semaphore(vctx->device);
+    }
+   // vkResetFences(vctx->device, MAX_FRAME_IN_FLIGHT, surface->fences);
+
+    VkFormat depth_formats[] = { VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT };
+
+    surface->window_handle  = desc->window_handle;
+    surface->vsync          = desc->vsync;
+    surface->format         = desc->preferred_format;
+    surface->sample_count   = desc->sample_count;
+    surface->depth_format   = _vk_find_supported_format(vctx, depth_formats, _countof(depth_formats), VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    surface->surface        = _vk_create_surface(vctx->instance, desc->window_handle);
+    for(int i = 0; i < MAX_FRAME_IN_FLIGHT; ++i) {
+        uint64_t target_handle = gfx_pool_alloc(vctx->render_target_pool);
+        surface->targets[i] = (vk_render_target_t*)gfx_pool_map(vctx->render_target_pool, target_handle);
+        surface->targets[i]->handle.idx = target_handle;
+    }
+    _vk_reset_surface(vctx, surface);
+
+    vctx->default_renderpass = surface->renderpass;
+    
+    surface->handle.idx = handle;
+    *out_surface = &surface->handle;
+}
+
+void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* _surface)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_surface_t* surface = (vk_surface_t*)gfx_pool_map(vctx->surface_pool, _surface->idx);
+}
+
+
+void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t** out_frame)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_surface_t* surface = (vk_surface_t*)gfx_pool_map(vctx->surface_pool, in_surface->idx);
+
+    uint32_t frame_idx = surface->frame_index;
+
+    VkFence fence = surface->fences[frame_idx];
+    vkWaitForFences(vctx->device, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(vctx->device, 1, &fence);
+
+    VkSemaphore image_available_sem = surface->semaphore_image_available[frame_idx];
+
+    uint32_t img_idx = 0;
+    while (auto result = vkAcquireNextImageKHR(vctx->device, surface->swapchain, UINT64_MAX, image_available_sem, VK_NULL_HANDLE, &img_idx))
+    {
+        if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+            _vk_reset_surface(vctx, surface);
+            continue;
+        }
+        else {
+            vctx->dbg_log(gfx_msg_error, "vk_acquire_img failed with %s error", string_VkResult(result));
+            return;
+        }
+    }
+
+    gfx_frame_t* frame = &surface->frames[frame_idx];
+    *out_frame = frame;
+
+    frame->ctx = ctx;
+    frame->surface = in_surface;
+    frame->frame_index = frame_idx;    
+    frame->swapchain_image_index = img_idx;      
+    frame->target = &surface->targets[img_idx]->handle; 
+
+    surface->swapchain_image_index = img_idx;
+
+    if(frame->cmd == nullptr)
+        vk_create_cmd(ctx, &frame->cmd);
+    vk_cmd_begin(frame->cmd);
+}
+
+void vk_frame_end(gfx_frame_t* frame)
+{
+    vk_context_t* vctx = from_ctx(frame->ctx);
+    vk_surface_t* surface = (vk_surface_t*)gfx_pool_map(vctx->surface_pool, frame->surface->idx);
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)gfx_pool_map(vctx->cmd_pool, frame->cmd->idx);
+
+    if (auto result = vkEndCommandBuffer(vcmd->cmd)) {
+        vctx->dbg_log(gfx_msg_error, "vk_frame_end : vkEndCommandBuffer failed!(%s)", string_VkResult(result));
+    }
+
+    VkPipelineStageFlags stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+
+    // 
+    uint32_t frame_idx = frame->frame_index;
+
+    VkFence fence = surface->fences[frame_idx];
+    VkSemaphore image_available_semaphore = surface->semaphore_image_available[frame_idx];
+    VkSemaphore rendering_finished_semaphore = surface->semaphore_rendering_finished[frame_idx];
+
+    VkSubmitInfo submit             = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &vcmd->cmd;
+        submit.pWaitDstStageMask    = stages;
+        submit.waitSemaphoreCount   = 1;
+        submit.pWaitSemaphores      = &image_available_semaphore;   // 
+        submit.signalSemaphoreCount = 1;
+        submit.pSignalSemaphores    = &rendering_finished_semaphore; // 
+    if (auto result = vkQueueSubmit(vctx->graphics_queue.queue, 1, &submit, fence)) {
+        vctx->dbg_log(gfx_msg_error, "vkQueueSubmit failed!(%s)", string_VkResult(result));
+    }
+
+    // 
+    VkPresentInfoKHR present_info       = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores    = &rendering_finished_semaphore;
+        present_info.swapchainCount     = 1;
+        present_info.pSwapchains        = &surface->swapchain;
+        present_info.pImageIndices      = &frame->swapchain_image_index;
+    if (auto result = vkQueuePresentKHR(vctx->present_queue.queue, &present_info)) {
+        vctx->dbg_log(gfx_msg_error, "vkQueuePresentKHR failed!(%s)", string_VkResult(result));
+    }
+
+    // 
+    if (vcmd->stamp_count > 0)
+    {
+        uint64_t timestamps[256] = {};
+        vkGetQueryPoolResults(vctx->device, vcmd->time_query_pool, 0,
+            vcmd->time_query_current_index,
+            _countof(timestamps) * sizeof(uint64_t),
+            timestamps,
+            sizeof(uint64_t),
+            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+
+        VkPhysicalDeviceLimits device_limits = vctx->device_properties.limits;
+        float delta_in_ms = float(timestamps[1] - timestamps[0]) * device_limits.timestampPeriod / 1000000.0f;
+
+        vcmd->stamp_count = 0;
+        vcmd->time_query_stack_top = 0;
+        vcmd->time_query_current_index = 0;
+        vctx->dbg_log(gfx_msg_info, "gpu time %.3f ", delta_in_ms);
+    }
+
+    surface->frame_index = (surface->frame_index + 1) % MAX_FRAME_IN_FLIGHT;
+}
 
 
 // --- SWAPCHAIN ---
 
-void vk_create_renderpass(gfx_context_t* ctx, VkFormat colorformat, VkFormat depthformat, VkRenderPass* renderpass)
+void vk_create_renderpass(vk_context_t* vctx, VkFormat colorformat, VkFormat depthformat, VkRenderPass* renderpass)
 {
-    vk_context_t* vctx = from_ctx(ctx);
-
-    // color attachment
     VkAttachmentDescription color_attachment = {};
     color_attachment.format           = colorformat;
     color_attachment.samples          = vctx->msaa_samples;
@@ -1120,7 +1471,6 @@ void vk_create_renderpass(gfx_context_t* ctx, VkFormat colorformat, VkFormat dep
     color_attachment.initialLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
     color_attachment.finalLayout      = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    // depth attachment
     VkAttachmentDescription depth_attachment = {};
     depth_attachment.format           = depthformat;
     depth_attachment.samples          = vctx->msaa_samples;
@@ -1174,141 +1524,9 @@ void vk_create_renderpass(gfx_context_t* ctx, VkFormat colorformat, VkFormat dep
     }
 }
 
-static vk_texture_t _vk_create_target_texture(vk_context_t* ctx, VkExtent3D extend, VkFormat format, VkImageUsageFlags usage, VkSampleCountFlagBits samples)
-{
-    vk_texture_t result = {};
-
-    result.image = _vk_create_image(ctx, VK_IMAGE_TYPE_2D, extend, 1, format, VK_IMAGE_TILING_OPTIMAL, 
-                                    usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &result.memory, samples);
-
-    result.view = _vk_create_image_view(ctx, VK_IMAGE_VIEW_TYPE_2D, result.image, format, 1);
-
-    return result;
-}
 
 
-void vk_recreate_swapchain(gfx_context_t* ctx, vk_swapchain_t* swapchain)
-{
-    vk_context_t* vctx = from_ctx(ctx);
 
-    if (vctx == nullptr || swapchain == nullptr)
-        return;
-
-    uint32_t format_count = 0;
-    VkSurfaceFormatKHR formats[256] = {};
-    VkSurfaceCapabilitiesKHR capabilities = { 0 };
-
-    vkGetPhysicalDeviceSurfaceFormatsKHR(vctx->physicaldevice, vctx->surface, &format_count, NULL);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(vctx->physicaldevice, vctx->surface, &format_count, formats);
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vctx->physicaldevice, vctx->surface, &capabilities);
-
-    swapchain->extend = capabilities.currentExtent;
-    swapchain->target.extend = capabilities.currentExtent;
-
-    auto prev_swapchain = swapchain->swapchain;
-    auto surface_format = formats[0];
-    uint32_t image_count = max(capabilities.minImageCount, 2);
-
-    VkSwapchainCreateInfoKHR info   = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
-        info.surface                = vctx->surface;
-        info.minImageCount          = image_count;
-        info.imageFormat            = surface_format.format;
-        info.imageColorSpace        = surface_format.colorSpace;
-        info.imageExtent            = capabilities.currentExtent;
-        info.imageArrayLayers       = 1;
-        info.imageUsage             = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;// | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        info.imageSharingMode       = VK_SHARING_MODE_EXCLUSIVE;
-        info.queueFamilyIndexCount  = 0;
-        info.pQueueFamilyIndices    = NULL;
-        info.preTransform           = capabilities.currentTransform; //VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-        info.compositeAlpha         = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        info.presentMode            = VK_PRESENT_MODE_FIFO_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
-        info.presentMode            = VK_PRESENT_MODE_MAILBOX_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
-        info.presentMode            = VK_PRESENT_MODE_IMMEDIATE_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
-        info.presentMode            = VK_PRESENT_MODE_MAILBOX_KHR;// VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_FIFO_KHR;
-        info.clipped                = VK_TRUE;
-        info.oldSwapchain           = prev_swapchain;
-    VkResult result = vkCreateSwapchainKHR(vctx->device, &info, NULL, &swapchain->swapchain);
-
-    if (prev_swapchain != VK_NULL_HANDLE)
-        vkDestroySwapchainKHR(vctx->device, prev_swapchain, nullptr);
-
-    //dept attachment
-    VkExtent3D extend = { capabilities.currentExtent.width, capabilities.currentExtent.height, 1 };
-    VkFormat depth_formats[] = { VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT };
-    VkFormat depth_format = _vk_find_supported_format(vctx, depth_formats, _countof(depth_formats), VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
-
-    if (swapchain->target.depth_attachments.view)
-    {
-        vkDestroyImageView(vctx->device, swapchain->target.depth_attachments.view, nullptr);
-        vkDestroyImage(vctx->device, swapchain->target.depth_attachments.image, nullptr);
-        vkFreeMemory(vctx->device, swapchain->target.depth_attachments.memory, nullptr);
-
-        swapchain->target.depth_attachments.view = VK_NULL_HANDLE;
-        swapchain->target.depth_attachments.image = VK_NULL_HANDLE;
-        swapchain->target.depth_attachments.memory = VK_NULL_HANDLE;
-    }
-
-    auto depth_target = _vk_create_target_texture(vctx, extend, depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, vctx->msaa_samples);
-    swapchain->target.depth_attachments = depth_target;
-
-    // color attachments
-    VkImage images[8] = {};
-    vkGetSwapchainImagesKHR(vctx->device, swapchain->swapchain, &image_count, NULL);
-    vkGetSwapchainImagesKHR(vctx->device, swapchain->swapchain, &image_count, images);
-
-    // render pass
-    if (swapchain->renderpass == VK_NULL_HANDLE)
-        vk_create_renderpass(ctx, surface_format.format, depth_format, &swapchain->renderpass);
-
-    for (uint32_t i = 0; i < image_count; ++i)
-    {
-        VkImageView color_view = _vk_create_image_view(vctx, VK_IMAGE_VIEW_TYPE_2D, images[i], surface_format.format, 1);
-
-        //                                      
-        VkImageView attachments[] =         { color_view,     depth_target.view   };
-
-        //                                    aa_view     aa_depth            resolve(swapchain view)
-        VkImageView sampled_attachments[] = { color_view, depth_target.view,  color_view        };
-
-        if (swapchain->framebuffers[i] != VK_NULL_HANDLE)
-            vkDestroyFramebuffer(vctx->device, swapchain->framebuffers[i], nullptr);
-        swapchain->framebuffers[i] = VK_NULL_HANDLE;
-
-        VkFramebufferCreateInfo info = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-            info.renderPass         = swapchain->renderpass;
-            info.attachmentCount    = _countof(attachments);
-            info.pAttachments       = attachments;
-            info.width              = extend.width;
-            info.height             = extend.height;
-            info.layers             = 1;
-        result = vkCreateFramebuffer(vctx->device, &info, nullptr, &(swapchain)->framebuffers[i]);
-        if(result != VK_SUCCESS)
-        {
-            auto err_str = string_VkResult(result);
-            vctx->dbg_log(gfx_msg_error, "failed to create framebuffer: %s", err_str);
-        }
-        swapchain->target.renderpass = swapchain->renderpass;
-        swapchain->target.framebuffer = swapchain->framebuffers[i];
-        swapchain->target.color_attachments[i].format = surface_format.format;
-        swapchain->target.color_attachments[i].view = color_view;
-        swapchain->target.color_attachments[i].image = images[i];
-    }
-}
-
-
-void vk_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** out_swapchain)
-{
-    vk_context_t* vctx = from_ctx(ctx);
-
-    vk_swapchain_t* swapchain = (vk_swapchain_t*)_gfx_alloc(vctx, sizeof(vk_swapchain_t));
-    if (swapchain == nullptr)
-        return;
-
-    *out_swapchain = &swapchain->handle;
-    vk_recreate_swapchain(ctx, swapchain);
-    vctx->default_renderpass = swapchain->target.renderpass;
-}
 
 void vk_destroy_swapchain(gfx_context_t* ctx, gfx_swapchain_t* swapchain)
 {
@@ -1321,27 +1539,19 @@ void vk_destroy_swapchain(gfx_context_t* ctx, gfx_swapchain_t* swapchain)
         vk_swapchain->framebuffers[i] = VK_NULL_HANDLE;
     }
 
-    if(vk_swapchain->target.depth_attachments.view) {
-        vkDestroyImageView(vctx->device, vk_swapchain->target.depth_attachments.view, nullptr);
-        vkDestroyImage(vctx->device, vk_swapchain->target.depth_attachments.image, nullptr);
-        vkFreeMemory(vctx->device, vk_swapchain->target.depth_attachments.memory, nullptr);
-
-        vk_swapchain->target.depth_attachments.view = VK_NULL_HANDLE;
-        vk_swapchain->target.depth_attachments.image = VK_NULL_HANDLE;
-        vk_swapchain->target.depth_attachments.memory = VK_NULL_HANDLE;
-     }
-
     for (size_t i = 0; i < vk_swapchain->target.color_attachment_count; i++) {
-        vkDestroyImageView(vctx->device, vk_swapchain->target.color_attachments[i].view, nullptr);
-        vk_swapchain->target.color_attachments[i].view = VK_NULL_HANDLE;
+        _destroy_vk_texture(vctx, &vk_swapchain->target.color_attachments[i]);
     }
+    _destroy_vk_texture(vctx, &vk_swapchain->target.depth_attachments);
 
     if(vk_swapchain->swapchain != VK_NULL_HANDLE)
         vkDestroySwapchainKHR(vctx->device, vk_swapchain->swapchain, nullptr);
     vk_swapchain->swapchain = VK_NULL_HANDLE;
+
+    _gfx_free(vctx, vk_swapchain);
 }
 
-
+/*
 int32_t vk_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target)
 {
     vk_context_t* vctx = from_ctx(ctx);
@@ -1356,7 +1566,7 @@ int32_t vk_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_rende
         {
             case VK_SUBOPTIMAL_KHR:
             case VK_ERROR_OUT_OF_DATE_KHR: 
-                vk_recreate_swapchain(ctx, vk_swapchain); 
+                vk_recreate_swapchain(ctx, vctx->surface, vk_swapchain);
                 continue;
 
             case VK_SUCCESS: 
@@ -1393,13 +1603,13 @@ void vk_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx
     auto result = vkQueuePresentKHR(vctx->present_queue.queue, &present_info);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
     {
-        vk_recreate_swapchain(ctx, vk_swapchain);
+        vk_recreate_swapchain(ctx, vctx->surface, vk_swapchain);
     }
 
     vctx->frame_idx = (vctx->frame_idx+1)%2;
     vctx->frame_number++;
 }
-
+*/
 
 // --- BUFFER ---
 
@@ -1949,6 +2159,7 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
     vk_context_t* vctx = from_ctx(ctx);
     vk_buffer_t staging = {};
 
+    desc->mip_levels = max(1, desc->mip_levels);
    // size_t size = desc->size;
     uint32_t mem_size = 0;
     for(uint32_t i = 0; i < desc->mip_levels; ++i) 
@@ -2249,13 +2460,7 @@ void vk_destroy_texture(gfx_context_t* ctx, gfx_texture_t* _texture)
     vk_texture_t* texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, _texture->idx);
     if(texture != nullptr)
     {
-        vkDestroyImageView(vctx->device, texture->view, nullptr);
-        vkDestroyImage(vctx->device, texture->image, nullptr);
-        vkFreeMemory(vctx->device, texture->memory, nullptr);
-
-        texture->view     = VK_NULL_HANDLE;
-        texture->image    = VK_NULL_HANDLE;
-        texture->memory   = VK_NULL_HANDLE;
+        _destroy_vk_texture(vctx, texture);
 
         gfx_pool_free(vctx->texture_pool, _texture->idx);
     }
@@ -2377,7 +2582,7 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     pipelineInfo.pVertexInputState      = &vertex_input;
     pipelineInfo.pDynamicState          = &dyn_state_info;
     pipelineInfo.layout                 = vkshader->pipeline_layout;
-    pipelineInfo.renderPass             = vctx->default_renderpass;
+    pipelineInfo.renderPass             = vctx->default_renderpass;///!!! fuck this shit
 
     uint64_t handle = gfx_pool_alloc(vctx->pipeline_pool);
     vk_pipeline_t* vkpipeline = (vk_pipeline_t*)gfx_pool_map(vctx->pipeline_pool, handle);
@@ -2686,6 +2891,7 @@ void vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
                 vk_command_buffer_t * tmp =  vctx->cmd_buffer_pool[j];
                 *out_cmd = &tmp->handle;
 
+                vkResetCommandBuffer(tmp->cmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
                 vctx->cmd_pool_size--;
                 vctx->cmd_buffer_pool[j] = nullptr;
                 return;
@@ -2768,12 +2974,15 @@ void vk_cmd_begin(gfx_command_buffer_t* cmd)
 
     VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
     vkResetCommandPool(vk_cmd->device, vk_cmd->pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
 
     if (auto result = vkBeginCommandBuffer(vk_cmd->cmd, &begin)) {
         auto err_str = string_VkResult(result);
         vk_cmd->ctx->dbg_log(gfx_msg_error, "vkBeginCommandBuffer failed!(s)", err_str);
     }
+
+    vkCmdResetQueryPool(vk_cmd->cmd, vk_cmd->time_query_pool, 0, MAX_TIMESTAMP_QUERIES);
 }
 
 
@@ -2925,7 +3134,6 @@ void vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
     vkcmd->time_query_current_index += 2; // reserve pair (start, end)
 }
 
-
 void vk_cmd_pop_marker(gfx_command_buffer_t* cmd)
 {
     vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
@@ -2945,71 +3153,6 @@ void vk_cmd_pop_marker(gfx_command_buffer_t* cmd)
         ctx->vk_dbg_cmd_pop_label(vkcmd->cmd);
 }
 
-
-
-typedef struct vulkan_state_mapping_t {
-    VkPipelineStageFlags2 stage;
-    VkAccessFlags2        access;
-    VkImageLayout         image_layout;
-} vulkan_state_mapping_t;
-
-static vulkan_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags aspect) {
-    vulkan_state_mapping_t out = { 0 };
-
-    switch (state) {
-    case gfx_barrier_transfer:
-        out.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        out.access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        out.image_layout = VK_IMAGE_LAYOUT_GENERAL; // or TRANSFER_DST_OPTIMAL, but GENERAL univeral for RW
-        break;
-
-    case gfx_barrier_compute:
-        out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        out.access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
-        out.image_layout = VK_IMAGE_LAYOUT_GENERAL;
-        break;
-
-    case gfx_barrier_graphics:
-        // enable both the Vertex and Fragment stages for full cross reading
-        out.stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        out.access = VK_ACCESS_2_SHADER_READ_BIT;
-        out.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        break;
-
-    case gfx_barrier_render_target:
-        out.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        out.access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        out.image_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        break;
-
-    case gfx_barrier_depth_stencil:
-        // Important: depth tests occur at early and late stages of fragments 
-        out.stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-        out.access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        out.image_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        break;
-
-    case gfx_barrier_indirect:
-        out.stage = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-        out.access = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
-        out.image_layout = VK_IMAGE_LAYOUT_UNDEFINED; // buffers don't have a layout
-        break;
-
-    case gfx_barrier_present:
-        out.stage = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-        out.access = VK_ACCESS_2_NONE;
-        out.image_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        break;
-
-    default:
-        out.stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-        out.access = VK_ACCESS_2_NONE;
-        out.image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        break;
-    }
-
-    return out;
-}
 
 void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier old_state, gfx_barrier new_state)
 {
@@ -3092,8 +3235,7 @@ void vk_cmd_end(gfx_command_buffer_t* cmd)
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
     if (auto result = vkEndCommandBuffer(vk_cmd->cmd)) {
-        auto err_str = string_VkResult(result);
-       // ctx->dbg_log(gfx_msg_error, "vkEndCommandBuffer failed!(s)", err_str);
+        vk_cmd->ctx->dbg_log(gfx_msg_error, "vkEndCommandBuffer failed!(s)", string_VkResult(result));
     }
 }
 
@@ -3103,7 +3245,6 @@ void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
     vk_context_t* vkctx = from_ctx(ctx);
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
-  //  VkPipelineStageFlags stages[] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
     VkPipelineStageFlags stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 
     VkFence fence = VK_NULL_HANDLE;
@@ -3117,16 +3258,6 @@ void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &vk_cmd->cmd;
 
-    if (options == gfx_submit_wait_for_image_ready)
-    {
-        fence = vkctx->semaphores[vkctx->frame_idx].wait_fence;
-        submit.pWaitDstStageMask    = stages;
-        submit.waitSemaphoreCount   = 1;
-        submit.pWaitSemaphores      = &vkctx->semaphores[vkctx->frame_idx].image_available;
-        submit.signalSemaphoreCount = 1;
-        submit.pSignalSemaphores    = &vkctx->semaphores[vkctx->frame_idx].rendering_finished;
-    }
-
     if (auto result = vkQueueSubmit(vkctx->graphics_queue.queue, 1, &submit, fence))
     {
         auto err_str = string_VkResult(result);
@@ -3137,12 +3268,10 @@ void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
 
     switch (options)
     {
-        case gfx_submit_nowait:break;
+        case gfx_submit_nowait: break;
         case gfx_submit_wait_for_fence:         wait_result = vkWaitForFences(vkctx->device, 1, &fence, VK_TRUE, 1000000000); break;
         case gfx_submit_wait_for_queue_idle:    wait_result = vkQueueWaitIdle(vkctx->graphics_queue.queue); break;
         case gfx_submit_wait_for_device_idle:   wait_result = vkDeviceWaitIdle(vkctx->device); break;
-        case gfx_submit_wait_for_image_ready:   wait_result = vkQueueWaitIdle(vkctx->graphics_queue.queue); break;
-      //  case gfx_submit_wait_for_image_ready:   wait_result = vkDeviceWaitIdle(vkctx->device); break;
     }
 
     if(wait_result != VK_SUCCESS)
@@ -3155,34 +3284,11 @@ void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
         vkResetFences(vkctx->device, 1, &fence);
         vkDestroyFence(vkctx->device, fence, nullptr);
     }
-
-    if(vk_cmd->stamp_count > 0) 
-    {
-        uint64_t timestamps[256] = {};
-        vkGetQueryPoolResults(  vkctx->device, vk_cmd->time_query_pool, 0, 
-                                vk_cmd->time_query_current_index,
-                                _countof(timestamps) * sizeof(uint64_t), 
-                                timestamps, 
-                                sizeof(uint64_t), 
-                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-
-        VkPhysicalDeviceLimits device_limits = vkctx->device_properties.limits;
-
-        float delta_in_ms = float(timestamps[1] - timestamps[0]) * device_limits.timestampPeriod / 1000000.0f;
-        vk_cmd->stamp_count = 0;
-
-        vk_cmd->time_query_stack_top = 0;
-        vk_cmd->time_query_current_index = 0;
-        vkctx->dbg_log(gfx_msg_info, "gpu time %.3f ", delta_in_ms);
-    }
 }
 
 
 
-
-
 // --- DEBUG ---
-
 void vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name)
 {
     if(ctx->vk_dbg_set_object_name != nullptr) {
@@ -3193,7 +3299,6 @@ void vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, 
         ctx->vk_dbg_set_object_name(ctx->device, &name_info);
     }
 }
-
 
 
 void vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name)

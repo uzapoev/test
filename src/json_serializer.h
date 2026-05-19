@@ -229,10 +229,10 @@ namespace json
                     {
                         object.*arg->member = (member_type)node->value.toNumber();
                     }
-                   /* else if constexpr (std::is_integral_v<member_type>)             // bool, int, int16m int32...
+                    else if constexpr (std::is_integral_v<member_type>)             // bool, int, int16m int32...
                     {
                         object.*arg->member = (member_type)value.ToInt();
-                    } */
+                    } 
                     else if constexpr (detail::is_vector<member_type>::value)       // vector
                     {
                         detail::jsonread_vec2(node->value, object.*arg->member);

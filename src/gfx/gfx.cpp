@@ -6,9 +6,12 @@
     #pragma comment(lib, "dbghelp.lib")
 #endif
 
+#include <stdio.h>
 #include <math.h>
 #include <memory.h> // memset
-#include <thread>
+#include <atomic>
+//#include <thread>
+
 #include "gfx_stub.h"
 
 #ifndef __cplusplus
@@ -269,14 +272,30 @@ void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps) {
 }
 
 // --- SWAPCHAIN ---
-void gfx_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain) {
-    g_tbl->pfn_create_swapchain(ctx, handle, swapchain);
+
+gfx_surface_t gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc)
+{
+    gfx_surface_t * surface = nullptr;
+    g_tbl->pfn_surface_create(ctx, desc, &surface);
+    return { surface ->idx };
 }
-int32_t gfx_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target) {
-    return g_tbl->pfn_acquire_img(ctx, swapchain, target);
+
+void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface)
+{
+    g_tbl->pfn_surface_destroy(ctx, &surface);
 }
-void gfx_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx) {
-    g_tbl->pfn_present_img(ctx, swapchain, idx);
+
+gfx_frame_t*  gfx_begin_frame(gfx_context_t* ctx, gfx_surface_t * surface)
+{
+    gfx_frame_t * out_frame = nullptr;
+    g_tbl->pfn_frame_begin(ctx, surface, &out_frame);
+    return out_frame;
+}
+
+gfx_result gfx_end_frame(gfx_frame_t* frame)
+{
+    g_tbl->pfn_frame_end(frame);
+    return gfx_ok;
 }
 
 // --- BUFFER ---
@@ -606,8 +625,11 @@ const char* gfx_to_string(gfx_pixel_format format)
 #pragma region gfx utils
 uint32_t gfx_utils_thread_id()
 {
-    static thread_local auto id = std::hash<std::thread::id> ();
-    return (uint32_t)id(std::this_thread::get_id());
+    static thread_local const uint32_t s_unique_id = []() {
+        static std::atomic<uint32_t> s_counter = 1;
+        return s_counter.fetch_add(1, std::memory_order_relaxed);
+     }();
+     return s_unique_id;
 }
 
 uint32_t gfx_utils_stack_trace(uint32_t skip, uintptr_t* frames, uint64_t count)
@@ -764,10 +786,10 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_init                    = vk_create_renderer;
     func_table->pfn_get_caps                = vk_get_caps;
 
-    // SWAPCHAIN
-    func_table->pfn_create_swapchain        = vk_create_swapchain;
-    func_table->pfn_acquire_img             = vk_acquire_img;
-    func_table->pfn_present_img             = vk_present_img;
+    func_table->pfn_surface_create          = vk_surface_create;
+
+    func_table->pfn_frame_begin             = vk_frame_begin;
+    func_table->pfn_frame_end               = vk_frame_end;
 
     // BUFFER
     func_table->pfn_create_buffer           = vk_create_buffer;
@@ -857,10 +879,6 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     // CONTEXT
     func_table->pfn_init                    = wgpu_init;
 
-    // SWAPCHAIN
-    func_table->pfn_create_swapchain        = wgpu_create_swapchain;
-    func_table->pfn_acquire_img             = wgpu_acquire_img;
-    func_table->pfn_present_img             = wgpu_present_img;
 
     // BUFFER
     func_table->pfn_create_buffer           = wgpu_create_buffer;
