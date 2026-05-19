@@ -104,8 +104,6 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         surface_desc.sample_count       = gfx_sample_1x;
     surface = gfx_surface_create(ctx, &surface_desc);
 
-//    gfx_create_swapchain(ctx, handle, &swapchain);
-
     gfx_shader_t* compute = nullptr;
     load_shader_from_file_path(ctx, "../data/shaders/compute.hlsl", &compute);
 
@@ -113,20 +111,16 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     compute_desc.shader = compute;
     gfx_pipeline_compute_t * compute_pipeline = gfx_compute_pipeline_create(ctx, &compute_desc);
 
-   // gfx_create_descriptor_set2(ctx, compute);
-    //gfx_create_descriptor_set2(ctx, compute);
-
 
     resource_manager::create_and_make_shader(ctx);
-    resource_manager::shared()->mount("../data/");
-
     render_system::create_and_make_shader(ctx);
+
+    resource_manager::shared()->mount("../data/");
 
     
     gfx_shader_t* shader = nullptr;
     load_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
 
-    //gfx_descriptor_set_t* sets = gfx_create_descriptor_set2(ctx, shader);
 
     gfx_vertex_attribute attributes[] = {
         { 0, 0, gfx_vertex_format_float4,   offsetof(vertex, position)  },
@@ -176,8 +170,8 @@ void platform_main(uintptr_t handle, int argc, char** argv)
 
   //  scene_test(ctx, "../data/unity", "Southside.big.json");
   //  scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
-    scene_test(ctx, "../data/unity", "../data/unity/City.json");
-  //  scene_test(ctx, "../data/gungsta", "../data/gungsta/Demo.json");
+   // scene_test(ctx, "../data/unity", "../data/unity/City.json");
+    scene_test(ctx, "../data/gungsta", "../data/gungsta/Demo.json");
 }
 
 

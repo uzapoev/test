@@ -1,9 +1,28 @@
 #include "asset_shader.h"
 
-#include <slang/slang.h>
-#include <slang/slang-cpp-types.h>
-#include <slang/slang-com-helper.h>
-#include <slang/slang-com-ptr.h>
+#ifdef EMSCRIPTEN
+
+int asset_shader_compile(const char* name, const char* data, uint32_t size, const char* target, char** out_blobs, int* out_sizes, const char** out_stages)
+{
+    return 0;
+}
+
+int asset_shader_compile(const char* name, const char* data, uint32_t size, const char* target, stage_blob_t* blobs)
+{
+    return 0;
+}
+
+void asset_shader_blob_free(stage_blob_t* blob) 
+{
+
+}
+
+void save_shader_asset(const char* path, stage_blob_t* stages, uint32_t stage_count) 
+{
+
+}
+
+#elif __has_include(<slang/slang.h>)
 
 #ifdef _DEBUG
 #pragma comment(lib, "lib/slangd.lib")
@@ -11,6 +30,10 @@
 #pragma comment(lib, "lib/slang.lib")
 #endif
 
+#include <slang/slang.h>
+#include <slang/slang-cpp-types.h>
+#include <slang/slang-com-helper.h>
+#include <slang/slang-com-ptr.h>
 
 struct shader_info_t {
     const char *    pragma_name;
@@ -19,11 +42,7 @@ struct shader_info_t {
 } g_shader_infos [] = { 
     { pragma_vertex_name,           SLANG_STAGE_VERTEX,         -1 },
     { pragma_fragment_name,         SLANG_STAGE_FRAGMENT,       -1 },
-                                                    
-    { pragma_hull_name,             SLANG_STAGE_HULL,           -1 },
-    { pragma_domain_name,           SLANG_STAGE_DOMAIN,         -1 },
-    { pragma_geometry_name,         SLANG_STAGE_GEOMETRY,       -1 },
-                           
+                                                                               
     { pragma_compute_name,          SLANG_STAGE_COMPUTE,        -1 },
       
     { pragma_ray_gen_name,          SLANG_STAGE_RAY_GENERATION, -1 },
@@ -164,6 +183,11 @@ int asset_shader_compile(const char * name, const char* data, uint32_t size, con
         assert(false);
     }
 
+    // Slang's SPIR-V backend is stable when emitting SPIR-V 1.3 and later, however, support for SPIR-V 1.0, 1.1 and 1.2 is still experimental
+    // spirv_1_3 spirv_1_4 spirv_1_5
+    auto profile = slangSession->findProfile("spirv_1_3");
+    spSetTargetProfile(compile_request, target_id, profile);
+
     shader_info_t stage_infos[_countof(g_shader_infos)] = {};
     int count = shlang_get_pragma_entrypoints(data, compile_request, translation_unit_index, stage_infos, _countof(stage_infos));
 
@@ -249,3 +273,5 @@ void AssetShader::export_shader(const std::string& path, const std::string& dst_
         fclose(file);
     }*/
 }
+
+#endif

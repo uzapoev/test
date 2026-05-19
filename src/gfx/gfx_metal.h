@@ -13,8 +13,10 @@ struct metal_descriptor_set_pool_t;
 
 typedef struct metal_context_t {
     gfx_context_t                   handle;
-    MTKView* view;
-    CAMetalLayer* metal_layer;
+
+    MTKView*                        view;
+    CAMetalLayer*                   metal_layer;
+
     id<MTLDevice>                   device;
     id<MTLCommandQueue>             cmd_queue;
     id<CAMetalDrawable>             drawable;
@@ -164,7 +166,7 @@ gfx_api void     metal_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* de
 gfx_api void     metal_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
 gfx_api void     metal_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
 gfx_api void     metal_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-gfx_api void     metal_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
+gfx_api void     metal_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
 gfx_api void     metal_create_cmd(gfx_context_t* ctx, uint32_t count, gfx_command_buffer_t** cmd);
 
 gfx_api void     metal_destroy_buffer(gfx_buffer_t* buffer);
@@ -904,7 +906,7 @@ void metal_create_descriptor_set_pool(metal_context_t* ctx, metal_shader_t* shad
 }
 
 
-void metal_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** out_descriptor)
+void metal_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
 {
     auto mctx = from_ctx(ctx);
     auto mshader = (metal_shader_t*)shader;

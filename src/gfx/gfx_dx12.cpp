@@ -125,7 +125,7 @@ extern "C" void dx12_create_render_target(gfx_context_t* /*ctx*/, gfx_render_tar
     *out_target = t ? &t->handle : nullptr;
 }
 
-extern "C" void dx12_create_descriptor_set(gfx_context_t* /*ctx*/, gfx_shader_t* /*shader*/, gfx_descriptor_set_t** out_descriptor)
+extern "C" void dx12_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
 {
     dx12_descriptor_set_t* s = (dx12_descriptor_set_t*)calloc(1, sizeof(dx12_descriptor_set_t));
     *out_descriptor = s ? &s->handle : nullptr;

@@ -630,7 +630,6 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
 
         shader_desc.uniforms = uniforms;
         shader_desc.uniform_count = uniform_count;
-
     *out_shader = gfx_shader_create(ctx, &shader_desc);
 }
 

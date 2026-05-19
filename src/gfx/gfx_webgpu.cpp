@@ -1451,7 +1451,7 @@ void wgpu_create_descriptor_set_pool(gfx_context_t* ctx, wgpu_shader_t * shader,
 }
 
 
-void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** out_descriptor)
+void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
     wgpu_shader_t*  wgpu_shader = (wgpu_shader_t*)shader;

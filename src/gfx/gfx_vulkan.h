@@ -36,7 +36,6 @@ typedef struct vk_context_t
     VkDevice                            device              = VK_NULL_HANDLE;
     VkPhysicalDevice                    physicaldevice      = VK_NULL_HANDLE;
     VkSurfaceKHR                        surface             = VK_NULL_HANDLE;
-    uint32_t                            frame_idx           = 0;
 
     gfx_allocator_t                     allocator;
 
@@ -54,12 +53,6 @@ typedef struct vk_context_t
     VkPhysicalDeviceFeatures            device_features     = {};
     VkPhysicalDeviceMemoryProperties    memory_properties   = {};
     VkPhysicalDeviceProperties          device_properties   = {};
-
-    struct {
-        VkSemaphore                     image_available;        // Wait Semaphores
-        VkSemaphore                     rendering_finished;     // Signal Semaphores
-        VkFence                         wait_fence;
-    } semaphores[2];
 
     VkSemaphore                         frame_timeline_semaphore;
 
@@ -313,7 +306,7 @@ gfx_api void    vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipel
 gfx_api void    vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
 gfx_api void    vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
 gfx_api void    vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-gfx_api void    vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
+gfx_api void    vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
 gfx_api void    vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
 
 gfx_api void    vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);

@@ -57,6 +57,7 @@ static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_un
     {
         strcpy(out_uniforms[i].name, spvflect->uniforms[i].name);
         out_uniforms[i].binding = spvflect->uniforms[i].binding;
+        out_uniforms[i].group = spvflect->uniforms[i].descriptor_set;
         out_uniforms[i].stage_mask  = spvflect->uniforms[i].stage_mask;
 
         switch (spvflect->uniforms[i].type)

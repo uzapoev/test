@@ -94,8 +94,9 @@ scene scene::create_from_json_file(const std::string_view& path)
         if(strstr(node->name.c_str(), "LOD1"))   continue;
         if(strstr(node->name.c_str(), "LOD2"))   continue;
         if(strstr(node->name.c_str(), "LOD3"))   continue;
-        if(strstr(node->name.c_str(), "Imposter"))   continue;
-        if(strstr(node->name.c_str(), "Impostor"))   continue;
+        if(strstr(node->name.c_str(), "Imposter"))  continue;
+        if(strstr(node->name.c_str(), "Impostor"))  continue;
+        if(strstr(node->name.c_str(), "mpostor"))   continue;
 
         // mesh
         auto mesh_guid = node->renderer.mesh_guid;
@@ -137,7 +138,7 @@ scene scene::create_from_json_file(const std::string_view& path)
         desc.minmag = gfx_filter_linear;
         desc.mipmap = gfx_filter_linear;
         desc.anisotropy = 8;
-    auto sampler = gfx_create_sampler2(ctx, &desc);
+    auto sampler = gfx_sampler_create(ctx, &desc);
 
     // update lightmap data
     for (size_t i = 0; i < result.m_renderers.size(); ++i)
@@ -153,16 +154,16 @@ scene scene::create_from_json_file(const std::string_view& path)
         auto lightmap_scale_offset_location = gfx_uniform_location(shader, "lightmap_scale_offset");
 
         if(texture_location && renderer.material->instance->textures[0].value)
-            gfx_uniform_set_texture(set, texture_location, renderer.material->instance->textures[0].value);
+            gfx_descriptor_set_write_texture(set, texture_location, renderer.material->instance->textures[0].value);
 
        if(lightmap_scale_offset_location != 0)
-            gfx_uniform_set_buffer_data(set, lightmap_scale_offset_location, &result.m_renderers[i].lightmap.scale_offset, sizeof(vec4));
+            gfx_descriptor_set_write_buffer_data(set, lightmap_scale_offset_location, &result.m_renderers[i].lightmap.scale_offset, sizeof(vec4));
 
         if(lightmap_location != 0)
-            gfx_uniform_set_texture(set, lightmap_location, result.m_renderers[i].lightmap.lightmap);
+            gfx_descriptor_set_write_texture(set, lightmap_location, result.m_renderers[i].lightmap.lightmap);
 
         if (sampler_location != 0)
-            gfx_uniform_set_sampler(set, sampler_location, sampler);
+            gfx_descriptor_set_write_sampler(set, sampler_location, sampler);
     }
     
     return result;
@@ -349,7 +350,7 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
             }
 
             mat4 mvp = math::mul(vp, renderer->transform);
-            gfx_uniform_set_buffer_data(renderer->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
+            gfx_descriptor_set_write_buffer_data(renderer->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
         }
     }
 
@@ -525,8 +526,8 @@ const std::vector<renderer_t*>& scene::cull(const camera& camera)
    //   auto dept_target_h = gfx_uniform_get_location("depth_texture");
    //   auto visibility_h = gfx_uniform_get_location("visibility_buffer");
    // 
-   //   gfx_uniform_set_texture(descriptor, dept_target_h, depth_rt);
-   //   gfx_uniform_set_buffer(descriptor, visibility_h, depth_rt);
+   //   gfx_descriptor_set_write_texture(descriptor, dept_target_h, depth_rt);
+   //   gfx_descriptor_set_write_buffer(descriptor, visibility_h, depth_rt);
    // 
    //   // build hi-z buffer
    //   gfx_cmd_bind_pipeline(cmd, build_hi_z_buffer);

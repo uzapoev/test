@@ -121,7 +121,7 @@ public:
        /* for(auto _texture in m_textures)
         {
             uint64_t uniform_handle = 0;//find_slot(_texture);
-            gfx_uniform_set_texture(m_descriptor_set, uniform_handle, nullptr);
+            gfx_descriptor_set_write_texture(m_descriptor_set, uniform_handle, nullptr);
             _texture->release();
             texture->unsubscribe(this);
         }*/
@@ -138,7 +138,7 @@ private:
         }
         
         auto texture_handle = _texture ? _texture->texture_handle() : nullptr;
-        gfx_uniform_set_texture(m_descriptor_set, uniform_handle, texture_handle);
+        gfx_descriptor_set_write_texture(m_descriptor_set, uniform_handle, texture_handle);
 
      //   if(_texture != nullptr)
      //       m_material_manager->on_texture_changed(this, _texture);
@@ -147,7 +147,7 @@ private:
     void texture_handle_changed(texture * _texture)
     {
         uint64_t uniform_handle = 0;//find_slot(tex);
-        gfx_uniform_set_texture(m_descriptor_set, uniform_handle, _texture->texture_handle());
+        gfx_descriptor_set_write_texture(m_descriptor_set, uniform_handle, _texture->texture_handle());
     }
 private:
     gfx_material_instance_t *   m_instance = nullptr;

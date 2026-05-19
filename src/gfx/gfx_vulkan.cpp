@@ -1036,20 +1036,8 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vkEnumerateDeviceExtensionProperties(physdevice, NULL, &vctx->extensions_count, vctx->extensions);
 
     auto maxUniformBufferRange = vctx->device_properties.limits.maxUniformBufferRange;
-
-    for(int i = 0; i < _countof(vctx->semaphores); ++i)
-    {
-        vctx->semaphores[i].image_available = _vk_create_semaphore(vctx->device);
-        vctx->semaphores[i].rendering_finished = _vk_create_semaphore(vctx->device);
-
-        VkFenceCreateInfo fenceInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-            fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        vkCreateFence(vctx->device, &fenceInfo, nullptr, &vctx->semaphores[i].wait_fence);
-      //  vkResetFences(vctx->device, 1, &vctx->semaphores[i].wait_fence);
-    }
-
     
-    gfx_pool_create(sizeof(vk_surface_t), 16, &vctx->surface_pool, &vctx->allocator);
+    gfx_pool_create(sizeof(vk_surface_t),       16, &vctx->surface_pool, &vctx->allocator);
     gfx_pool_create(sizeof(vk_render_target_t), 256, &vctx->render_target_pool, &vctx->allocator);
 
     gfx_pool_create(sizeof(vk_sampler_t),        128,  &vctx->sampler_pool, &vctx->allocator);
@@ -1073,43 +1061,43 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
 
     //staging buffer
     gfx_buffer_t* staging_buffer = nullptr;
-    gfx_buffer_desc_t staging_descriptor = {};
-    staging_descriptor.label    = "staging_buffer";
-    staging_descriptor.mapped   = true;
-    staging_descriptor.size     = cfg->limits.staging_buffer_size;
-    staging_descriptor.usage    = gfx_buffer_usage_staging;
+    gfx_buffer_desc_t staging_descriptor    = {};
+        staging_descriptor.label            = "staging_buffer";
+        staging_descriptor.mapped           = true;
+        staging_descriptor.size             = cfg->limits.staging_buffer_size;
+        staging_descriptor.usage            = gfx_buffer_usage_staging;
     vk_create_buffer(&vctx->handle, &staging_descriptor, &staging_buffer);
     vctx->staging_buffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, staging_buffer->idx);
 
     // default sampler
-    gfx_sampler_desc_t sampler_descriptor = {};
-    sampler_descriptor.anisotropy = 1;
-    sampler_descriptor.minmag     = gfx_filter_point;
-    sampler_descriptor.mipmap     = gfx_filter_point;
-    sampler_descriptor.mode       = gfx_address_mode_repeat;
+    gfx_sampler_desc_t sampler_descriptor   = {};
+        sampler_descriptor.anisotropy       = 1;
+        sampler_descriptor.minmag           = gfx_filter_point;
+        sampler_descriptor.mipmap           = gfx_filter_point;
+        sampler_descriptor.mode             = gfx_address_mode_repeat;
     vk_create_sampler(&vctx->handle, &sampler_descriptor, &vctx->default_sampler);
     
     // default texture
     gfx_texture_t* default_texture = nullptr;
     gfx_texture_desc_t  default_texture_desc = { 0 };
-    default_texture_desc.label        = "_default_texture";
-    default_texture_desc.width        = 4;
-    default_texture_desc.height       = 4;
-    default_texture_desc.depth        = 1;
-    default_texture_desc.format       = gfx_pixel_format_rgba8;
-    default_texture_desc.mip_levels   = 3;
-    default_texture_desc.data         = &_colors[0];
+        default_texture_desc.label        = "_default_texture";
+        default_texture_desc.width        = 4;
+        default_texture_desc.height       = 4;
+        default_texture_desc.depth        = 1;
+        default_texture_desc.format       = gfx_pixel_format_rgba8;
+        default_texture_desc.mip_levels   = 3;
+        default_texture_desc.data         = &_colors[0];
     vk_create_texture(&vctx->handle, &default_texture_desc, &default_texture);
     vctx->default_texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, default_texture->idx);
 
     // default texture storage
     gfx_texture_desc_t default_texture_storage_desc = { 0 };
-    default_texture_storage_desc.label    = "_default_texture_storage";
-    default_texture_storage_desc.width    = 32;
-    default_texture_storage_desc.height   = 32;
-    default_texture_storage_desc.depth    = 1;
-    default_texture_storage_desc.format   = gfx_pixel_format_rgba8;
-    default_texture_storage_desc.storage  = 1;
+        default_texture_storage_desc.label    = "_default_texture_storage";
+        default_texture_storage_desc.width    = 32;
+        default_texture_storage_desc.height   = 32;
+        default_texture_storage_desc.depth    = 1;
+        default_texture_storage_desc.format   = gfx_pixel_format_rgba8;
+        default_texture_storage_desc.storage  = 1;
     vk_create_texture(&vctx->handle, &default_texture_storage_desc, &vctx->default_storage_texture);
 
     // bindless texture pool and set
@@ -1176,11 +1164,6 @@ void vk_destroy_renderer(gfx_context_t * ctx)
     vk_destroy_sampler(ctx, vctx->default_sampler);
     vk_destroy_texture(ctx, &vctx->default_texture->handle);
     vctx_free(ctx, vctx->extensions);
-
-    vkDestroySemaphore(vctx->device, vctx->semaphores[0].image_available, NULL);
-    vkDestroySemaphore(vctx->device, vctx->semaphores[0].rendering_finished, NULL);
-    vkDestroySemaphore(vctx->device, vctx->semaphores[1].image_available, NULL);
-    vkDestroySemaphore(vctx->device, vctx->semaphores[1].rendering_finished, NULL);
 
     vkDestroyDevice(vctx->device, nullptr);
     vkDestroySurfaceKHR(vctx->instance, vctx->surface, nullptr);
@@ -1927,7 +1910,7 @@ void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
             if ((*ptr & SpvOpCodeMask) != SpvOpEntryPoint) continue;
 
             stage->stage = VkShaderStageFlagBits(1 << *(SpvExecutionModel*)(ptr + 1));
-            stage->pName = _strdup((const char*)(ptr + 3));
+            stage->pName = _strdup((const char*)(ptr + 3)); // todo: memleak here
             break;
         }
 
@@ -1973,9 +1956,6 @@ void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
         #define  test_flag(v, f) ((v & f) == f)
 
         vk_shader->bindings[i].stageFlags |= test_flag(stage_mask, 1 << gfx_shader_vertex)      ? VK_SHADER_STAGE_VERTEX_BIT   : 0;
-        vk_shader->bindings[i].stageFlags |= test_flag(stage_mask, 1 << gfx_shader_hull)        ? 0 : 0; //
-        vk_shader->bindings[i].stageFlags |= test_flag(stage_mask, 1 << gfx_shader_domain)      ? 0 : 0; //
-        vk_shader->bindings[i].stageFlags |= test_flag(stage_mask, 1 << gfx_shader_geometry)    ? VK_SHADER_STAGE_GEOMETRY_BIT : 0;
         vk_shader->bindings[i].stageFlags |= test_flag(stage_mask, 1 << gfx_shader_fragment)    ? VK_SHADER_STAGE_FRAGMENT_BIT : 0;
         vk_shader->bindings[i].stageFlags |= test_flag(stage_mask, 1 << gfx_shader_compute)     ? VK_SHADER_STAGE_COMPUTE_BIT  : 0;
 
@@ -2724,7 +2704,7 @@ void vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* target)
 
 // --- DESCRIPTOR SET ---
 
-void vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** out_set)
+void vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
 {
     assert(ctx && shader && out_set);
 

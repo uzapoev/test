@@ -101,10 +101,10 @@ void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_poo
     pool->capacity              = capacity;
     pool->used_chunks           = 0;
     pool->hash                  = hash16((char*)pool, sizeof(intptr_t));
-    pool->data                  = allocator->gfx_alloc(capacity * stride, allocator->user_data);
+    pool->data                  =                allocator->gfx_alloc(capacity * stride, allocator->user_data);
     pool->handles               = (gfx_handle_t*)allocator->gfx_alloc(capacity * sizeof(gfx_handle_t), allocator->user_data);
-    pool->free_list             = (uint32_t*)allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
-    pool->generation_counters   = (uint32_t*)allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
+    pool->free_list             = (uint32_t*)    allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
+    pool->generation_counters   = (uint32_t*)    allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
 
     if (!pool->data || !pool->handles || !pool->free_list || !pool->generation_counters) {
         gfx_pool_destroy(pool);
@@ -321,7 +321,7 @@ gfx_api gfx_shader_t* gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* d
     g_tbl->pfn_create_shader(ctx, desc, &result);
     return result;
 }
-uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, gfx_uniform_t* uniforms) {
+uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, uint32_t group, gfx_uniform_t* uniforms) {
     assert(false);
     return 0;
 }
@@ -431,21 +431,21 @@ void gfx_render_target_destroy(gfx_context_t* ctx, gfx_render_target_t* target) 
 }
 
 // --- DESCRIPTOR SET ---
-gfx_api gfx_descriptor_set_t* gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader) {
+gfx_api gfx_descriptor_set_t* gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx) {
     gfx_descriptor_set_t* result = nullptr;
-    g_tbl->pfn_create_descriptor_set(ctx, shader, &result);
+    g_tbl->pfn_create_descriptor_set(ctx, shader, set_idx, &result);
     return result;
 }
-void gfx_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) {
+void gfx_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) {
     g_tbl->pfn_uniform_set_buffer_data(set, handle, data, size);
 }
-void gfx_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t size) {
+void gfx_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t size) {
     g_tbl->pfn_uniform_set_buffer(set, handle, buffer, size);
 }
-void gfx_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture) {
+void gfx_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture) {
     g_tbl->pfn_uniform_set_texture(set, handle, texture);
 }
-void gfx_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler) {
+void gfx_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler) {
     g_tbl->pfn_uniform_set_sampler(set, handle, sampler);
 }
 void gfx_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor) {
@@ -541,9 +541,6 @@ const char* gfx_to_string(gfx_shader_stage stage)
     switch (stage) 
     {
         case gfx_shader_vertex:           return "vertex";
-        case gfx_shader_hull:             return "hull";
-        case gfx_shader_domain:           return "domain";
-        case gfx_shader_geometry:         return "geometry";
         case gfx_shader_fragment:         return "fragment";
                                           
         case gfx_shader_amplify:          return "amplify";

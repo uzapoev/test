@@ -288,20 +288,20 @@ std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * nam
 
     auto material = std::make_shared<gfx_material_t>();
     material->instance = instance;
-    material->descriptor_set = gfx_descriptor_set_create(m_ctx, instance->shader);
+    material->descriptor_set = gfx_descriptor_set_create(m_ctx, instance->shader, 0);
     
     for(size_t i = 0; i < _countof(instance->textures); ++i)
     {
         uint64_t handle = gfx_uniform_location(instance->shader, instance->textures[i].key.c_str());
         if(handle && instance->textures[i].value)
-            gfx_uniform_set_texture(material->descriptor_set, handle, instance->textures[i].value);
+            gfx_descriptor_set_write_texture(material->descriptor_set, handle, instance->textures[i].value);
     }
 
     for (size_t i = 0; i < _countof(instance->vectorsf); ++i)
     {
         uint64_t handle = gfx_uniform_location(instance->shader, instance->vectorsf[i].key.c_str());
         if (handle)
-            gfx_uniform_set_buffer_data(material->descriptor_set, handle, &instance->vectorsf[i].value, sizeof(vec4));
+            gfx_descriptor_set_write_buffer_data(material->descriptor_set, handle, &instance->vectorsf[i].value, sizeof(vec4));
     }
 
     m_materials.push_back(material);
