@@ -839,8 +839,8 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_destroy_descriptor_set  = vk_destroy_descriptor_set;
 
     // COMMAND BUFFER
-    func_table->pfn_create_cmd              = vk_create_cmd;
-    func_table->pfn_destroy_cmd             = vk_destroy_cmd;
+    func_table->pfn_create_cmd              = vk_cmd_create;
+    func_table->pfn_destroy_cmd             = vk_cmd_destroy;
 
     func_table->pfn_cmd_begin               = vk_cmd_begin;
     func_table->pfn_cmd_begin_pass          = vk_cmd_begin_pass;
@@ -864,7 +864,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_cmd_texture_barrier     = vk_cmd_texture_barrier;
 
     func_table->pfn_cmd_end                 = vk_cmd_end;
-    func_table->pfn_submit_cmd              = vk_submit_cmd;
+    func_table->pfn_submit_cmd              = vk_cmd_submit;
 }
 #else
 void gfx_init_vulkan(gfx_api_pfn* func_table) { 

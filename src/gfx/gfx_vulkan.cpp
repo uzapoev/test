@@ -827,22 +827,22 @@ static void _vk_image_transition(vk_context_t* ctx, VkImage image, uint16_t mips
         assert(false);
 
     gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(&ctx->handle, &cmd);
+    vk_cmd_create(&ctx->handle, &cmd);
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
     vk_cmd_begin(cmd);
 
     vkCmdPipelineBarrier(vk_cmd->cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier );
 
-    gfx_cmd_end(cmd);
-    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_cmd_destroy(&ctx->handle, cmd);
+    vk_cmd_end(cmd);
+    vk_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    vk_cmd_destroy(&ctx->handle, cmd);
 }
 
 static void _vk_copy_buffer_to(vk_context_t* ctx, VkBuffer src, vk_copy_info_t * dst_info)
 {
     gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(&ctx->handle, &cmd);
+    vk_cmd_create(&ctx->handle, &cmd);
     vk_cmd_begin(cmd);
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
@@ -875,15 +875,15 @@ static void _vk_copy_buffer_to(vk_context_t* ctx, VkBuffer src, vk_copy_info_t *
         }
         vkCmdCopyBufferToImage(vk_cmd->cmd, src, dst_info->dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dst_info->dst_image_mips, regions);
     }
-    gfx_cmd_end(cmd);
-    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_cmd_destroy(&ctx->handle, cmd);
+    vk_cmd_end(cmd);
+    vk_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    vk_cmd_destroy(&ctx->handle, cmd);
 }
 
 static void _vk_copy_buffer_to_image(vk_context_t* ctx, VkBuffer src, VkImage image, uint32_t mips, gfx_pixel_format format, VkExtent3D extend)
 {
     gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(&ctx->handle, &cmd);
+    vk_cmd_create(&ctx->handle, &cmd);
     vk_cmd_begin(cmd);
 
     VkBufferImageCopy regions[16] = {};
@@ -909,15 +909,15 @@ static void _vk_copy_buffer_to_image(vk_context_t* ctx, VkBuffer src, VkImage im
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
     vkCmdCopyBufferToImage(vk_cmd->cmd, src, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mips, regions);
 
-    gfx_cmd_end(cmd);
-    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_cmd_destroy(&ctx->handle, cmd);
+    vk_cmd_end(cmd);
+    vk_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    vk_cmd_destroy(&ctx->handle, cmd);
 }
 
 static void _vk_copy_buffer_to_buffer(vk_context_t* ctx, VkBuffer src, VkBuffer dst_buffer, VkDeviceSize dst_buffer_offset, VkDeviceSize dst_buffer_size)
 {
     gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(&ctx->handle, &cmd);
+    vk_cmd_create(&ctx->handle, &cmd);
     vk_cmd_begin(cmd);
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
@@ -927,9 +927,9 @@ static void _vk_copy_buffer_to_buffer(vk_context_t* ctx, VkBuffer src, VkBuffer 
         region.srcOffset = 0;
     vkCmdCopyBuffer(vk_cmd->cmd, src, dst_buffer, 1, &region);
 
-    gfx_cmd_end(cmd);
-    gfx_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    gfx_cmd_destroy(&ctx->handle, cmd);
+    vk_cmd_end(cmd);
+    vk_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
+    vk_cmd_destroy(&ctx->handle, cmd);
 }
 
 void _destroy_vk_texture(vk_context_t * ctx, vk_texture_t* texture)
@@ -1394,7 +1394,7 @@ void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t**
     surface->swapchain_image_index = img_idx;
 
     if(frame->cmd == nullptr)
-        vk_create_cmd(ctx, &frame->cmd);
+        vk_cmd_create(ctx, &frame->cmd);
     vk_cmd_begin(frame->cmd);
 }
 
@@ -2306,7 +2306,7 @@ void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
     }
 
     gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(ctx, &cmd);
+    vk_cmd_create(ctx, &cmd);
     vk_cmd_begin(cmd);
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
@@ -2382,9 +2382,9 @@ void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture)
         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    gfx_cmd_end(cmd);
-    gfx_cmd_submit(ctx, cmd, gfx_submit_wait_for_fence);
-    gfx_cmd_destroy(ctx, cmd);
+    vk_cmd_end(cmd);
+    vk_cmd_submit(ctx, cmd, gfx_submit_wait_for_fence);
+    vk_cmd_destroy(ctx, cmd);
 }
 
 
@@ -2396,7 +2396,7 @@ void vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
     if (!vsrc || !vdst) return;
 
     gfx_command_buffer_t* cmd = nullptr;
-    vk_create_cmd(ctx, &cmd);
+    vk_cmd_create(ctx, &cmd);
     vk_cmd_begin(cmd);
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
@@ -2448,9 +2448,9 @@ void vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         0, 0, nullptr, 0, nullptr, 2, post);
 
-    gfx_cmd_end(cmd);
-    gfx_cmd_submit(ctx, cmd, gfx_submit_wait_for_fence);
-    gfx_cmd_destroy(ctx, cmd);
+    vk_cmd_end(cmd);
+    vk_cmd_submit(ctx, cmd, gfx_submit_wait_for_fence);
+    vk_cmd_destroy(ctx, cmd);
 }
 
 void vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
@@ -2922,7 +2922,7 @@ void vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descrip
 
 // --- COMMAND BUFFER ---
 
-void vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
+void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
 {
     vk_context_t* vctx = (vk_context_t*)ctx;
 
@@ -2988,7 +2988,7 @@ void vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
     *out_cmd = &vk_cmd->handle;
 }
 
-void vk_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
+void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
 {
     vk_context_t* vctx = from_ctx(ctx);
     vk_command_buffer_t * vkcmd = (vk_command_buffer_t*)cmd;
@@ -3280,7 +3280,7 @@ void vk_cmd_end(gfx_command_buffer_t* cmd)
 }
 
 
-void vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options)
+void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options)
 {
     vk_context_t* vkctx = from_ctx(ctx);
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;

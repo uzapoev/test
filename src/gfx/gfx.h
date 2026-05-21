@@ -408,21 +408,43 @@ typedef struct { uint64_t idx; } gfx_command_buffer_t;          /**< Handle capt
 typedef struct { uint64_t idx; } gfx_acceleration_structure_t;  /**< Handle to a Top or Bottom level acceleration structure */
 typedef struct { uint64_t idx; } gfx_sbt_t;                     /**< Handle to a Shader Binding Table mapping ray tracing groups */
 
-// type - info/warning/error
+
+// ============================================================================
+// --- Callbacks, Custom Allocators & Error States ---
+// ============================================================================
+
+/**
+ * @brief Function pointer signature for receiving diagnostic engine messages.
+ * @param type Severity classification of the triggered log event.
+ * @param msg Format string reference mapping the detailed diagnostic data.
+ */
 typedef void (*gfx_callback)(gfx_msg type, const char* msg, ...);
 
+/**
+ * @brief Interface providing custom memory allocation hooks to bypass native system malloc/free.
+ */
 typedef struct gfx_allocator_t {
     void*   (*gfx_alloc) (size_t size, void* userdata)  = nullptr; /**< Function pointer allocating a discrete block of heap memory */
     void    (*gfx_free)  (void* ptr, void* userdata)    = nullptr; /**< Function pointer releasing a previously allocated memory address block */
     void*   user_data                                   = nullptr; /**< Custom runtime context state passed down into callbacks */
 } gfx_allocator_t;
 
+/**
+ * @brief Comprehensive payload encapsulating API runtime failures.
+ */
 typedef struct gfx_error_t {
     const char*     message = nullptr;  /**< Explanatory string explaining the crash or validation root cause context */
     uint32_t        code    = 0;        /**< Unique numerical integer identifier linked to the error state classification */
 } gfx_error_t;
 
 
+// ============================================================================
+// --- System Initialization & Hardware Capabilities ---
+// ============================================================================
+
+/**
+ * @brief Primary configuration settings used to initialize the graphics engine context.
+ */
 typedef struct gfx_settings_t {
     uint32_t                options                 = 0;                /**< Bitmask configuration flags (see gfx_options) */
 
@@ -430,6 +452,9 @@ typedef struct gfx_settings_t {
     gfx_gpu_type            prefer_gpu              = gfx_gpu_discrete; /**< Preferred hardware GPU architecture type */
     intptr_t                handle                  = 0;                /**< Optional OS-specific application/window instance handle */
 
+    /**
+     * @brief Fixed limits and pool capacities allocated for resource management.
+     */
     struct {
         uint32_t            staging_buffer_size             = 8 * 1024 * 1024;  /**< Size of host-visible staging memory in bytes */
         uint32_t            uniform_buffer_size             = 8 * 1024 * 1024;  /**< Size of persistent uniform buffer ring in bytes */
@@ -489,6 +514,10 @@ typedef struct gfx_caps_t {
 } gfx_caps_t;
 
 
+// ============================================================================
+// --- Core Resource Descriptors ---
+// ============================================================================
+
 
 typedef struct gfx_surface_desc_t {
     const char*             label;              /**< Optional debug metadata string literal identifier */
@@ -534,9 +563,14 @@ typedef struct gfx_buffer_desc_t {
     void*                   data;               /**< Optional host pointer used to clone initial data directly into allocation */
 } gfx_buffer_desc_t;
 
-/// <summary>
-/// gfx_uniform_t - get by shader reflection;
-/// </summary>
+
+// ============================================================================
+// --- Shader Reflection & Layout Descriptors ---
+// ============================================================================
+
+/**
+ * @brief Layout metadata payload extracted from automated shader reflection parsing.
+ */
 typedef struct gfx_uniform_t {
     char                    name[32];           /**< Unique shader variable layout name token identifier */
     gfx_uniform_type        type;               /**< Layout component parameter block or binding type */
@@ -584,12 +618,11 @@ typedef struct gfx_uniform_loc_t {
 } gfx_uniform_loc_t;
 
 
-typedef struct gfx_shader_stage_data{
-    gfx_shader_stage        stage;
-    void*                   data;
-    uint32_t                size;
-
-    const char *            entry;
+typedef struct gfx_shader_stage_data {
+    gfx_shader_stage        stage;              /**< Target hardware pipeline stage execution block assignment */
+    void*                   data;               /**< Pointer referencing native compiled shader source or SPIR-V/DXIL bytes */
+    uint32_t                size;               /**< Memory boundary footprint size of the data source byte array in bytes */
+    const char*             entry;              /**< Function name string literal identifying the main entry execution point */
 } gfx_shader_stage_data;
 
 
@@ -604,6 +637,10 @@ typedef struct gfx_shader_desc_t {
     gfx_uniform_t*          uniforms;                   /**< Array of active binding configuration metadata structures */
 } gfx_shader_desc_t;
 
+
+// ============================================================================
+// --- Input Assembly & Vertex Layout Descriptors ---
+// ============================================================================
 
 typedef struct gfx_vertex_attribute {
 //  gfx_semantic            semantic;
@@ -631,6 +668,10 @@ typedef struct gfx_vertex_assembly {
     gfx_vertex_attribute*   attributes;         /**< Array mapping element locations layout configurations */
 } gfx_vertex_assembly;
 
+
+// ============================================================================
+// --- Fixed-Function Render States Descriptors ---
+// ============================================================================
 
 typedef struct gfx_render_states_desc_t {
     gfx_topology            topology    = gfx_topology_triangles;   /**< Hardware fallback primitive reconstruction topology rules */
@@ -676,7 +717,11 @@ typedef struct gfx_render_states_desc_t {
         bool                alpha       = true;                 /**< Allow calculations to write pixels to output Alpha color channels */
     } color_mask;
 } gfx_render_states_desc_t;
- 
+
+
+// ============================================================================
+// --- Render Target & Pipeline Descriptors ---
+// ============================================================================
 
 typedef struct gfx_render_target_desc_t {
     uint16_t                    width;                      /**< Target frame buffer width boundary in pixels */
@@ -702,15 +747,20 @@ typedef struct gfx_compute_pipeline_desc_t {
     gfx_shader_t*               shader;                     /**< Pointer to the compiled single-stage compute shader state machine */
 } gfx_compute_pipeline_desc_t;
 
-
-// todo: for future mesh shading
+/**
+ * @brief Configuration payload reserved for modern next-gen geometry mesh shading pipeline state machine structures.
+ * @todo Implement data layouts matching mesh/amplification shaders combinations.
+ */
 typedef struct gfx_mesh_pipeline_desc_t{
     const char*                 label;                  /**< Optional debug metadata string literal identifier */
     gfx_shader_t*               shader;                 /**< Pointer to the compiled shader containing gfx_shader_mesh (and optionally gfx_shader_amplify) */
     gfx_render_states_desc_t    render_states;          /**< Comprehensive fixed-function blending, depth, and stencil states */
 } gfx_mesh_pipeline_desc_t;
 
-// todo: for raytracing
+/**
+ * @brief Configuration payload reserved for hardware-accelerated ray tracing pipeline state machine structures.
+ * @todo Implement tracking properties driving shader binding tables generation.
+ */
 typedef struct gfx_raytrace_pipeline_desc_t;
 
 typedef struct gfx_render_pass_desc_t {
@@ -718,7 +768,15 @@ typedef struct gfx_render_pass_desc_t {
     uint32_t                    clear_depth;                /**< Packed depth precision scaling token used to wipe z-buffer values on load */
 } gfx_render_pass_desc_t;
 
-// Common layout used by Vulkan/DX12/WebGPU for indexed indirect draws.
+
+// ============================================================================
+// --- GPU Execution Argument Command Layouts ---
+// ============================================================================
+
+/**
+ * @brief Fixed hardware memory layout driving indexed indirect draw argument evaluations.
+ * @note Binary layout directly matches VkDrawIndexedIndirectCommand and D3D12_DRAW_INDEXED_ARGUMENTS.
+ */
 typedef struct indirect_data_t {
     uint32_t                    index_count;                /**< Number of indices to read from the bound index buffer */
     uint32_t                    instance_count;             /**< Number of geometry instances to draw via instanced rendering */
@@ -737,94 +795,494 @@ typedef struct gfx_frame_t {
     gfx_command_buffer_t*       cmd;                        /**< Primary command buffer instance logging commands generated during this frame step */
 } gfx_frame_t;
 
-// --- CONTEXT ---
-gfx_api void                    gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
-gfx_api void                    gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
-gfx_api gfx_surface_t           gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t * desc);
-gfx_api void                    gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface);
 
-gfx_api gfx_frame_t*            gfx_begin_frame(gfx_context_t* ctx, gfx_surface_t *surface);
-gfx_api gfx_result              gfx_end_frame(gfx_frame_t* frame);
+// ============================================================================
+// --- Core Subsystem Context & Surface Lifetime ---
+// ============================================================================
 
-// --- BUFFER ---
-gfx_api gfx_buffer_t*           gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc);
-gfx_api void                    gfx_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-gfx_api void                    gfx_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer);
+/**
+ * @brief Initializes the primary graphics subsystem context based on requested settings.
+ * @param settings Pointer to the initial runtime and limits configuration.
+ * @param[out] ctx Pointer to a pointer that will store the allocated context handle.
+ */
+gfx_api void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
 
-// --- SHADER ---
-gfx_api gfx_shader_t*           gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc);
-gfx_api uint32_t                gfx_shader_get_descriptor_set_count(gfx_shader_t* shader);
-gfx_api uint32_t                gfx_shader_get_uniforms(gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms);
-gfx_api uint64_t                gfx_uniform_location(gfx_shader_t* shader, const char* name);
-gfx_api void                    gfx_shader_destroy(gfx_context_t* ctx, gfx_shader_t* shader);
+/**
+ * @brief Queries the hardware capabilities matrix and supported features of the active GPU.
+ * @param ctx Reference to the active graphics context.
+ * @param[out] caps Pointer to the structure that will be populated with device capabilities.
+ */
+gfx_api void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
-// --- SAMPLER ---
-gfx_api gfx_sampler_t*          gfx_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc);
-gfx_api void                    gfx_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler);
+/**
+ * @brief Creates an OS-tied presentation surface viewport.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Configuration parameters for the presentation window.
+ * @return A unique type-safe handle to the created surface.
+ */
+gfx_api gfx_surface_t gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc);
 
-// --- TEXTURE ---
-gfx_api gfx_texture_t*          gfx_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc);
-gfx_api void                    gfx_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
-gfx_api void                    gfx_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
-gfx_api void                    gfx_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
-gfx_api void                    gfx_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
-gfx_api void                    gfx_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-gfx_api void                    gfx_texture_destroy(gfx_context_t* ctx, gfx_texture_t* texture);
+/**
+ * @brief Safely tears down and releases an active presentation surface viewport.
+ * @param surface Handle of the surface to destroy.
+ */
+gfx_api void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface);
 
-// --- PIPELINE ---
-gfx_api gfx_pipeline_t*         gfx_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc);
-gfx_api void                    gfx_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
+/**
+ * @brief Begins a new frame cycle, acquiring the next available swapchain image.
+ * @param ctx Reference to the active graphics context.
+ * @param surface Pointer to the presentation surface bound to the current frame thread.
+ * @return Pointer to a populated frame orchestration transport package.
+ */
+gfx_api gfx_frame_t* gfx_begin_frame(gfx_context_t* ctx, gfx_surface_t* surface);
 
+/**
+ * @brief Concludes the current frame cycle and submits the image for presentation.
+ * @param frame Pointer to the tracking frame data package to be closed.
+ * @return Execution result tracking success or device-loss states.
+ */
+gfx_api gfx_result gfx_end_frame(gfx_frame_t* frame);
+
+
+
+// ============================================================================
+// --- Hardware Data Buffers ---
+// ============================================================================
+
+/**
+ * @brief Allocates a new hardware data buffer (Vertex, Index, Uniform, or Storage).
+ * @param ctx Reference to the active graphics context.
+ * @param desc Properties and usage flags driving the allocation layout.
+ * @return Pointer to the allocated internal buffer wrapper state.
+ */
+gfx_api gfx_buffer_t* gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc);
+
+/**
+ * @brief Synchronously uploads raw host memory data into an existing hardware buffer slot.
+ * @param ctx Reference to the active graphics context.
+ * @param buffer Target hardware buffer allocation to update.
+ * @param data Source host memory address pointer containing the update payload.
+ * @param size Total number of bytes to copy from the source pointer.
+ * @param offset Byte offset destination position inside the hardware buffer memory.
+ */
+gfx_api void gfx_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+
+/**
+ * @brief Reclaims hardware memory allocations bound to an active data buffer.
+ * @param ctx Reference to the active graphics context.
+ * @param buffer Reference pointer to the buffer wrapper to be destroyed.
+ */
+gfx_api void gfx_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer);
+
+
+
+// ============================================================================
+// --- Programmable Shader States ---
+// ============================================================================
+
+/**
+ * @brief Compiles and links an executable multi-stage shader program binary.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Structural assembly bytecode configurations.
+ * @return Pointer to the compiled internal shader state mapping metadata.
+ */
+gfx_api gfx_shader_t* gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc);
+
+/**
+ * @brief Queries the total number of unique descriptor set layout groupings used by the shader.
+ * @param shader Reference pointer to the compiled shader program.
+ * @return Integer length of active resource group configurations layout blocks.
+ */
+gfx_api uint32_t gfx_shader_get_descriptor_set_count(gfx_shader_t* shader);
+
+/**
+ * @brief Populates metadata fields for all variables associated with a resource group index.
+ * @param shader Reference pointer to the compiled shader program.
+ * @param set_index Target layout grouping/set index to query.
+ * @param[out] uniforms Array that will be populated with reflected uniform data.
+ * @return Total number of uniforms written into the output array.
+ */
+gfx_api uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms);
+
+/**
+ * @brief Generates a pre-packed location handle for ultra-fast uniform variable lookup operations.
+ * @param shader Reference pointer to the compiled shader program.
+ * @param name String literal identity token matching the shader variable name.
+ * @return Compressed 64-bit packed uniform location mapping parameters token.
+ */
+gfx_api uint64_t gfx_uniform_location(gfx_shader_t* shader, const char* name);
+
+/**
+ * @brief Disposes of binary module states bound to a compiled shader program.
+ * @param ctx Reference to the active graphics context.
+ * @param shader Reference pointer to the shader program instance to be destroyed.
+ */
+gfx_api void gfx_shader_destroy(gfx_context_t* ctx, gfx_shader_t* shader);
+
+
+// ============================================================================
+// --- Descriptor Resource Binding Sets ---
+// ============================================================================
+
+/**
+ * @brief Allocates a mutable resource layout binding set matching a specific shader layout.
+ * @param ctx Reference to the active graphics context.
+ * @param shader Reference pointer to the compiled shader program defining the layout.
+ * @param set_idx Mapping index of the descriptor group set register (e.g., set = X).
+ * @return Pointer to the allocated resource descriptor set binding tracker.
+ */
+gfx_api gfx_descriptor_set_t* gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx);
+
+/**
+ * @brief Schedules an immediate update writing host-provided raw values into a set's UBO memory slice.
+ * @param set Reference pointer to the descriptor binding set wrapper.
+ * @param handle Dynamic packed layout location handle token generated via uniform reflection lookup.
+ * @param data Address pointer containing host update payload arrays.
+ * @param size Total payload data array length footprint bounds measured in bytes.
+ */
+gfx_api void gfx_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
+
+/**
+ * @brief Binds a specific hardware buffer allocation into a set's register binding uniform slot.
+ * @param set Reference pointer to the descriptor binding set wrapper.
+ * @param handle Dynamic packed layout location handle token generated via uniform reflection lookup.
+ * @param buffer Reference pointer to the hardware buffer allocation to link.
+ * @param offset Starting byte offset position alignment parameter mapped inside the buffer.
+ */
+gfx_api void gfx_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
+
+/**
+ * @brief Binds a specific hardware image texture allocation view into a set's sample variable slot.
+ * @param set Reference pointer to the descriptor binding set wrapper.
+ * @param handle Dynamic packed layout location handle token generated via uniform reflection lookup.
+ * @param texture Reference pointer to the target texture asset object to link.
+ */
+gfx_api void gfx_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
+
+/**
+ * @brief Binds a filtering configuration block sampler state into a set's sampler variable slot.
+ * @param set Reference pointer to the descriptor binding set wrapper.
+ * @param handle Dynamic packed layout location handle token generated via uniform reflection lookup.
+ * @param sampler Reference pointer to the filtering configurations sampler asset object to link.
+ */
+gfx_api void gfx_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
+
+/**
+ * @brief Unbinds and releases tracking pools structures allocated to an active descriptor binding set.
+ * @param ctx Reference to the active graphics context.
+ * @param descriptor Reference pointer to the descriptor set wrapper instance to be destroyed.
+ */
+gfx_api void gfx_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+
+
+// ============================================================================
+// --- Sampler & Texture Resources ---
+// ============================================================================
+
+/**
+ * @brief Allocates an immutable hardware state block for filtering texture coordinate lookups.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Properties configuring edge wrapping and anisotropy rules.
+ * @return Pointer to the allocated internal sampler asset structure.
+ */
+gfx_api gfx_sampler_t* gfx_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc);
+
+/**
+ * @brief Deallocates hardware states tracking an active sampler asset block.
+ * @param ctx Reference to the active graphics context.
+ * @param sampler Reference pointer to the sampler instance to be destroyed.
+ */
+gfx_api void gfx_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler);
+
+/**
+ * @brief Allocates an empty or populated dimensional image texture memory object.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Resolution dimensions, pixel format layouts, and capability rules flags.
+ * @return Pointer to the allocated internal texture asset structure.
+ */
+gfx_api gfx_texture_t* gfx_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc);
+
+/**
+ * @brief Synchronously pushes raw pixel host arrays directly into an active texture block.
+ * @param ctx Reference to the active graphics context.
+ * @param texture Target hardware texture allocation to update.
+ * @param data Source host memory pointer containing the raw pixel data payload.
+ * @param size Total number of image bytes to copy from the source pointer.
+ * @param offset Pixel byte offset location within the allocated texture region.
+ */
+gfx_api void gfx_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+
+/**
+ * @brief Binds a texture allocation into a specific slot within the global bindless table.
+ * @param ctx Reference to the active graphics context.
+ * @param texture Reference pointer to the target texture asset.
+ * @param idx Dedicated layout index slot within the global bindless array table.
+ */
+gfx_api void gfx_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
+
+/**
+ * @brief Dispatches hardware routines to dynamically generate downstream mipmap downsamples.
+ * @param ctx Reference to the active graphics context.
+ * @param texture Target texture asset to generate mipmaps for.
+ */
+gfx_api void gfx_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
+
+/**
+ * @brief Performs a fast GPU blit copy transfer operation separating two texture surface boundaries.
+ * @param ctx Reference to the active graphics context.
+ * @param src Reference pointer to the source texture allocation view.
+ * @param dst Reference pointer to the destination texture allocation view.
+ */
+gfx_api void gfx_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+
+/**
+ * @brief Submits a read-back request to clone hardware texture pixel arrays back onto host-visible space.
+ * @param ctx Reference to the active graphics context.
+ * @param cmd Active command buffer instance scheduling execution tracking.
+ */
+gfx_api void gfx_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+
+/**
+ * @brief Releases hardware allocations bound to an active image texture layout memory block.
+ * @param ctx Reference to the active graphics context.
+ * @param texture Reference pointer to the texture asset instance to be destroyed.
+ */
+gfx_api void gfx_texture_destroy(gfx_context_t* ctx, gfx_texture_t* texture);
+
+
+// ============================================================================
+// --- Pipeline State Machines (PSO) ---
+// ============================================================================
+
+/**
+ * @brief Compiles a full fixed+programmable vertex and fragment state machine pipeline.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Inputs layouts assembly links, render states, and shaders packages.
+ * @return Pointer to the allocated monolithic graphics pipeline state object.
+ */
+gfx_api gfx_pipeline_t* gfx_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc);
+
+/**
+ * @brief Destroys and cleans up an active graphics pipeline state object.
+ * @param ctx Reference to the active graphics context.
+ * @param pipeline Reference pointer to the graphics pipeline instance to be destroyed.
+ */
+gfx_api void gfx_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
+
+/**
+ * @brief Compiles a hardware data-parallel compute pipeline state machine layout.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Properties wrapping target single-stage compute shader modules.
+ * @return Pointer to the allocated monolithic compute pipeline state object.
+ */
 gfx_api gfx_pipeline_compute_t* gfx_compute_pipeline_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc);
-gfx_api void                    gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
-gfx_api gfx_pipeline_mesh_t*    gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc);
-gfx_api void                    gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
+/**
+ * @brief Destroys and cleans up an active compute pipeline state object.
+ * @param ctx Reference to the active graphics context.
+ * @param pipeline Reference pointer to the compute pipeline instance to be destroyed.
+ */
+gfx_api void gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
-gfx_api gfx_pipeline_raytrace_t*gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc);
-gfx_api void                    gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
+/**
+ * @brief Compiles a next-gen task and mesh geometry acceleration pipeline state layout.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Geometry processing properties packing mesh shader configurations.
+ * @return Pointer to the allocated monolithic mesh shading pipeline state object.
+ */
+gfx_api gfx_pipeline_mesh_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc);
+
+/**
+ * @brief Destroys and cleans up an active mesh shading pipeline state object.
+ * @param ctx Reference to the active graphics context.
+ * @param pipeline Reference pointer to the mesh shading pipeline instance to be destroyed.
+ */
+gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
+
+/**
+ * @brief Compiles a hardware-accelerated ray tracing raygen/hit/miss pipeline state object.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Intersection acceleration properties driving shader binding tables.
+ * @return Pointer to the allocated monolithic ray tracing pipeline state object.
+ */
+gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc);
+
+/**
+ * @brief Destroys and cleans up an active ray tracing pipeline state object.
+ * @param ctx Reference to the active graphics context.
+ * @param pipeline Reference pointer to the ray tracing pipeline instance to be destroyed.
+ */
+gfx_api void gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
+
+// ============================================================================
+// --- Render Target Attachments ---
+// ============================================================================
+
+/**
+ * @brief Allocates an execution container wrapping multiple color views and depth textures buffers.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Layout dimensions configurations matching target textures properties.
+ * @return Pointer to the configured frame buffer render target wrapper.
+ */
+gfx_api gfx_render_target_t* gfx_render_target_create(gfx_context_t* ctx, gfx_render_target_desc_t* desc);
+
+/**
+ * @brief Reclaims hardware resource views associated with a multi-attachment render target.
+ * @param ctx Reference to the active graphics context.
+ * @param target Reference pointer to the render target container instance to be destroyed.
+ */
+gfx_api void gfx_render_target_destroy(gfx_context_t* ctx, gfx_render_target_t* target);
+
+// ============================================================================
+// --- Command Buffer Recording & Recording Passes ---
+// ============================================================================
+
+/**
+ * @brief Pushes a named visual region marker onto the GPU execution tracking profile stack.
+ * @param cmd Active command buffer token capturing logging context.
+ * @param marker String literal label naming the diagnostic block region.
+ */
+gfx_api void gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker);
+
+/**
+ * @brief Pops the top diagnostic region marker block from the active GPU execution profile stack.
+ * @param cmd Active command buffer token capturing logging context.
+ */
+gfx_api void gfx_cmd_pop_marker(gfx_command_buffer_t* cmd);
+
+/**
+ * @brief Opens a new hardware rendering pass block clearing and binding active attachments views targets.
+ * @param cmd Active command buffer token recording graphic draw state sequences tokens.
+ * @param target Reference pointer to the frame buffer target wrapper container to execute inside.
+ */
+gfx_api void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+
+/**
+ * @brief Closes the active rendering pass block, resolving multisample targets and executing layout transitions.
+ * @param cmd Active command buffer token recording graphic draw state sequences tokens.
+ */
+gfx_api void gfx_cmd_end_pass(gfx_command_buffer_t* cmd);
+
+// ============================================================================
+// --- Dynamic States, Bindings & Draw Dispatches ---
+// ============================================================================
+
+/**
+ * @brief Updates hardware scissor rect boundaries regions filtering out out-of-bounds rendering pixels.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param x Horizontal pixel position offset start anchor.
+ * @param y Vertical pixel position offset start anchor.
+ * @param w Scissor box width dimensions measured in pixels.
+ * @param h Scissor box height dimensions measured in pixels.
+ */
+gfx_api void gfx_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
+/**
+ * @brief Updates hardware viewport transformation scaling properties mapping clip space dimensions.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param x Horizontal viewport start floating coordinates location anchor.
+ * @param y Vertical viewport start floating coordinates location anchor.
+ * @param w Viewport width layout dimensions mapping span resolution.
+ * @param h Viewport height layout dimensions mapping span resolution.
+ */
+gfx_api void gfx_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
+/**
+ * @brief Binds a compiled pipeline layout state object regulating fixed-function assembly routines.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param pipeline Reference pointer to the pipeline state object to activate.
+ */
+gfx_api void gfx_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+
+/**
+ * @brief Links an updated descriptor binding group set into a pipeline layout resource register slot.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param slot Registration array set registry layout index location (e.g., set = slot).
+ * @param descriptor Reference pointer to the resource variables group wrapper package to link.
+ */
+gfx_api void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
+
+/**
+ * @brief Binds an allocated hardware data buffer to drive geometry index stream layouts assembly lookups.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param format Bit width size encoding of index elements data streams rows (16 or 32-bit).
+ * @param offset Starting byte offset position within the bound index buffer.
+ * @param buffer Reference pointer to the index buffer allocation.
+ */
+gfx_api void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
+
+/**
+ * @brief Binds an allocated hardware data buffer to drive geometry vertex attribute streams processing layouts.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param slot Stream input registration slot layout mapping link alignment index.
+ * @param offset Starting byte offset position within the bound vertex buffer.
+ * @param buffer Reference pointer to the vertex buffer allocation.
+ */
+gfx_api void gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
+
+/**
+ * @brief Commits a non-indexed direct drawing command token onto the graphics queue streams.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param vertex_count Total sequential vertex positions to read from the bound vertex stream.
+ * @param instance_count Total geometry duplicates to generate via instanced hardware routines.
+ */
+gfx_api void gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+
+/**
+ * @brief Commits an indexed drawing command token optimal for vertex-sharing topology architectures.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param index_count Total element indices to fetch from the bound index buffer.
+ * @param first_index Elements starting index lookup offset index within the index buffer.
+ * @param instance_count Total geometry duplicates to generate via instanced hardware routines.
+ * @param vertex_offset Signed scalar offset added directly onto vertex layout indicators indices inside streams.
+ */
+gfx_api void gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_index, uint32_t instance_count, uint32_t vertex_offset);
+
+/**
+ * @brief Commits a GPU indirect drawing command fetching rendering draw arguments arrays out from hardware buffers.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param buffer Reference pointer to the storage buffer holding structured arrays of indirect_data_t arguments primitives.
+ * @param offset Byte starting offset position matching draw data arrays positions layout properties.
+ * @param draw_count Total sequence length of independent indirect draw tokens to execute in sequence loops blocks.
+ * @param stride Memory stride spacing separating independent argument packets elements properties.
+ */
+gfx_api void gfx_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
+
+/**
+ * @brief Dispatches a 3D thread grid blocks payload onto a bound active parallel compute shader layout.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param x Length grid count size multiplier matching thread block groupings layout widths.
+ * @param y Length grid count size multiplier matching thread block groupings layout heights.
+ * @param z Length grid count size multiplier matching thread block groupings layout depths layers.
+ */
+gfx_api void gfx_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+
+// ============================================================================
+// --- Pipeline Resource Execution Barriers ---
+// ============================================================================
+
+/**
+ * @brief Injects an execution and pipeline memory hazard barrier token across a set of active hardware data buffers.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param buffers Array pointer tracking allocated buffers wrappers affected by transition changes.
+ * @param count Length of active buffers pointers array blocks.
+ * @param src Previous layout access state domain pipeline role block rule.
+ * @param dst Target next layout access state domain pipeline role block rule.
+ */
+gfx_api void gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
+/**
+ * @brief Injects an execution and texture layout hazard barrier token across a set of active image textures memory blocks.
+ * @param cmd Active command buffer token logging states parameters changes.
+ * @param textures Array pointer tracking allocated textures assets affected by transition layout modifications.
+ * @param count Length of active textures pointers array blocks.
+ * @param src Previous layout access state domain pipeline role block rule.
+ * @param dst Target next layout access state domain pipeline role block rule.
+ */
+gfx_api void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
 
 
-// --- RENDER TARGET ---
-gfx_api gfx_render_target_t*    gfx_render_target_create(gfx_context_t* ctx, gfx_render_target_desc_t* desc);
-gfx_api void                    gfx_render_target_destroy(gfx_context_t* ctx, gfx_render_target_t* target);
-
-// --- DESCRIPTOR SET ---
-gfx_api gfx_descriptor_set_t*   gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx);
-gfx_api void                    gfx_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
-gfx_api void                    gfx_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
-gfx_api void                    gfx_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
-gfx_api void                    gfx_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
-gfx_api void                    gfx_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
-
-// --- COMMAND BUFFER ---
- gfx_api [[deprecated]]gfx_command_buffer_t*   gfx_cmd_create(gfx_context_t* ctx);
- gfx_api [[deprecated]]void     gfx_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-
- gfx_api[[deprecated]] void     gfx_cmd_begin(gfx_command_buffer_t* cmd);
- gfx_api[[deprecated]] void     gfx_cmd_end(gfx_command_buffer_t* cmd);
- gfx_api[[deprecated]] void     gfx_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
-
-gfx_api void                    gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker);
-gfx_api void                    gfx_cmd_pop_marker(gfx_command_buffer_t* cmd);
-
-gfx_api void                    gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
-gfx_api void                    gfx_cmd_end_pass(gfx_command_buffer_t* cmd);
-
-gfx_api void                    gfx_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-gfx_api void                    gfx_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-gfx_api void                    gfx_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-gfx_api void                    gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
-gfx_api void                    gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
-gfx_api void                    gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
-gfx_api void                    gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-gfx_api void                    gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_index, uint32_t instance_count, uint32_t vertex_offset);
-gfx_api void                    gfx_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
-gfx_api void                    gfx_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
-
-gfx_api void                    gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
-gfx_api void                    gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
 
 
 // ============================================================================
