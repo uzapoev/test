@@ -131,6 +131,18 @@ typedef enum gfx_texture_type {
 } gfx_texture_type;
 
 
+typedef enum gfx_texture_usage_flags {
+    gfx_texture_usage_none          = 0,   /**< Defaults to gfx_texture_usage_shader_read for standard assets */
+    gfx_texture_usage_shader_read   = 1 << 0, /**< Texture can be sampled inside shaders (e.g., texture2D in Slang) */
+    gfx_texture_usage_render_target = 1 << 1, /**< Texture can be bound as a Color or Depth attachment in dynamic passes */
+    gfx_texture_usage_storage       = 1 << 2, /**< Texture can be used as a Read-Write Compute image object (e.g., RWTexture2D) */
+    gfx_texture_usage_transfer_src  = 1 << 3, /**< Texture can be used as a source for blit/copy operations */
+    gfx_texture_usage_transfer_dst  = 1 << 4, /**< Texture can be used as a destination for blit/copy operations */
+} gfx_texture_usage_flags;
+
+/**
+ * @brief Layout binding roles for shader resource variables.
+ */
 typedef enum gfx_uniform_type {
     gfx_uniform_undefined,              /**< Uninitialized or invalid binding type */
     gfx_uniform_ubo,                    /**< Uniform Buffer Object block binding */
@@ -545,9 +557,8 @@ typedef struct gfx_texture_desc_t {
     uint32_t                depth;              /**< Volumetric depth layers, array slices, or cubemap faces count */
     void*                   data;               /**< Optional raw memory pointer payload mapped to populate initial mipmaps levels */
     uint32_t                mip_levels;         /**< Total requested mipmap chains level allocations */  
-    uint32_t                storage;            /**< Non-zero value flag enabling use as a writable compute storage image */
+    uint32_t                usage_flags;        /**< Bitmask matching combinations of gfx_texture_usage_flags */
     
-    gfx_access_type         access;             /**< CPU/GPU read/write access permissions model */
     gfx_texture_type        type;               /**< Structural dimensional class layout type */
     gfx_pixel_format        format;             /**< Compressed or uncompressed element bit layout design */
     uint32_t                swizzle_mask;       /**< Formatted channel swizzle code (e.g., generated via gfx_make_swizzle_mask) */
