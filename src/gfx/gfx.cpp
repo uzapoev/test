@@ -12,7 +12,6 @@
 #include <atomic>
 //#include <thread>
 
-#include "gfx_stub.h"
 
 #ifndef __cplusplus
     #define nullptr     NULL

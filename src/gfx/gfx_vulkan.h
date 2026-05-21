@@ -258,6 +258,7 @@ typedef struct vk_descriptor_set_t {
     uint32_t                            index_in_pool;
     VkDescriptorSet                     descriptor_set;
 
+    uint32_t                            write_count;
     VkWriteDescriptorSet *              writes;                 // Points to a sub-array inside the parent pool
     struct vk_write_info_t *            write_infos;            // Points to a sub-array inside the parent pool
 } vk_descriptor_set_t;

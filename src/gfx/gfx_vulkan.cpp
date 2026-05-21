@@ -5,7 +5,6 @@
 
 #include <vulkan/vk_enum_string_helper.h>
 #include <spirv_cross/spirv.h>
-#include "gfx_stub.h"
 
 #ifdef _WIN32
     #pragma comment(lib, "../lib/vulkan-1.lib")
@@ -1683,7 +1682,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
     }
 
     uint32_t binding_count = shader->set_binding_count[set_idx];
-    VkDescriptorSetLayoutBinding* binding_layout = shader->set_bindings[set_idx];
+    VkDescriptorSetLayoutBinding* set_layout_bindings = shader->set_bindings[set_idx];
 
     const uint32_t VK_DESCRIPTOR_TYPE_RANGE_SIZE = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
 
@@ -1694,7 +1693,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
         pool_sizes_by_type[i].type = (VkDescriptorType)i;
 
     for (size_t i = 0; i < binding_count; ++i)
-        pool_sizes_by_type[binding_layout[i].descriptorType].descriptorCount++;
+        pool_sizes_by_type[set_layout_bindings[i].descriptorType].descriptorCount++;
 
     uint32_t pool_size_count = 0;
 
@@ -1755,21 +1754,20 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
             ctx->dbg_log(gfx_msg_error, "failed to create descriptor pool (%s)", err_str);
         }
 
-        sets[i].is_free = true;
-        sets[i].is_dirty = true;
-        sets[i].shader = shader;
-        sets[i].pool = pool;
-
-        sets[i].writes = pool->descriptor_writes + i * shader->uniform_count;
-        sets[i].write_infos =  pool->write_infos + i * shader->uniform_count;
+        sets[i].is_free     = true;
+        sets[i].is_dirty    = true;
+        sets[i].shader      = shader;
+        sets[i].pool        = pool;
+        sets[i].write_count = binding_count;
+        sets[i].writes      = pool->descriptor_writes + i * binding_count;
+        sets[i].write_infos = pool->write_infos + i * binding_count;
 
         if(ubo_buffer_size > 0 && ubo_buffer != nullptr)
             sets[i].ubo_mapped_data = (uint8_t*)ubo_buffer->data_ptr + aligned_size * i;
 
-        VkDescriptorSetLayoutBinding* set_bindings = shader->set_bindings[set_idx];
-        for(uint32_t j = 0;  j < shader->uniform_count; ++j)
+        for(uint32_t j = 0;  j < binding_count; ++j)
         {
-            auto& binding = set_bindings[j];
+            auto& binding = set_layout_bindings[j];
 
             sets[i].writes[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             sets[i].writes[j].dstSet = sets[i].descriptor_set;
@@ -1807,7 +1805,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
             }
         }
 
-        vkUpdateDescriptorSets(ctx->vk_device, shader->uniform_count, sets[i].writes, 0, NULL);
+        vkUpdateDescriptorSets(ctx->vk_device, binding_count, sets[i].writes, 0, NULL);
     }
     *out_pool = pool;
 
@@ -2873,7 +2871,7 @@ void vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_text
     {
         vkset->is_dirty = true;
         vkset->write_infos[loc.binding].image_info.imageView = image_view;
-        vkUpdateDescriptorSets(vkctx->vk_device, vkshader->uniform_count, vkset->writes, 0, NULL);
+        vkUpdateDescriptorSets(vkctx->vk_device, vkset->write_count, vkset->writes, 0, NULL);
     }
 }
 
@@ -2901,9 +2899,9 @@ void vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_samp
         return;
     }
 
-    vkset->write_infos[loc.binding].image_info.sampler = vksampler->sampler;
     vkset->is_dirty = true;
-    vkUpdateDescriptorSets(vkctx->vk_device, vkshader->uniform_count, vkset->writes, 0, NULL);
+    vkset->write_infos[loc.binding].image_info.sampler = vksampler->sampler;
+    vkUpdateDescriptorSets(vkctx->vk_device, vkset->write_count, vkset->writes, 0, NULL);
 }
 
 

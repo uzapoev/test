@@ -924,6 +924,19 @@ inline void _gfx_error(gfx_context_t * ctx, uint32_t type, const char * msg, ...
    // ctx->dbg_callback(, "")
 }
 
+// Helper for backend stubs:
+// - Logs warning if callback exists
+// - Asserts in debug builds (so stubs don't silently ship into "working" code paths)
+static inline void gfx_stub_not_implemented(gfx_callback dbglog, const char* what)
+{
+    if (dbglog && what)
+        dbglog(gfx_msg_warning, "%s: not implemented", what);
+
+#if !defined(NDEBUG)
+    assert(!"gfx backend function not implemented");
+#endif
+}
+
 static uint32_t gfx_make_swizzle_mask(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return  (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(r));
 }
