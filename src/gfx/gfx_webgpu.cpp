@@ -21,6 +21,11 @@
 
 #include "spirvflect.h"
 
+extern const char* gfx_to_string(gfx_buffer_usage usage);
+extern const char* gfx_to_string(gfx_shader_stage stage);
+extern const char* gfx_to_string(gfx_texture_type type);
+extern const char* gfx_to_string(gfx_pixel_format format);
+
 static wgpu_context_t* from_ctx(gfx_context_t* ctx) {
     return (wgpu_context_t*)ctx;
 }
@@ -835,7 +840,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
 
     GFX_VERBOSE(wgpu_ctx->dbglog(gfx_msg_info, "wgpu_create_shader : %s", desc->label ? desc->label : ""));
 
-    for (uint32_t i = 0; i < desc->stages_count; ++i)
+    for (uint32_t i = 0; i < desc->stage_count; ++i)
     {
         if (desc->stages[i].data != nullptr && desc->stages[i].size > 0) {
             GFX_VERBOSE( wgpu_ctx->dbglog(gfx_msg_info, "    %s", gfx_to_string((gfx_shader_stage)i)) );
@@ -856,13 +861,13 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
     uint32_t wgsl_info_count = 0;
     WGPUBindGroupLayoutEntry* layout_entries = wgpu_shader->bindings;
 
-    uint16_t hash = 0;
-    for (size_t stageIdx = 0; stageIdx < desc->stages_count; ++stageIdx)
+    for (size_t stageIdx = 0; stageIdx < desc->stage_count; ++stageIdx)
     {
         if (desc->stages[stageIdx].data == nullptr || desc->stages[stageIdx].size == 0)
             continue;
 
-        hash |= gfx_utils_hash_16((char*)desc->stages[stageIdx].data, desc->stages[stageIdx].size);
+        uint32_t stage_hash = gfx_utils_hash_32((char*)desc->stages[stageIdx].data, desc->stages[stageIdx].size);
+        wgpu_shader->hash = gfx_utils_hash_combine(wgpu_shader->hash, stage_hash);
 
 
         gfx_shader_stage stage = desc->stages[stageIdx].stage;
@@ -964,7 +969,6 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
             wgsl_info_count++;
         }
     } // for (size_t stageIdx = 0; stageIdx < gfx_shader_count; ++stageIdx)
-    wgpu_shader->hash = hash;
     wgpu_shader->binding_count = wgsl_info_count;
     wgpu_shader->uniform_count = wgsl_info_count;
 
@@ -1277,9 +1281,9 @@ void wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pip
     for(uint32_t i = 0; i < desc->assembly.slot_count; ++i)
     {
         vertex_assembly[i].arrayStride     = desc->assembly.slots[i].stride;
-        vertex_assembly[i].attributeCount  = desc->assembly.attributes_count;
+        vertex_assembly[i].attributeCount  = desc->assembly.attribute_count;
         vertex_assembly[i].attributes      = attributes;
-        for (uint32_t j = 0; j < desc->assembly.attributes_count; ++j) {
+        for (uint32_t j = 0; j < desc->assembly.attribute_count; ++j) {
             attributes[j].offset          = desc->assembly.attributes[j].offset;
             attributes[j].shaderLocation  = desc->assembly.attributes[j].location;
             attributes[j].format          = gfx_vertex_format_2_webgpu(desc->assembly.attributes[j].format);

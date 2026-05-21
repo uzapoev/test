@@ -46,6 +46,8 @@ static gfx_access_type spv_2_gfx_access(SpvAccessQualifier  access) {
     }
 }
 
+#define  TEST_FLAG(v, f) ((v & f) == f)
+
 
 static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_uniforms, uint32_t* uniforms_count)
 {
@@ -58,7 +60,13 @@ static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_un
         strcpy(out_uniforms[i].name, spvflect->uniforms[i].name);
         out_uniforms[i].binding = spvflect->uniforms[i].binding;
         out_uniforms[i].group = spvflect->uniforms[i].descriptor_set;
-        out_uniforms[i].stage_mask  = spvflect->uniforms[i].stage_mask;
+
+        uint16_t stage_mask = 0;
+        stage_mask |= TEST_FLAG(spvflect->uniforms[i].stage_mask, 1 << SpvExecutionModelVertex) ? (1 << gfx_shader_vertex) : 0;
+        stage_mask |= TEST_FLAG(spvflect->uniforms[i].stage_mask, 1 << SpvExecutionModelFragment) ? (1 << gfx_shader_fragment) : 0;
+        stage_mask |= TEST_FLAG(spvflect->uniforms[i].stage_mask, 1 << SpvExecutionModelGLCompute) ? (1 << gfx_shader_compute) : 0;
+
+        out_uniforms[i].stage_mask = stage_mask;
 
         switch (spvflect->uniforms[i].type)
         {

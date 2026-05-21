@@ -183,16 +183,17 @@ void resource_manager::init()
         //     {1, sizeof(instance_data), gfx_vertex_rate_instance}
     };
 
-    gfx_pipeline_desc_t piplene_desc = {};
-        piplene_desc.shader = m_default_shader;
-        piplene_desc.assembly.topology = gfx_topology_triangles;
-        piplene_desc.assembly.attributes = attributes;
-        piplene_desc.assembly.attributes_count = _countof(attributes);
-        piplene_desc.assembly.slots = slots;
-        piplene_desc.assembly.slot_count = _countof(slots);
-        piplene_desc.render_states.blend.enable = false;
-        piplene_desc.render_states.blend.color_src = gfx_blend_mode_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
-        piplene_desc.render_states.blend.color_dst = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
+    gfx_pipeline_desc_t piplene_desc = { 0 };
+        piplene_desc.shader                     = m_default_shader;
+        piplene_desc.assembly.topology          = gfx_topology_triangles;
+        piplene_desc.assembly.attribute_count   = _countof(attributes);
+        piplene_desc.assembly.attributes        = attributes;
+
+        piplene_desc.assembly.slots                 = slots;
+        piplene_desc.assembly.slot_count            = _countof(slots);
+        piplene_desc.render_states.blend.enable     = false;
+        piplene_desc.render_states.blend.color_src  = gfx_blend_mode_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
+        piplene_desc.render_states.blend.color_dst  = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
     m_default_pipeline = gfx_pipeline_create(m_ctx, &piplene_desc);
 
     m_meshes.reserve(1024);

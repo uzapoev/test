@@ -322,30 +322,6 @@ int debug::callstack(uintptr_t* frames, uint32_t count)
     int frame_count = RtlCaptureStackBackTrace(skipframes, (DWORD)count, (PVOID*)frames, NULL) - 5;
     if(frame_count > count)
         frame_count = count;
-        /*
-    HANDLE hprocess = GetCurrentProcess();
-    char tmpbuffer[sizeof(SYMBOL_INFO) + 64] = "";
-    for (uint64_t i = 0; i < frame_count; ++i)
-    {
-        DWORD ldsp = 0;
-        IMAGEHLP_LINE64 line = { sizeof(IMAGEHLP_LINE64) };
-         PSYMBOL_INFO symbol = (PSYMBOL_INFO)tmpbuffer;
-        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-        symbol->MaxNameLen = 64;
-
-        // SymGetLineFromAddr64(hprocess, adress, &ldsp, &line);
-        SymFromAddr(hprocess, frames[i], 0, symbol);
-
-        if(names != nullptr) 
-        {
-            strcpy(name_buffer, symbol->Name);
-            strcat(name_buffer, "\0");
-            names[i] = name_buffer;
-            name_buffer += strlen(name_buffer) + 1;
-        }
-
-        debug::log("%s", symbol->Name);
-    }*/
     return frame_count;
 #endif
     return -1;

@@ -76,12 +76,24 @@ typedef struct gfx_handle_pool_t {
 static uint16_t hash16(const char* str, size_t len)
 {
     int hash = 0;
-    for (int i = 0; i < len; i++)
-    {
+    for (int i = 0; i < len; i++) {
         hash = hash + ((hash) << 5) + (str[i] + i) + (((str[i] + i)) << 7);
     }
 
     return ((hash) ^ (hash >> 16)) & 0xffff;
+}
+
+static uint32_t hash32(const char* str, size_t len)
+{
+    const uint8_t* data = (const uint8_t*)str;
+    uint32_t hash = 0x811c9dc5; // FNV_offset_basis
+    
+    for (size_t i = 0; i < len; i++) {
+        hash ^= data[i];
+        hash *= 0x01000193; // FNV_prime
+    }
+    
+    return hash;
 }
 
 
@@ -149,6 +161,13 @@ uint64_t gfx_pool_alloc(gfx_handle_pool_t* pool)
 
     return pool->handles[index].handle;
 }
+
+void * gfx_pool_alloc_data(gfx_handle_pool_t* pool, uint64_t* out_handle)
+{
+    *out_handle = gfx_pool_alloc(pool);
+    return gfx_pool_map(pool, *out_handle);
+}
+
 
 void gfx_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 {
@@ -321,6 +340,12 @@ gfx_api gfx_shader_t* gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* d
     g_tbl->pfn_create_shader(ctx, desc, &result);
     return result;
 }
+
+uint32_t gfx_shader_get_descriptor_set_count(gfx_shader_t* shader) {
+    return g_tbl->pfn_shader_get_descriptor_set_count(shader);
+}
+
+
 uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, uint32_t group, gfx_uniform_t* uniforms) {
     assert(false);
     return 0;
@@ -629,43 +654,23 @@ uint32_t gfx_utils_thread_id()
      return s_unique_id;
 }
 
-uint32_t gfx_utils_stack_trace(uint32_t skip, uintptr_t* frames, uint64_t count)
-{
-#ifdef GFX_PLATFORM_WIN
-    static bool lazyinit = false;
-    if (!lazyinit) {
-        SymInitialize(GetCurrentProcess(), NULL, TRUE);
-        SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-        lazyinit = true;
-    }
-    return RtlCaptureStackBackTrace(skip, (DWORD)count, (PVOID*)frames, NULL);
-#endif
-    return 0;
-}
-
-void gfx_utils_stack_trace_names(uintptr_t* frames, uint64_t count, const char** names)
-{
-#ifdef GFX_PLATFORM_WIN
-    HANDLE hprocess = GetCurrentProcess();
-    char tmpbuffer[sizeof(SYMBOL_INFO) + 64] = "";
-    for (uint64_t i = 0; i < count; ++i)
-    {
-        DWORD ldsp = 0;
-        IMAGEHLP_LINE64 line = { sizeof(IMAGEHLP_LINE64) };
-        PSYMBOL_INFO symbol = (PSYMBOL_INFO)tmpbuffer;
-        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-        symbol->MaxNameLen = 64;
-
-        // SymGetLineFromAddr64(hprocess, adress, &ldsp, &line);
-        SymFromAddr(hprocess, frames[i], 0, symbol);
-        printf("\n\t%s", symbol->Name);
-    }
-#endif
-}
-
 uint16_t gfx_utils_hash_16(const char* data, uint32_t size)
 {
     return hash16(data, size);
+}
+
+uint32_t gfx_utils_hash_32(const char* data, uint32_t size)
+{
+    return hash32(data, size);
+}
+
+uint32_t gfx_utils_hash_combine(uint32_t hash1, uint32_t hash2)
+{
+    hash1 ^= hash2;
+    hash1 *= 0xcc9e2d51;
+    hash1 = (hash1 << 15) | (hash1 >> 17); // ROTL32
+    hash1 = hash1 * 5 + 0xe6546b64;
+    return hash1;
 }
 
 
@@ -795,6 +800,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 
     // SHADER
     func_table->pfn_create_shader           = vk_create_shader;
+    func_table->pfn_shader_get_descriptor_set_count = vk_shader_get_descriptor_set_count;
     func_table->pfn_uniform_location        = vk_uniform_location;
     func_table->pfn_destroy_shader          = vk_destroy_shader;
 

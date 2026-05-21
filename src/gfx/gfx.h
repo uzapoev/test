@@ -15,8 +15,12 @@
 *       surface_desc.sample_count       = gfx_sample_1x;
 *   auto surface = gfx_surface_create(ctx, &surface_desc);
 * 
+*   gfx_render_pass_desc_t pass = {0}
+*       pass.clear_color = rgba(255,255,255,255);
+*       pass.clear_depth = 0;
+* 
 *   auto frame = gfx_begin_frame(ctx, &surface);
-*       gfx_cmd_begin_pass(frame->cmd, frame->target);
+*       gfx_cmd_begin_pass(frame->cmd, pass, frame->target);
 * 
 *       // draw here
 * 
@@ -73,490 +77,539 @@
     #define GFX_VERBOSE_IF(cond, exp)   {}
 #endif
 
+/**
+ * @brief API function execution results.
+ */
 typedef enum gfx_result {
-    gfx_ok,
-    gfx_error
+    gfx_ok,                                 /**< Operation completed successfully */
+    gfx_error                               /**< Generic execution error */
 } gfx_result;
 
 
+/**
+ * @brief Bitmask flags for context initialization and runtime behavior.
+ */
 typedef enum gfx_options {
-    gfx_options_debug       = 1 << 0,
-    gfx_options_verbose     = 1 << 1,
-    gfx_options_callstack   = 1 << 2,
+    gfx_options_debug       = 1 << 0,   /**< Enable validation layers and graphics debugging features */
+    gfx_options_verbose     = 1 << 1,   /**< Enable detailed verbose log output */
+    gfx_options_callstack   = 1 << 2,   /**< Dump callstack on critical errors or validation failures */
 } gfx_options;
 
 
 typedef enum gfx_gpu_type {
-    gfx_gpu_discrete,
-    gfx_gpu_integrated
+    gfx_gpu_discrete,                   /**< High-performance standalone GPU with dedicated VRAM */
+    gfx_gpu_integrated                  /**< Power-efficient GPU integrated into the CPU/SoC sharing system RAM */
 } gfx_gpu_type;
 
 
 typedef enum gfx_msg {
-    gfx_msg_info,
-    gfx_msg_warning,
-    gfx_msg_error,
+    gfx_msg_info,                       /**< Informational status message */
+    gfx_msg_warning,                    /**< Non-critical warning, execution can continue */
+    gfx_msg_error,                      /**< Critical runtime error */
 } gfx_msg;
 
 
 typedef enum gfx_backend {
-    gfx_backend_auto,               //metal for apple, webgpu - html, vulkan - win/android, dx12 - win
-    gfx_backend_vulkan,
-    gfx_backend_d3d12,
-    gfx_backend_metal,
-    gfx_backend_webgpu,
+    gfx_backend_auto,                   /**< Auto-select: Metal on Apple, WebGPU on HTML5, Vulkan on Win/Android, DX12 on Win */
+    gfx_backend_vulkan,                 /**< Vulkan API backend */
+    gfx_backend_d3d12,                  /**< Direct3D 12 backend */
+    gfx_backend_metal,                  /**< Apple Metal backend */
+    gfx_backend_webgpu,                 /**< WebGPU backend */
 } gfx_backend;
 
 
+typedef enum gfx_shader_format_flags {
+    gfx_shader_format_unknown   = 0,
+    gfx_shader_format_spirv     = 1 << 0,   /**< SPIR-V binary formats (Standard for Vulkan) */
+    gfx_shader_format_dxil      = 1 << 1,   /**< DXIL binary formats (Standard for DirectX 12 DXR) */
+    gfx_shader_format_msl       = 1 << 2,   /**< Metal Shading Language precompiled binaries (Apple Metal) */
+    gfx_shader_format_wgsl      = 1 << 3,   /**< WebGPU Shading Language text/binary tokens formats */
+} gfx_shader_format_flags;
+
+
 typedef enum gfx_buffer_usage {
-    gfx_buffer_usage_staging,       // cpu mapped
-    gfx_buffer_usage_index,         // gpu
-    gfx_buffer_usage_vertex,        // gpu
-    gfx_buffer_usage_uniform,       // cpu --> gpu, limited size for shader binding
-    gfx_buffer_usage_storage,       // cpu <-> gpu, unlimited size for shader binding
-    gfx_buffer_usage_indirect,      //
+    gfx_buffer_usage_staging,           /**< Host-visible memory used for CPU-to-GPU memory transfers */
+    gfx_buffer_usage_index,             /**< Device-local memory holding geometry indices */
+    gfx_buffer_usage_vertex,            /**< Device-local memory holding vertex attributes */
+    gfx_buffer_usage_uniform,           /**< Constrained size buffer for constant/uniform shader parameters */
+    gfx_buffer_usage_storage,           /**< Unbounded size buffer for read/write compute and shader structured storage */
+    gfx_buffer_usage_indirect,          /**< Buffer storing draw arguments for GPU indirect command execution */
 } gfx_buffer_usage;
 
 
 typedef enum gfx_memory_hint {
-    gfx_memory_auto,
-    gfx_memory_gpu_only,
-    gfx_memory_cpu_to_gpu,
-    gfx_memory_gpu_to_cpu,
+    gfx_memory_auto,                    /**< Automatically determine optimal memory placement based on usage */
+    gfx_memory_gpu_only,                /**< VRAM allocation, inaccessible by CPU, maximum performance */
+    gfx_memory_cpu_to_gpu,              /**< Host-visible memory mapped for fast CPU writes to GPU */
+    gfx_memory_gpu_to_cpu,              /**< Host-visible memory optimized for reading data back from the GPU to CPU */
 } gfx_memory_hint;
 
 
 typedef enum gfx_access_type {
-    gfx_access_read,
-    gfx_access_write,
-    gfx_access_rw
+    gfx_access_read,                    /**< Read-only access */
+    gfx_access_write,                   /**< Write-only access */
+    gfx_access_rw                       /**< Read and Write access */
 } gfx_access_type;
 
 
 typedef enum gfx_texture_type {
-    gfx_texture2d,
-    gfx_texture2d_cube,
-    gfx_texture2d_array,
-    gfx_texture3d,
+    gfx_texture2d,                      /**< Standard 2D texture */
+    gfx_texture2d_cube,                 /**< Cubemap texture containing 6 faces */
+    gfx_texture2d_array,                /**< Array of independent 2D texture layers */
+    gfx_texture3d,                      /**< Volumetric 3D texture */
 } gfx_texture_type;
 
 
 typedef enum gfx_uniform_type {
-    gfx_uniform_undefined,
-    gfx_uniform_ubo,
-    gfx_uniform_storage,        // (RW)StructuredBuffer, (RW)ByteAddressBuffer
-    gfx_uniform_storage_image,  // RWTexture2D
-    gfx_uniform_sampler,
-    gfx_uniform_texture2d,
-    gfx_uniform_texture2d_cube,
-    gfx_uniform_texture2d_array,
-    gfx_uniform_texture3d,
-    gfx_uniform_ubo_field, // vec4, mat4, color4
+    gfx_uniform_undefined,              /**< Uninitialized or invalid binding type */
+    gfx_uniform_ubo,                    /**< Uniform Buffer Object block binding */
+    gfx_uniform_storage,                /**< Structured or ByteAddress storage buffer binding (RW/ReadOnly) */
+    gfx_uniform_storage_image,          /**< Read-Write texture image slot (e.g., RWTexture2D) */
+    gfx_uniform_sampler,                /**< Texture state sampler (filtering, addressing) */
+    gfx_uniform_texture2d,              /**< Standard 2D texture view binding */
+    gfx_uniform_texture2d_cube,         /**< Cubemap resource view binding */
+    gfx_uniform_texture2d_array,        /**< Texture array resource view binding */
+    gfx_uniform_texture3d,              /**< 3D volumetric texture view binding */
+    gfx_uniform_ubo_field,              /**< Individual field data type inside a UBO block (e.g., vec4, mat4) */
 } gfx_uniform_type;
 
 
 typedef enum gfx_pixel_format {
-    gfx_pixel_format_unknown,
-    gfx_pixel_format_a8,                //! 8-bit textures used as masks
-    gfx_pixel_format_rgba4444,          //! 16-bit textures: RGBA4444
-    gfx_pixel_format_rgb5a1,            //! 16-bit textures: RGB5A1
-    gfx_pixel_format_rgb565,            //! 16-bit texture without Alpha channel 
-    gfx_pixel_format_rgba8,             //! 32-bit texture: RGBA8888
+    gfx_pixel_format_unknown,           /**< Unspecified or invalid format */
+    
+    // Uncompressed 8/16-bit low-precision formats
+    gfx_pixel_format_a8,                /**< 8-bit alpha-only mask texture */
+    gfx_pixel_format_rgba4444,          /**< Packed 16-bit texture: 4 bits per channel */
+    gfx_pixel_format_rgb5a1,            /**< Packed 16-bit texture: 5 bits RGB, 1 bit Alpha */
+    gfx_pixel_format_rgb565,            /**< Packed 16-bit texture: 5 bits Red, 6 bits Green, 5 bits Blue */
+    gfx_pixel_format_rgba8,             /**< Standard 32-bit texture: 8 bits per channel (RGBA) */
 
-    gfx_pixel_format_etc1,              //!  RGB888 
-    gfx_pixel_format_etc2_rgb8a1,       //!  RGB8 A1 
-    gfx_pixel_format_etc2_rgba8,        //!  RGBA 8 
+    // Mobile ETC compressed formats
+    gfx_pixel_format_etc1,              /**< Ericsson Texture Compression: 4bpp RGB8 fallback */
+    gfx_pixel_format_etc2_rgb8a1,       /**< ETC2 variant supporting RGB8 with 1-bit punch-through Alpha */
+    gfx_pixel_format_etc2_rgba8,        /**< ETC2 variant supporting full 8-bit Alpha channel */
 
-    gfx_pixel_format_bc1,               //! dxt1, 4 bpp, albedo/diffuse without alpha
-    gfx_pixel_format_bc3,               //! dxt5, 8 bpp, albedo/diffuse with alpha, can be used as fallback from bc7
-    gfx_pixel_format_bc4,               //!       4 bpp, R - perfect for masks
-    gfx_pixel_format_bc5,               //!       8 bpp, RG - perfect for normal maps
-    gfx_pixel_format_bc6h,              //        8 bpp, 16 bit hdr 
-    gfx_pixel_format_bc7,               //        8 bpp, maximum quality
+    // Desktop Block Compression (DXTC / BC) formats
+    gfx_pixel_format_bc1,               /**< DXT1: 4 bpp compressed, opaque Albedo/Diffuse maps */
+    gfx_pixel_format_bc3,               /**< DXT5: 8 bpp compressed, Albedo/Diffuse maps with full Alpha */
+    gfx_pixel_format_bc4,               /**< BC4:  4 bpp compressed, single-channel grayscale mask/height maps */
+    gfx_pixel_format_bc5,               /**< BC5:  8 bpp compressed, two-channel format optimal for Normal maps */
+    gfx_pixel_format_bc6h,              /**< BC6H: 8 bpp compressed, High Dynamic Range (HDR) floating-point data */
+    gfx_pixel_format_bc7,               /**< BC7:  8 bpp compressed, ultra-high quality RGBA texture maps */
 
-    gfx_pixel_format_astc4x4,           //
-    gfx_pixel_format_astc5x5,           //
-    gfx_pixel_format_astc6x6,           // 
-    gfx_pixel_format_astc8x8,           //
-    gfx_pixel_format_astc10x10,         //
-    gfx_pixel_format_astc12x12,         //
+    // ASTC scalable compressed formats
+    gfx_pixel_format_astc4x4,           /**< Adaptive Scalable Texture Compression: 4x4 block size (8.00 bpp) */
+    gfx_pixel_format_astc5x5,           /**< ASTC 5x5 block footprint allocation (5.12 bpp) */
+    gfx_pixel_format_astc6x6,           /**< ASTC 6x6 block footprint allocation (3.56 bpp) */
+    gfx_pixel_format_astc8x8,           /**< ASTC 8x8 block footprint allocation (2.00 bpp) */
+    gfx_pixel_format_astc10x10,         /**< ASTC 10x10 block footprint allocation (1.28 bpp) */
+    gfx_pixel_format_astc12x12,         /**< ASTC 12x12 block footprint allocation (0.89 bpp) */
+    gfx_pixel_format_astc4x4_hdr,       /**< ASTC 4x4 block footprint configured for High Dynamic Range data */
 
-    gfx_pixel_format_astc4x4_hdr,       //
+    // High precision floating-point formats
+    gfx_pixel_format_r16f,              /**< Half-precision 16-bit float Red channel */
+    gfx_pixel_format_rg16f,             /**< Half-precision 16-bit float Red and Green channels */
+    gfx_pixel_format_rgba16f,           /**< Half-precision 16-bit float full RGBA channels */
+    gfx_pixel_format_r32f,              /**< Full-precision 32-bit float Red channel */
+    gfx_pixel_format_rg32f,             /**< Full-precision 32-bit float Red and Green channels */
+    gfx_pixel_format_rgba32f,           /**< Full-precision 32-bit float full RGBA channels */
 
-    gfx_pixel_format_r16f,              //!
-    gfx_pixel_format_rg16f,             //!
-    gfx_pixel_format_rgba16f,           //!
-
-    gfx_pixel_format_r32f,              //!
-    gfx_pixel_format_rg32f,             //!
-    gfx_pixel_format_rgba32f,           //!
-
-    gfx_pixel_format_d24x8,             //! depth buffer
-    gfx_pixel_format_d24s8,             //! depth buffer
-    gfx_pixel_format_d32,               //! depth buffer
+    // Depth and Stencil target formats
+    gfx_pixel_format_d24x8,             /**< 24-bit Depth target with 8 bits unused */
+    gfx_pixel_format_d24s8,             /**< 24-bit Depth combined with 8-bit Stencil channel */
+    gfx_pixel_format_d32,               /**< High-precision 32-bit pure floating-point Depth target */
 } gfx_pixel_format;
 
 
 typedef enum gfx_vertex_format {
-    gfx_vertex_format_float1,           // float
-    gfx_vertex_format_float2,           // vec2f
-    gfx_vertex_format_float4,           // vec4f
-
-    gfx_vertex_format_int2,             // 
-    gfx_vertex_format_int4,             // 
-    gfx_vertex_format_uint2,            // 
-    gfx_vertex_format_uint4,            // 
-
-    gfx_vertex_format_half2,            // Two 16 bit floating value
-    gfx_vertex_format_half4,            // Four 16 bit floating value
-
-    gfx_vertex_format_short2,           // 2D signed short normalized (v[0]/32767.0,v[1]/32767.0,0,1)
-    gfx_vertex_format_short4,           // 4D signed short normalized (v[0]/32767.0,v[1]/32767.0,v[2]/32767.0,v[3]/32767.0)
-    gfx_vertex_format_ushort2,          // 2D unsigned short normalized (v[0]/65535.0,v[1]/65535.0,0,1)
-    gfx_vertex_format_ushort4,          // 4D unsigned short normalized (v[0]/65535.0,v[1]/65535.0,v[2]/65535.0,v[3]/65535.0)
-
-    gfx_vertex_format_byte4,            // Each of 4 bytes is normalized by dividing to 255.0
+    gfx_vertex_format_float1,           /**< Single 32-bit floating-point component scalar */
+    gfx_vertex_format_float2,           /**< Two-dimensional 32-bit float vector (vec2f) */
+    gfx_vertex_format_float4,           /**< Four-dimensional 32-bit float vector (vec4f) */
+    
+    gfx_vertex_format_int2,             /**< Two-dimensional 32-bit signed integer vector */
+    gfx_vertex_format_int4,             /**< Four-dimensional 32-bit signed integer vector */
+    gfx_vertex_format_uint2,            /**< Two-dimensional 32-bit unsigned integer vector */
+    gfx_vertex_format_uint4,            /**< Four-dimensional 32-bit unsigned integer vector */
+    
+    gfx_vertex_format_half2,            /**< Two 16-bit half-precision floating-point components */
+    gfx_vertex_format_half4,            /**< Four 16-bit half-precision floating-point components */
+    
+    gfx_vertex_format_short2,           /**< 2D signed short components normalized to [-1.0, 1.0] range */
+    gfx_vertex_format_short4,           /**< 4D signed short components normalized to [-1.0, 1.0] range */
+    gfx_vertex_format_ushort2,          /**< 2D unsigned short components normalized to [0.0, 1.0] range */
+    gfx_vertex_format_ushort4,          /**< 4D unsigned short components normalized to [0.0, 1.0] range */
+    
+    gfx_vertex_format_byte4,            /**< Four 8-bit unsigned bytes normalized to [0.0, 1.0] (optimal for vertex colors) */
 } gfx_vertex_format;
 
 
 typedef enum gfx_vertex_rate {
-    gfx_vertex_rate_vertex,
-    gfx_vertex_rate_instance
+    gfx_vertex_rate_vertex,             /**< Step data per vertex (standard pipeline behavior) */
+    gfx_vertex_rate_instance            /**< Step data per instance (used in instanced rendering techniques) */
 } gfx_vertex_rate;
 
 
 typedef enum gfx_index_format {
-    gfx_index_format_16,
-    gfx_index_format_32
+    gfx_index_format_16,                /**< 16-bit unsigned short indices (max 65535 vertices) */
+    gfx_index_format_32                 /**< 32-bit unsigned integer indices */
 } gfx_index_format;
 
 
 typedef enum gfx_sample_count {
-    gfx_sample_1x   = 1,
-    gfx_sample_2x   = 2,
-    gfx_sample_4x   = 4,
-    gfx_sample_8x   = 8,
-    gfx_sample_16x  = 16,
+    gfx_sample_1x   = 1,                /**< MSAA disabled, single sample per pixel */
+    gfx_sample_2x   = 2,                /**< 2x multisampling */
+    gfx_sample_4x   = 4,                /**< 4x multisampling (recommended quality sweet-spot) */
+    gfx_sample_8x   = 8,                /**< 8x multisampling */
+    gfx_sample_16x  = 16,               /**< 16x multisampling high-end quality level */
 } gfx_sample_count;
 
 
 typedef enum gfx_topology {
-    gfx_topology_points,
-    gfx_topology_lines,
-    gfx_topology_lines_strip,
-    gfx_topology_triangles,
-    gfx_topology_triangles_strip,
+    gfx_topology_points,                /**< List of disconnected points */
+    gfx_topology_lines,                 /**< List of independent line segments */
+    gfx_topology_lines_strip,           /**< Strip of connected line segments sharing vertices */
+    gfx_topology_triangles,             /**< List of independent triangles */
+    gfx_topology_triangles_strip,       /**< Strip of connected triangles sharing vertices */
 } gfx_topology;
 
 
 typedef enum gfx_cull {
-    gfx_cull_none,
-    gfx_cull_back,
-    gfx_cull_front,
+    gfx_cull_none,                      /**< Culling disabled, render both sides of geometry */
+    gfx_cull_back,                      /**< Cull backward-facing geometry polygons */
+    gfx_cull_front,                     /**< Cull forward-facing geometry polygons */
 } gfx_cull;
 
 
 typedef enum gfx_face {
-    gfx_face_cw,
-    gfx_face_ccw,
+    gfx_face_cw,                        /**< Clockwise vertex winding order is front-facing */
+    gfx_face_ccw,                       /**< Counter-clockwise vertex winding order is front-facing */
 } gfx_face;
 
 
 typedef enum gfx_filter {
-    gfx_filter_point,
-    gfx_filter_linear,
+    gfx_filter_point,                   /**< Nearest-neighbor pixel matching, pixelated look */
+    gfx_filter_linear,                  /**< Bilinear/Trilinear texture blending filtering */
 } gfx_filter;
 
 
 typedef enum gfx_address_mode {
-    gfx_address_mode_repeat,
-    gfx_address_mode_mirror_repeat,
-    gfx_address_mode_clamp_to_edge
+    gfx_address_mode_repeat,            /**< Repeat texture tiles infinitely outside [0, 1] UV space */
+    gfx_address_mode_mirror_repeat,     /**< Repeat texture tiles, mirroring coordinates at every edge junction */
+    gfx_address_mode_clamp_to_edge      /**< Clamp texture coordinates to the edge pixel value */
 } gfx_address_mode;
 
 
 typedef enum gfx_cmp {
-    gfx_cmp_never,
-    gfx_cmp_less,
-    gfx_cmp_equal,
-    gfx_cmp_lequal,
-    gfx_cmp_greater,
-    gfx_cmp_not_equal,
-    gfx_cmp_gequal,
-    gfx_cmp_always,
+    gfx_cmp_never,                      /**< Comparison test always fails */
+    gfx_cmp_less,                       /**< Passes if source value is less than destination value */
+    gfx_cmp_equal,                      /**< Passes if values are mathematically equal */
+    gfx_cmp_lequal,                     /**< Passes if source is less than or equal to destination value */
+    gfx_cmp_greater,                    /**< Passes if source value is greater than destination value */
+    gfx_cmp_not_equal,                  /**< Passes if source value does not equal destination value */
+    gfx_cmp_gequal,                     /**< Passes if source is greater than or equal to destination value */
+    gfx_cmp_always,                     /**< Comparison test always passes */
 } gfx_cmp;
 
 
 typedef enum gfx_stencil_op {
-    gfx_stencil_op_zero,                // D3D10_STENCIL_OP_ZERO         D3DSTENCILOP_ZERO       GL_ZERO
-    gfx_stencil_op_keep,                // D3D10_STENCIL_OP_KEEP         D3DSTENCILOP_KEEP       GL_KEEP
-    gfx_stencil_op_replace,             // D3D10_STENCIL_OP_REPLACE      D3DSTENCILOP_REPLACE    GL_REPLACE
-    gfx_stencil_op_incr,                // D3D10_STENCIL_OP_INCR_SAT     D3DSTENCILOP_INCRSAT    GL_INCR
-    gfx_stencil_op_incr_wrap,           // D3D10_STENCIL_OP_INCR         D3DSTENCILOP_INCR       GL_INCR_WRAP
-    gfx_stencil_op_decr,                // D3D10_STENCIL_OP_DECR_SAT     D3DSTENCILOP_DECRSAT    GL_DECR
-    gfx_stencil_op_decr_wrap,           // D3D10_STENCIL_OP_DECR         D3DSTENCILOP_DECR       GL_DECR_WRAP
-    gfx_stencil_op_invert,              // D3D10_STENCIL_OP_INVERT       D3DSTENCILOP_INVERT     GL_INVERT
+    gfx_stencil_op_zero,                /**< Set stencil buffer bit value to 0 */
+    gfx_stencil_op_keep,                /**< Maintain the current stencil buffer value */
+    gfx_stencil_op_replace,             /**< Overwrite value with the test reference integer */
+    gfx_stencil_op_incr,                /**< Increment stencil value, clamping at maximum boundary */
+    gfx_stencil_op_incr_wrap,           /**< Increment stencil value, wrapping back to 0 on overflow */
+    gfx_stencil_op_decr,                /**< Decrement stencil value, clamping at 0 boundary */
+    gfx_stencil_op_decr_wrap,           /**< Decrement stencil value, wrapping to max value on underflow */
+    gfx_stencil_op_invert,              /**< Bitwise invert the current value in the stencil buffer */
 } gfx_stencil_op;
 
 
 typedef enum gfx_blend_mode {
-    gfx_blend_mode_zero,
-    gfx_blend_mode_one,
-    gfx_blend_mode_src_color,
-    gfx_blend_mode_inv_src_color,
-    gfx_blend_mode_src_alpha,
-    gfx_blend_mode_inv_src_alpha,
-    gfx_blend_mode_dst_alpha,
-    gfx_blend_mode_inv_dest_alpha,
-    gfx_blend_mode_dst_color,
-    gfx_blend_mode_inv_dst_color,
+    gfx_blend_mode_zero,                /**< Blend factor is 0 */
+    gfx_blend_mode_one,                 /**< Blend factor is 1 */
+    gfx_blend_mode_src_color,           /**< Factor based on source fragment color values */
+    gfx_blend_mode_inv_src_color,       /**< Factor based on inverted source fragment color values (1 - src) */
+    gfx_blend_mode_src_alpha,           /**< Factor based on source fragment alpha value */
+    gfx_blend_mode_inv_src_alpha,       /**< Factor based on inverted source fragment alpha value (1 - alpha) */
+    gfx_blend_mode_dst_alpha,           /**< Factor based on destination target buffer alpha value */
+    gfx_blend_mode_inv_dest_alpha,      /**< Factor based on inverted destination target buffer alpha value (1 - alpha) */
+    gfx_blend_mode_dst_color,           /**< Factor based on destination target buffer color values */
+    gfx_blend_mode_inv_dst_color,       /**< Factor based on inverted destination target buffer color values (1 - dst) */
 } gfx_blend_mode;
 
 
 typedef enum gfx_blend_op {
-    gfx_blend_op_add,
-    gfx_blend_op_min,
-    gfx_blend_op_max,
-    gfx_blend_op_subtract,
-    gfx_blend_op_rev_subtract,
+    gfx_blend_op_add,                   /**< Add components together: Source + Destination */
+    gfx_blend_op_min,                   /**< Choose the minimum component value: min(Source, Destination) */
+    gfx_blend_op_max,                   /**< Choose the maximum component value: max(Source, Destination) */
+    gfx_blend_op_subtract,              /**< Subtract destination from source: Source - Destination */
+    gfx_blend_op_rev_subtract,          /**< Subtract source from destination: Destination - Source */
 } gfx_blend_op;
 
 
 typedef enum gfx_pipeline_flags {
-    gfx_colormask_r     = 1 << 0,
-    gfx_colormask_g     = 1 << 1,
-    gfx_colormask_b     = 1 << 2,
-    gfx_colormask_a     = 1 << 3,
-    gfx_colormask_rgba  = gfx_colormask_r | gfx_colormask_g | gfx_colormask_b | gfx_colormask_a,
-    gfx_depth_test      = 1 << 4,
-    gfx_depth_write     = 1 << 5,
-    gfx_blend           = 1 << 6,
-    gfx_stencil         = 1 << 7,
+    gfx_colormask_r     = 1 << 0,       /**< Enable Red color channel output writes */
+    gfx_colormask_g     = 1 << 1,       /**< Enable Green color channel output writes */
+    gfx_colormask_b     = 1 << 2,       /**< Enable Blue color channel output writes */
+    gfx_colormask_a     = 1 << 3,       /**< Enable Alpha color channel output writes */
+    gfx_colormask_rgba  = gfx_colormask_r | gfx_colormask_g | gfx_colormask_b | gfx_colormask_a, /**< Full RGBA color write permissions enabled */
+    gfx_depth_test      = 1 << 4,       /**< Enable hardware depth testing */
+    gfx_depth_write     = 1 << 5,       /**< Enable writing calculated fragment depth values into the depth buffer */
+    gfx_blend           = 1 << 6,       /**< Enable color alpha blending equations for the render target */
+    gfx_stencil         = 1 << 7,       /**< Enable stencil test pipeline operations */
 } gfx_pipeline_flags;
 
 
 typedef enum gfx_semantic {
-    gfx_position,
-    gfx_color,
-    gfx_normal,
-    gfx_tangent,
-    gfx_bnormal,
-    gfx_uv0,
-    gfx_uv1,
-    gfx_uv2,
-    gfx_uv3,
-    gfx_weight,
-    gfx_index,
+    gfx_position,                       /**< Vertex positions data array (e.g., location/slot 0) */
+    gfx_color,                          /**< Vertex primary diffuse/albedo color array data */
+    gfx_normal,                         /**< Geometry surface shading normal vector arrays */
+    gfx_tangent,                        /**< Surface tangent vector arrays for normal mapping calculations */
+    gfx_bnormal,                        /**< Surface bitangent/binormal vector arrays */
+    gfx_uv0,                            /**< Primary texture coordinate coordinate mapping channel */
+    gfx_uv1,                            /**< Secondary texture coordinate coordinate mapping channel */
+    gfx_uv2,                            /**< Tertiary texture coordinate coordinate mapping channel */
+    gfx_uv3,                            /**< Quaternary texture coordinate coordinate mapping channel */
+    gfx_weight,                         /**< Vertex skinning influence matrix blend weights data */
+    gfx_index,                          /**< Vertex skinning joint/bone array blend indices data */
 } gfx_semantic;
 
 
 typedef enum gfx_shader_stage {
-    gfx_shader_vertex,
-   // gfx_shader_hull,
-   // gfx_shader_domain,
-  //  gfx_shader_geometry,
-    gfx_shader_fragment,
+    // Standard Graphics Pipeline
+    gfx_shader_vertex,                  /**< Vertex shader stage (transforms per-vertex data) */
+    gfx_shader_fragment,                /**< Fragment/Pixel shader stage (calculates pixel color output) */
 
-    gfx_shader_compute,
+    // Compute Pipeline
+    gfx_shader_compute,                 /**< Compute shader stage for general GPU data processing */
 
-    gfx_shader_rt_raygen,               // = 0x0100,
-    gfx_shader_rt_intersect,            // = 0x1000,
-    gfx_shader_rt_any_hit,              // = 0x0200,
-    gfx_shader_rt_closest_hit,          // = 0x0400,
-    gfx_shader_rt_miss,                 // = 0x0800,
-    gfx_shader_rt_callable,             // = 0x2000,
+    // Hardware Ray Tracing Pipeline (VK_KHR_ray_tracing_pipeline / DX12 DXR)
+    gfx_shader_rt_raygen,               /**< Ray Generation shader (entry point for executing ray traces) */
+    gfx_shader_rt_intersect,            /**< Intersection shader (defines custom primitive intersections) */
+    gfx_shader_rt_any_hit,              /**< Any-Hit shader (executed when a ray intersection filters transparent/shadow pixels) */
+    gfx_shader_rt_closest_hit,          /**< Closest-Hit shader (executed on the nearest ray intersection point for shading) */
+    gfx_shader_rt_miss,                 /**< Miss shader (executed when a ray fails to intersect any geometry) */
+    gfx_shader_rt_callable,             /**< Callable shader (invoked from other shaders for dynamic branch execution) */
 
-    gfx_shader_amplify,                 // amplify + mesh + fragment
-    gfx_shader_mesh,                    // mesh + fragment 
+    // Modern Next-Gen Geometry Pipelines (VK_EXT_mesh_shader / DX12 Mesh Shading)
+    gfx_shader_amplify,                 /**< Amplify/Task shader stage (performs coarse culling and launches mesh groups) */
+    gfx_shader_mesh,                    /**< Mesh shader stage (generates vertex and primitive topologies directly on GPU) */
 
-    gfx_shader_count,
+    gfx_shader_count,                   /**< Total number of shader stages available */
 } gfx_shader_stage;
 
 
 typedef enum gfx_barrier {
-    gfx_barrier_indirect,
-    gfx_barrier_compute,
-    gfx_barrier_graphics,     // before vertex, after frament
-    gfx_barrier_render_target,
-    gfx_barrier_depth_stencil,
-    gfx_barrier_transfer,
-    gfx_barrier_present,
+    gfx_barrier_indirect,               /**< Barrier for buffers driving indirect command execution arguments */
+    gfx_barrier_compute,                /**< Barrier separating compute shader read/write hazards */
+    gfx_barrier_graphics,               /**< General graphics barrier executed before vertex work or after fragment shading */
+    gfx_barrier_render_target,          /**< Layout transition barrier optimized for attachment color buffers writes */
+    gfx_barrier_depth_stencil,          /**< Layout transition barrier optimized for depth/stencil buffers writes */
+    gfx_barrier_transfer,               /**< Barrier for explicit host/device memory transfer operations (copy/blit) */
+    gfx_barrier_present,                /**< Layout transition barrier releasing ownership to the OS swapchain presentation system */
 } gfx_barrier;
 
 
 typedef enum gfx_submit_options {
-    gfx_submit_nowait,
-    gfx_submit_wait_for_fence,
-    gfx_submit_wait_for_queue_idle,
-    gfx_submit_wait_for_device_idle,
-    gfx_submit_wait_for_image_ready,
+    gfx_submit_nowait,                  /**< Asynchronously fire commands onto the queue without any host stalling */
+    gfx_submit_wait_for_fence,          /**< Block host thread execution until the associated submission fence is signaled */
+    gfx_submit_wait_for_queue_idle,     /**< Block host execution until the target execution queue finishes all active items */
+    gfx_submit_wait_for_device_idle,    /**< Stall host execution completely until the entire GPU device settles into an idle state */
+    gfx_submit_wait_for_image_ready,    /**< Hold execution until the swapchain engine acquires and releases ownership of the next image */
 } gfx_submit_options;
 
-typedef struct { uint64_t idx; } gfx_context_t;
-typedef struct { uint64_t idx; } gfx_surface_t;
+typedef struct { uint64_t idx; } gfx_context_t;                 /**< Handle to the primary graphics subsystem instance */
+typedef struct { uint64_t idx; } gfx_surface_t;                 /**< Handle managing the OS-specific display window association */
 
-typedef struct { uint64_t idx; } gfx_swapchain_t; // deprecated
+typedef struct { uint64_t idx; } gfx_swapchain_t;               /**< @deprecated Managed directly inside gfx_surface_t now */
 
-typedef struct { uint64_t idx; } gfx_buffer_t;
-typedef struct { uint64_t idx; } gfx_texture_t;
-typedef struct { uint64_t idx; } gfx_sampler_t;
-typedef struct { uint64_t idx; } gfx_shader_t;  
-typedef struct { uint64_t idx; } gfx_descriptor_set_t;
-typedef struct { uint64_t idx; } gfx_pipeline_t;            // vertex + fragment
-typedef struct { uint64_t idx; } gfx_pipeline_compute_t;    // compute
-typedef struct { uint64_t idx; } gfx_pipeline_mesh_t;       // task + mesh + fragment
-typedef struct { uint64_t idx; } gfx_pipeline_raytrace_t;   // ray tracing
-typedef struct { uint64_t idx; } gfx_render_target_t;
-typedef struct { uint64_t idx; } gfx_command_buffer_t;
+typedef struct { uint64_t idx; } gfx_buffer_t;                  /**< Handle referencing allocated hardware data buffers */
+typedef struct { uint64_t idx; } gfx_texture_t;                 /**< Handle referencing 2D, 3D, or Cubemap image texture memory */
+typedef struct { uint64_t idx; } gfx_sampler_t;                 /**< Handle referencing filtering and texture state configuration blocks */
+typedef struct { uint64_t idx; } gfx_shader_t;                  /**< Handle mapping to compiled multi-stage shader program binaries */
+typedef struct { uint64_t idx; } gfx_descriptor_set_t;          /**< Handle linking an updated set of bound resource variables */
+typedef struct { uint64_t idx; } gfx_pipeline_t;                /**< Handle representing an active fixed-function vertex+fragment state */
+typedef struct { uint64_t idx; } gfx_pipeline_compute_t;        /**< Handle representing an active compute state machine layout */
+typedef struct { uint64_t idx; } gfx_pipeline_mesh_t;           /**< Handle representing a modern task+mesh geometry state machine layout */
+typedef struct { uint64_t idx; } gfx_pipeline_raytrace_t;       /**< Handle representing a hardware-accelerated ray tracing state machine layout */
+typedef struct { uint64_t idx; } gfx_render_target_t;           /**< Handle configuring multiple bound color and depth attachments targets */
+typedef struct { uint64_t idx; } gfx_command_buffer_t;          /**< Handle capturing rendering execution tokens for execution queue submission */
 
+typedef struct { uint64_t idx; } gfx_acceleration_structure_t;  /**< Handle to a Top or Bottom level acceleration structure */
+typedef struct { uint64_t idx; } gfx_sbt_t;                     /**< Handle to a Shader Binding Table mapping ray tracing groups */
 
 // type - info/warning/error
 typedef void (*gfx_callback)(gfx_msg type, const char* msg, ...);
 
 typedef struct gfx_allocator_t {
-    void*   (*gfx_alloc) (size_t size, void* userdata)  = nullptr;
-    void    (*gfx_free)  (void* ptr, void* userdata)    = nullptr;
-    void    *user_data                                  = nullptr;
+    void*   (*gfx_alloc) (size_t size, void* userdata)  = nullptr; /**< Function pointer allocating a discrete block of heap memory */
+    void    (*gfx_free)  (void* ptr, void* userdata)    = nullptr; /**< Function pointer releasing a previously allocated memory address block */
+    void*   user_data                                   = nullptr; /**< Custom runtime context state passed down into callbacks */
 } gfx_allocator_t;
 
 typedef struct gfx_error_t {
-    const char *    message = nullptr;
-    uint32_t        code    = 0;
+    const char*     message = nullptr;  /**< Explanatory string explaining the crash or validation root cause context */
+    uint32_t        code    = 0;        /**< Unique numerical integer identifier linked to the error state classification */
 } gfx_error_t;
 
 
 typedef struct gfx_settings_t {
-    uint32_t                options                 = 0;
+    uint32_t                options                 = 0;                /**< Bitmask configuration flags (see gfx_options) */
 
-    gfx_backend             backend                 = gfx_backend_auto;
-    gfx_gpu_type            prefer_gpu              = gfx_gpu_discrete;
-    intptr_t                handle                  = 0;
+    gfx_backend             backend                 = gfx_backend_auto; /**< Preferred graphics API backend rendering system */
+    gfx_gpu_type            prefer_gpu              = gfx_gpu_discrete; /**< Preferred hardware GPU architecture type */
+    intptr_t                handle                  = 0;                /**< Optional OS-specific application/window instance handle */
 
     struct {
-        uint32_t            staging_buffer_size             = 16 * 1024 * 1024;
-        uint32_t            buffer_pool_capacity            = 1  * 1024;
-        uint32_t            shaders_pool_capacity           = 1  * 1024;
-        uint32_t            textures_pool_capacity          = 2  * 1024;
-        uint32_t            pipeline_pool_capacity          = 1  * 1024;
-        uint32_t            compute_pipeline_pool_capacity  = 1  * 1024;
+        uint32_t            staging_buffer_size             = 8 * 1024 * 1024;  /**< Size of host-visible staging memory in bytes */
+        uint32_t            uniform_buffer_size             = 8 * 1024 * 1024;  /**< Size of persistent uniform buffer ring in bytes */
+        uint32_t            buffer_pool_capacity            = 1  * 1024;        /**< Maximum number of concurrent buffer allocations */
+        uint32_t            shader_pool_capacity            = 1  * 1024;        /**< Maximum number of concurrent shader allocations */
+        uint32_t            texture_pool_capacity           = 2  * 1024;        /**< Maximum number of concurrent texture allocations */
+        uint32_t            pipeline_pool_capacity          = 1  * 1024;        /**< Maximum number of concurrent graphics pipelines */
+        uint32_t            compute_pipeline_pool_capacity  = 1  * 1024;        /**< Maximum number of concurrent compute pipelines */
     } limits;
 
-    gfx_allocator_t *       allocator;
-    gfx_callback            dbglog;
+    gfx_allocator_t*        allocator;                                  /**< Custom memory allocator hook (nullptr for system default) */
+    gfx_callback            dbglog;                                     /**< Call pointer for routing diagnostic logging events */
 } gfx_settings_t;
 
 
-typedef struct gfx_device_info_t {
-    gfx_gpu_type            type;               // discrete/embbed
-    char                    name[64];           // 
-    char                    gpu_vendor[64];
-} gfx_device_info_t;
-
-
 typedef struct gfx_caps_t {
-    gfx_device_info_t       device_info;    
+    gfx_gpu_type            gpu_type;                           /**< Hardware architecture type (discrete or integrated) */
+    char                    gpu_name[64];                       /**< Human-readable product name string of the GPU */
+    char                    gpu_vendor[64];                     /**< GPU manufacturer name string (e.g., NVIDIA, AMD, Intel, Apple) */
 
-    uint8_t                 support_pvr;        //
-    uint8_t                 support_etc;        //
-    uint8_t                 support_astc;       //
-    uint8_t                 support_bc;         // block compression dxt
+    // Hardware Texture Compression Layout Support
+    bool                    support_pvr;                        /**< True if PVRTC mobile texture compression formats are supported */
+    bool                    support_etc;                        /**< True if ETC1/ETC2 mobile texture compression formats are supported */
+    bool                    support_astc;                       /**< True if ASTC scalable mobile texture compression formats are supported */
+    bool                    support_bc;                         /**< True if desktop Block Compression formats (DXTC / BC1-BC7) are supported */
 
-    uint8_t                 support_compute;    //
-    uint8_t                 support_raytrace;   //
-    uint8_t                 support_indirect;   //
-    uint8_t                 support_bindless;   //
+    // Advanced Pipeline & Architecture Features
+    bool                    support_compute;                    /**< True if general purpose compute shader pipelines are available */
+    bool                    support_raytrace;                   /**< True if hardware-accelerated ray tracing pipeline is available */
+    bool                    support_indirect;                   /**< True if GPU indirect command argument drawing is available */
+    bool                    support_bindless;                   /**< True if unbounded bindless descriptor indexing is supported */
 
-    uint8_t                 support_mesh_shader;
-    uint8_t                 support_mesh_amplification_shader;
+    // Next-Gen Geometry Pipeline Support
+    bool                    support_mesh_shader;                /**< True if advanced geometry mesh shaders are supported */
+    bool                    support_mesh_amplification_shader;  /**< True if amplification/task mesh shaders are supported */
+
+    // --- Shader Binary Capabilities ---
+    uint32_t                supported_shader_formats;           /**< Bitmask matching combinations of gfx_shader_format_flags */
+
+    // Hardware Constraints & Limits Boundaries
+    uint32_t                max_texture_dimension_2d;           /**< Maximum allowed width/height for a 2D texture allocation */
+    uint32_t                max_compute_work_group_invocations; /**< Maximum total number of threads inside a single compute work group */
+    uint64_t                min_uniform_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic UBO bindings */
+    uint64_t                min_storage_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic SSBO bindings */
+    uint64_t                max_uniform_buffer_range;           /**< Maximum byte allocation size range that can be bound to a single UBO slot */
+
+    // Extended Shader Data Types & Atomics
+    bool                    support_shader_float16;             /**< True if shader supports native 16-bit floating-point math (half) */
+    bool                    support_shader_int8;                /**< True if shader supports native 8-bit integer math (int8_t) */
+    bool                    support_shader_atomic_float32;      /**< True if atomic operations are supported on float variables in SSBOs */
+    bool                    support_shader_subgroup_ops;        /**< True if wave/subgroup voting and shuffling operations are available */
+
+    // Architecture & Optimization Architectural Hints
+    bool                    has_unified_memory;                 /**< True if CPU and GPU share the same system RAM pool (Unified Memory) */
+    bool                    support_barycentrics;               /**< True if fragment shader can access raw hardware barycentric coordinates */
+    bool                    support_conservative_rasterization; /**< True if conservative overestimation rasterization features are enabled */
 } gfx_caps_t;
 
 
+
 typedef struct gfx_surface_desc_t {
-    const char*         label;                  // "Main Window", "Scene Viewport"
-    intptr_t            window_handle;          // Required: HWND, NSWindow*, ANativeWindow*
-    bool                vsync;                  // default = true
-    bool                enable_hdr;             // future
+    const char*             label;              /**< Optional debug metadata string literal identifier */
+    intptr_t                window_handle;      /**< Native window reference token (e.g., HWND on Win32, NSWindow* on macOS) */
+    bool                    vsync;              /**< Vertically synchronize presentation to refresh rates (default = true) */
+    bool                    enable_hdr;         /**< Reserved for high dynamic range surface configuration layouts */
     
-    gfx_pixel_format    preferred_format;       // gfx_pixel_format_rgba8
-    gfx_sample_count    sample_count;           // gfx_sample_1x
+    gfx_pixel_format        preferred_format;   /**< Preferred surface pixel component output format layout */
+    gfx_sample_count        sample_count;       /**< Surface output multisampling anti-aliasing count */
 } gfx_surface_desc_t;
 
  
 typedef struct gfx_sampler_desc_t {
-    gfx_filter              minmag;
-    gfx_filter              mipmap;
-    gfx_address_mode        mode;
-    uint32_t                anisotropy;
+    gfx_filter              minmag;             /**< Minification and magnification pixel processing filter mode */
+    gfx_filter              mipmap;             /**< Mipmap transition blending interpolation filter mode */
+    gfx_address_mode        mode;               /**< Out-of-bounds UV coordinates edge addressing wrapping policy */
+    uint32_t                anisotropy;         /**< Anisotropic filtering clamp level (0 to disable) */
 } gfx_sampler_desc_t;
 
 
 typedef struct gfx_texture_desc_t {
-    const char *            label;
-    uint32_t                width;
-    uint32_t                height;
-    uint32_t                depth;      // depth | array slice | cube side(+/-x, +/-y, +/-z) 
-    void *                  data;       // cubemap and cube - data[slice, mipmaps], [slice, mipmaps]
-    uint32_t                mip_levels;  
-    uint32_t                storage;    // greater 0 - use as storage
+    const char*             label;              /**< Optional debug metadata string literal identifier */
+    uint32_t                width;              /**< Horizontal pixel boundary allocation measurement */
+    uint32_t                height;             /**< Vertical pixel boundary allocation measurement */
+    uint32_t                depth;              /**< Volumetric depth layers, array slices, or cubemap faces count */
+    void*                   data;               /**< Optional raw memory pointer payload mapped to populate initial mipmaps levels */
+    uint32_t                mip_levels;         /**< Total requested mipmap chains level allocations */  
+    uint32_t                storage;            /**< Non-zero value flag enabling use as a writable compute storage image */
     
-    gfx_access_type         access;
-    gfx_texture_type        type;
-    gfx_pixel_format        format;
-    uint32_t                swizzle_mask; // only r,g,b,a symbols. desc.swizzle_mask = gfx_make_swizzle_mask('b', 'g', 'r', 'a');  
+    gfx_access_type         access;             /**< CPU/GPU read/write access permissions model */
+    gfx_texture_type        type;               /**< Structural dimensional class layout type */
+    gfx_pixel_format        format;             /**< Compressed or uncompressed element bit layout design */
+    uint32_t                swizzle_mask;       /**< Formatted channel swizzle code (e.g., generated via gfx_make_swizzle_mask) */
 } gfx_texture_desc_t;
 
 
 typedef struct gfx_buffer_desc_t {
-    const char*             label;
-    gfx_memory_hint         memory_hint;
-    gfx_buffer_usage        usage;
-    bool                    mapped;
-    uint32_t                size;
-    void *                  data;
+    const char*             label;              /**< Optional debug metadata string literal identifier */
+    gfx_memory_hint         memory_hint;        /**< Explicit hardware memory allocation priority placement suggestion */
+    gfx_buffer_usage        usage;              /**< Target pipeline hardware binding role mask configuration */
+    bool                    mapped;             /**< Flag enabling persistent mapping of host memory for fast writes */
+    uint32_t                size;               /**< Total capacity boundaries allocated measured in bytes */
+    void*                   data;               /**< Optional host pointer used to clone initial data directly into allocation */
 } gfx_buffer_desc_t;
 
 /// <summary>
 /// gfx_uniform_t - get by shader reflection;
 /// </summary>
 typedef struct gfx_uniform_t {
-    char                    name[32];
-    gfx_uniform_type        type;
-    uint16_t                stage_mask;     // fragment|vertex
-    uint16_t                binding;
-    uint16_t                group;          // set index
+    char                    name[32];           /**< Unique shader variable layout name token identifier */
+    gfx_uniform_type        type;               /**< Layout component parameter block or binding type */
+    uint16_t                stage_mask;         /**< Bitmask of bound programmable shader stages executing this variable */
+    uint16_t                binding;            /**< Hardware resource registration binding index slot */
+    uint16_t                group;              /**< Hardware descriptor set layout grouping index register */
     
     struct {
-        uint16_t            size;           //
-        uint16_t            field_count;    //
+        uint16_t            size;               /**< Total byte capacity footprint bounds of the uniform constant block */
+        uint16_t            field_count;        /**< Active member fields count located inside the uniform block constant */
         struct {
-            char            name[32];
-            uint16_t        stride;     // for ubo field
-            uint16_t        offset;     // for ubo field
-            uint16_t        type;       // for ubo field
+            char            name[32];           /**< Variable label assigned to individual component member fields */
+            uint16_t        stride;             /**< Memory padding footprint stride offset between array indices */
+            uint16_t        offset;             /**< Byte offset address start position relative to uniform base address */
+            uint16_t        type;               /**< Variable data element primitive type classification */
         } fields[16];
     } buffer;
     
-    struct  {
-        gfx_access_type     access;
+    struct {
+        gfx_access_type     access;             /**< Compute buffer storage layout read/write access visibility */
     } storage;
     
     struct {
-        gfx_texture_type    dimension;
-        gfx_access_type     access;       // read/write/read_wite
+        gfx_texture_type    dimension;          /**< Layout dimensional requirements bound to image texture sampling */
+        gfx_access_type     access;             /**< Writable storage read/write accessibility state mapping flags */
     } texture;
     
     struct {
-        
+        // Reserved for future explicit cross-backend sampler states reflection
     } sampler;
 } gfx_uniform_t;
 
 
 typedef struct gfx_uniform_loc_t {
-    uint32_t shader_hash;
-    uint8_t  type;
-    uint8_t  binding;
-    uint8_t  set_index;
-    uint8_t  member_idx;
+    union {
+        uint64_t handle;                        /**< Compressed opaque 64-bit lookup hash value */
+        struct {
+            uint32_t        shader_hash;        /**< Parent compiled shader tracking identifier code */
+            uint8_t         type;               /**< Underlying uniform binding variable classification role */
+            uint8_t         binding;            /**< Pipeline layout registration register location index */
+            uint8_t         set_index;          /**< Descriptor array grouping allocation layer pointer */
+            uint8_t         member_idx;         /**< Struct member inner field offset index index */
+        };
+    };
 } gfx_uniform_loc_t;
 
 
@@ -570,112 +623,112 @@ typedef struct gfx_shader_stage_data{
 
 
 typedef struct gfx_shader_desc_t {
-    const char*             label;
-    uint32_t                descriptor_pool_capacity;
+    const char*             label;                      /**< Optional debug metadata string literal identifier */
+    uint32_t                descriptor_pool_capacity;   /**< Pre-allocated local descriptor pool count scaling hint limits */
 
-    uint32_t                stages_count;
-    gfx_shader_stage_data*  stages;
+    uint32_t                stage_count;                /**< Total programmable bytecode stages arrays length */
+    gfx_shader_stage_data*  stages;                     /**< Array of shader source execution packages */
 
-    uint32_t                uniform_count;
-    gfx_uniform_t*          uniforms;
+    uint32_t                uniform_count;              /**< Total reflected variable metadata layouts array length */
+    gfx_uniform_t*          uniforms;                   /**< Array of active binding configuration metadata structures */
 } gfx_shader_desc_t;
 
 
 typedef struct gfx_vertex_attribute {
 //  gfx_semantic            semantic;
-    uint32_t                location;       // attribute location
-    uint32_t                binding;        // buffer binding
-    gfx_vertex_format       format;         // 
-    uint32_t                offset;
+    uint32_t                location;           /**< Hardware layout shader location registration index slot (layout(location = X)) */
+    uint32_t                binding;            /**< Input slot buffer source binding index register alignment link */
+    gfx_vertex_format       format;             /**< Primitive vector component layout size encoding and configuration classification */
+    uint32_t                offset;             /**< Byte offset starting boundaries address relative to current vertex index row start */
 } gfx_vertex_attribute;
 
 
 typedef struct gfx_vertex_slot_t {
-    uint32_t                binding;
-    uint32_t                stride;
-    gfx_vertex_rate         rate;
+    uint32_t                binding;            /**< Target input source buffer binding index slot registration alignment link */
+    uint32_t                stride;             /**< Byte dimensions footprint width separating individual sequential vertex array blocks */
+    gfx_vertex_rate         rate;               /**< Stepping frequency behavior rules (per-vertex or per-instance data steps) */
 } gfx_vertex_slot_t;
 
 
 typedef struct gfx_vertex_assembly {
-    gfx_topology            topology = gfx_topology_points;
+    gfx_topology            topology = gfx_topology_points; /**< Primitive topology reconstruction layout instructions assembly */
 
-    uint32_t                slot_count;
-    gfx_vertex_slot_t *     slots;
+    uint32_t                slot_count;         /**< Length of active input source buffer streams array */
+    gfx_vertex_slot_t*      slots;              /**< Array configuring layout stream strides parameters */
 
-    uint32_t                attributes_count;
-    gfx_vertex_attribute *  attributes;
-
+    uint32_t                attribute_count;    /**< Length of mapped hardware vector variable bindings array */
+    gfx_vertex_attribute*   attributes;         /**< Array mapping element locations layout configurations */
 } gfx_vertex_assembly;
 
 
 typedef struct gfx_render_states_desc_t {
-    gfx_topology            topology    = gfx_topology_triangles;
-    gfx_cull                culling     = gfx_cull_none;
-    gfx_face                face        = gfx_face_ccw;
-    uint32_t                states      = gfx_colormask_rgba | gfx_depth_test | gfx_depth_write;
+    gfx_topology            topology    = gfx_topology_triangles;   /**< Hardware fallback primitive reconstruction topology rules */
+    gfx_cull                culling     = gfx_cull_none;            /**< Hardware backface culling execution boundary options policies */
+    gfx_face                face        = gfx_face_ccw;             /**< Winding evaluation determining vertex normal orientation directions */
+    uint32_t                states      = gfx_colormask_rgba | gfx_depth_test | gfx_depth_write; /**< Bitmask combinations mapping gfx_pipeline_flags */
 
     struct {
-        gfx_pixel_format*   color;
+        gfx_pixel_format*   color;              /**< Array of pixel formats matching output color render pass attachments formats */
     } attachments;
 
     struct {
-        bool                enable      = false;
-        gfx_blend_mode      color_src   = gfx_blend_mode_one;   // srcColor
-        gfx_blend_mode      color_dst   = gfx_blend_mode_one;   // dstColor
-        gfx_blend_op        color_op    = gfx_blend_op_add;     // opColor
+        bool                enable      = false;                /**< Globally toggles frame buffer blend interpolation math engines */
+        gfx_blend_mode      color_src   = gfx_blend_mode_one;   /**< Color equation scaling factor values source input multipliers */
+        gfx_blend_mode      color_dst   = gfx_blend_mode_one;   /**< Color equation scaling factor values target destination multipliers */
+        gfx_blend_op        color_op    = gfx_blend_op_add;     /**< Arithmetic operator equation combining calculated color factors */
 
-        gfx_blend_mode      alpha_dst   = gfx_blend_mode_one;   // srcAlpha
-        gfx_blend_mode      alpha_src   = gfx_blend_mode_one;   // dstAlpha
-        gfx_blend_op        alpha_op    = gfx_blend_op_add;     // opAlpha
+        gfx_blend_mode      alpha_src   = gfx_blend_mode_one;   /**< Alpha equation scaling factor values source input multipliers */
+        gfx_blend_mode      alpha_dst   = gfx_blend_mode_one;   /**< Alpha equation scaling factor values target destination multipliers */
+        gfx_blend_op        alpha_op    = gfx_blend_op_add;     /**< Arithmetic operator equation combining calculated alpha factors */
     } blend;
     
     struct {
-        bool                enable      = true;
-        bool                write       = true;
-        gfx_cmp             mode        = gfx_cmp_lequal;
+        bool                enable      = true;                 /**< Globally toggles geometry visibility depth testing routines */
+        bool                write       = true;                 /**< Toggles locking z-buffer outputs for updating pixel depth values */
+        gfx_cmp             mode        = gfx_cmp_lequal;       /**< Evaluation comparison math operators matching test conditions pass */
     } depth;
 
     struct {
-        gfx_cmp             func        = gfx_cmp_always;
-        uint8_t             ref         = 0;
-        uint8_t             pass        = 0xFF;
+        gfx_cmp             func        = gfx_cmp_always;       /**< Testing condition comparison math operators matching stencil bits */
+        uint8_t             ref         = 0;                    /**< Reference integer mask bit matching stencil validation checks */
+        uint8_t             pass        = 0xFF;                 /**< Bitwise verification logic mask filters applied on dynamic reads */
 
-        gfx_stencil_op      opPass      = gfx_stencil_op_keep;
-        gfx_stencil_op      opFail      = gfx_stencil_op_keep;
-        gfx_stencil_op      opZFail     = gfx_stencil_op_keep;
+        gfx_stencil_op      opPass      = gfx_stencil_op_keep;  /**< Updates executed when depth testing and stencil validations both pass */
+        gfx_stencil_op      opFail      = gfx_stencil_op_keep;  /**< Updates executed when stencil validation fails immediately */
+        gfx_stencil_op      opZFail     = gfx_stencil_op_keep;  /**< Updates executed when stencil validation passes but depth testing fails */
     } stencil;
 
     struct {
-        bool                red         = true;
-        bool                green       = true;
-        bool                blue        = true;
-        bool                alpha       = true; 
+        bool                red         = true;                 /**< Allow calculations to write pixels to output Red color channels */
+        bool                green       = true;                 /**< Allow calculations to write pixels to output Green color channels */
+        bool                blue        = true;                 /**< Allow calculations to write pixels to output Blue color channels */
+        bool                alpha       = true;                 /**< Allow calculations to write pixels to output Alpha color channels */
     } color_mask;
 } gfx_render_states_desc_t;
  
 
 typedef struct gfx_render_target_desc_t {
-    uint16_t                    width;
-    uint16_t                    height;
-    uint32_t                    color_attachement_count;
-    gfx_pixel_format *          color_attachement_formats;
-    gfx_pixel_format            depth_attachement_format;
+    uint16_t                    width;                      /**< Target frame buffer width boundary in pixels */
+    uint16_t                    height;                     /**< Target frame buffer height boundary in pixels */
+    
+    uint32_t                    color_attachment_count;     /**< Length of active color attachment pixel formats array */
+    gfx_pixel_format*           color_attachment_formats;   /**< Array defining pixel formats for each bound color output view */
+    gfx_pixel_format            depth_attachment_format;    /**< Selected depth/stencil attachment pixel format layout */
 
-    gfx_sample_count            sample_count;
+    gfx_sample_count            sample_count;               /**< Multisample anti-aliasing sample count configurations */
 } gfx_render_target_desc_t;
 
 
 typedef struct gfx_pipeline_desc_t {
-    gfx_shader_t *              shader;
-    gfx_render_states_desc_t    render_states;
+    gfx_shader_t*               shader;                     /**< Pointer to the compiled multi-stage graphics shader program */
+    gfx_render_states_desc_t    render_states;              /**< Comprehensive fixed-function hardware blending, depth, and stencil states */
 //  gfx_render_pass_desc_t      render_pass;
-    gfx_vertex_assembly         assembly;
+    gfx_vertex_assembly         assembly;                   /**< Input assembly topology layouts and vertex streaming buffers strides attributes */
 } gfx_pipeline_desc_t;
 
 
 typedef struct gfx_compute_pipeline_desc_t {
-    gfx_shader_t* shader;
+    gfx_shader_t*               shader;                     /**< Pointer to the compiled single-stage compute shader state machine */
 } gfx_compute_pipeline_desc_t;
 
 // todo: for future mesh shading
@@ -687,27 +740,27 @@ typedef struct gfx_raytrace_pipeline_desc_t {
 } gfx_raytrace_pipeline_desc_t;
 
 typedef struct gfx_render_pass_desc_t {
-    uint32_t                    clear_color;
-    uint32_t                    clear_depth;
+    uint32_t                    clear_color;                /**< Packed hexadecimal RGBA8 color value used to scrub color targets on load */
+    uint32_t                    clear_depth;                /**< Packed depth precision scaling token used to wipe z-buffer values on load */
 } gfx_render_pass_desc_t;
 
 // Common layout used by Vulkan/DX12/WebGPU for indexed indirect draws.
 typedef struct indirect_data_t {
-    uint32_t index_count;
-    uint32_t instance_count;
-    uint32_t first_index;       // offset in index buffer (indices)
-    int32_t  base_vertex;       // added to vertex indices
-    uint32_t first_instance;    // base instance id
+    uint32_t                    index_count;                /**< Number of indices to read from the bound index buffer */
+    uint32_t                    instance_count;             /**< Number of geometry instances to draw via instanced rendering */
+    uint32_t                    first_index;                /**< Element offset position location mapped within the bound index buffer */
+    int32_t                     base_vertex;                /**< Signed constant value added to vertex index indices inside hardware streams */
+    uint32_t                    first_instance;             /**< Starting base identification instance register value id */
 } indirect_data_t;
 
 
 typedef struct gfx_frame_t {    
-    gfx_context_t*              ctx;
-    uint32_t                    frame_index;            // frame index 0,1,2,3...n
-    uint32_t                    swapchain_image_index;  //
-    gfx_surface_t*              surface;                //
-    gfx_render_target_t*        target;                 //
-    gfx_command_buffer_t*       cmd;                    //
+    gfx_context_t*              ctx;                        /**< Primary reference link referencing active subsystem graphics instance */
+    uint32_t                    frame_index;                /**< Linear monotonically increasing frame execution tracker index (0,1..n) */
+    uint32_t                    swapchain_image_index;      /**< Current active texture surface image target slot returned from swapchain engine */
+    gfx_surface_t*              surface;                    /**< Active presentation window viewport surface abstraction */
+    gfx_render_target_t*        target;                     /**< Active render target frame buffer containing current color and depth views */
+    gfx_command_buffer_t*       cmd;                        /**< Primary command buffer instance logging commands generated during this frame step */
 } gfx_frame_t;
 
 // --- CONTEXT ---
@@ -715,7 +768,7 @@ gfx_api void                    gfx_init(gfx_settings_t* settings, gfx_context_t
 gfx_api void                    gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
 gfx_api gfx_surface_t           gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t * desc);
-gfx_api void                    gfx_surface_destroy(gfx_surface_t surface);
+gfx_api void                    gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface);
 
 gfx_api gfx_frame_t*            gfx_begin_frame(gfx_context_t* ctx, gfx_surface_t *surface);
 gfx_api gfx_result              gfx_end_frame(gfx_frame_t* frame);
@@ -728,7 +781,7 @@ gfx_api void                    gfx_buffer_destroy(gfx_context_t* ctx, gfx_buffe
 // --- SHADER ---
 gfx_api gfx_shader_t*           gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc);
 gfx_api uint32_t                gfx_shader_get_descriptor_set_count(gfx_shader_t* shader);
-gfx_api uint32_t                gfx_shader_get_uniforms(gfx_shader_t* shader, uint32_t group, gfx_uniform_t* uniforms);
+gfx_api uint32_t                gfx_shader_get_uniforms(gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms);
 gfx_api uint64_t                gfx_uniform_location(gfx_shader_t* shader, const char* name);
 gfx_api void                    gfx_shader_destroy(gfx_context_t* ctx, gfx_shader_t* shader);
 
@@ -756,7 +809,7 @@ gfx_api gfx_pipeline_mesh_t*    gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx
 gfx_api void                    gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
 
 gfx_api gfx_pipeline_raytrace_t*gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc);
-gfx_api void                    gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* desc);
+gfx_api void                    gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
 
 // --- RENDER TARGET ---
@@ -764,7 +817,7 @@ gfx_api gfx_render_target_t*    gfx_render_target_create(gfx_context_t* ctx, gfx
 gfx_api void                    gfx_render_target_destroy(gfx_context_t* ctx, gfx_render_target_t* target);
 
 // --- DESCRIPTOR SET ---
-gfx_api gfx_descriptor_set_t*   gfx_descriptor_set_create(gfx_context_t* ctx,  gfx_shader_t* shader, uint32_t set_idx);
+gfx_api gfx_descriptor_set_t*   gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx);
 gfx_api void                    gfx_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
 gfx_api void                    gfx_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
 gfx_api void                    gfx_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
@@ -792,7 +845,7 @@ gfx_api void                    gfx_cmd_bind_descriptor_set(gfx_command_buffer_t
 gfx_api void                    gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
 gfx_api void                    gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
 gfx_api void                    gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-gfx_api void                    gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+gfx_api void                    gfx_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_index, uint32_t instance_count, uint32_t vertex_offset);
 gfx_api void                    gfx_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
 gfx_api void                    gfx_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
@@ -838,32 +891,28 @@ gfx_api void                    gfx_cmd_texture_barrier(gfx_command_buffer_t* cm
 // } gfx_rt_acceleration_struct;
 
 
-
-
-extern const char*  gfx_to_string(gfx_buffer_usage usage);
-extern const char*  gfx_to_string(gfx_shader_stage stage);
-extern const char*  gfx_to_string(gfx_texture_type type);
-extern const char*  gfx_to_string(gfx_pixel_format format);
-
-
 // utility
 uint32_t            gfx_utils_thread_id();
-uint32_t            gfx_utils_stack_trace(uint32_t skip, uintptr_t* frames, uint64_t count);
-void                gfx_utils_stack_trace_names(uintptr_t* frames, uint64_t count, const char** names);
-uint16_t            gfx_utils_hash_16(const char * data, uint32_t size);
+uint32_t            gfx_utils_hash_32(const char * data, uint32_t size);
+uint32_t            gfx_utils_hash_combine(uint32_t hash1, uint32_t hash2);
 gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format);
 gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width);
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
 
 // pool 
 struct gfx_handle_pool_t;
-gfx_api void        gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** pool, gfx_allocator_t * allocator);
+gfx_api void        gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t * allocator);
 gfx_api void        gfx_pool_destroy(gfx_handle_pool_t* pool);
+
 gfx_api uint64_t    gfx_pool_alloc(gfx_handle_pool_t* pool);
+gfx_api void*       gfx_pool_alloc_data(gfx_handle_pool_t* pool, uint64_t * out_handle); // return pointer to allocated data, out parameter returns handle
+
 gfx_api void        gfx_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api void*       gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api size_t      gfx_pool_get_size(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_capacity(gfx_handle_pool_t* pool);
+
+#define             gfx_pool_alloc_typed(pool, type, handle)  ((type*)gfx_pool_alloc_data(pool, handle)
 
 
 /*
@@ -900,6 +949,7 @@ typedef struct gfx_api_pfn
 
     // SHADER
     void     (*pfn_create_shader)    (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+    uint32_t (*pfn_shader_get_descriptor_set_count)(gfx_shader_t* shader);
     uint64_t (*pfn_uniform_location) (gfx_shader_t* shader, const char* name);
     void     (*pfn_destroy_shader)   (gfx_context_t* ctx, gfx_shader_t* shader);
 

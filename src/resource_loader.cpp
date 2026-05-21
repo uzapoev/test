@@ -626,7 +626,7 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
     gfx_shader_desc_t shader_desc = {};
         shader_desc.label = name? name: "name";
         shader_desc.stages = stage_data;
-        shader_desc.stages_count = count;
+        shader_desc.stage_count = count;
 
         shader_desc.uniforms = uniforms;
         shader_desc.uniform_count = uniform_count;

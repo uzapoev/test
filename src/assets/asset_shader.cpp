@@ -109,8 +109,29 @@ static const char* find_pragma_entry(const char* data, const char* stage_name, c
 // KEYWORD1 KEYWORD3
 // KEYWORD2 KEYWORD3
 
-void find_pragma_multicompile(const char* data,  char ** keywords, int * keyword_count)
+// #pragma multicompile USE_ALBEDO USE_NORMALMAP
+void find_pragma_multicompile(const char* data, char keywords[32][64], int* keyword_count)
 {
+    *keyword_count = 0;
+    const char* pragma_mc = "#pragma multicompile";
+    const char* line = strstr(data, pragma_mc);
+
+    if (!line) return;
+
+    line += strlen(pragma_mc);
+    while (isspace(*line) && *line != '\n') line++;
+
+    while (*line != '\n' && *line != '\0' && *keyword_count < 32)
+    {
+        int char_idx = 0;
+        while (!isspace(*line) && *line != '\0' && char_idx < 63)
+        {
+            keywords[*keyword_count][char_idx++] = *line++;
+        }
+        keywords[*keyword_count][char_idx] = '\0';
+        if (char_idx > 0) (*keyword_count)++;
+        while (isspace(*line) && *line != '\n') line++;
+    }
 }
 
 
@@ -195,6 +216,8 @@ int asset_shader_compile(const char * name, const char* data, uint32_t size, con
     auto diagnostics = spGetDiagnosticOutput(compile_request);
 
     printf(diagnostics);
+    if (strstr(diagnostics, ": error"))
+        return 0;
 
     for(int i = 0; i < count; ++i)
     {

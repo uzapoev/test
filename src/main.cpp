@@ -90,7 +90,7 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         settings.handle     = handle;
         settings.backend    = gfx_backend_vulkan;
     //    settings.backend    = gfx_backend_webgpu;
-     //   settings.options    = gfx_options_debug;
+        settings.options    = gfx_options_debug;
         settings.dbglog     = log_func;
         settings.allocator  = &gfx_allocator;
     gfx_init(&settings, &ctx);
@@ -104,13 +104,13 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         surface_desc.sample_count       = gfx_sample_1x;
     surface = gfx_surface_create(ctx, &surface_desc);
 
-    gfx_shader_t* compute = nullptr;
+   /* gfx_shader_t* compute = nullptr;
     load_shader_from_file_path(ctx, "../data/shaders/compute.hlsl", &compute);
 
     gfx_compute_pipeline_desc_t compute_desc = {};
     compute_desc.shader = compute;
     gfx_pipeline_compute_t * compute_pipeline = gfx_compute_pipeline_create(ctx, &compute_desc);
-
+    */
 
     resource_manager::create_and_make_shader(ctx);
     render_system::create_and_make_shader(ctx);
@@ -134,13 +134,17 @@ void platform_main(uintptr_t handle, int argc, char** argv)
    //     {1, sizeof(instance_data), gfx_vertex_rate_instance}
     };
 
-    gfx_pipeline_desc_t piplene_desc = {};
-        piplene_desc.shader = shader;
-        piplene_desc.assembly.topology = gfx_topology_triangles;
-        piplene_desc.assembly.attributes = attributes;
-        piplene_desc.assembly.attributes_count = _countof(attributes);
-        piplene_desc.assembly.slots = slots;
-        piplene_desc.assembly.slot_count = _countof(slots);
+    gfx_pipeline_desc_t piplene_desc = { 0 };
+
+        piplene_desc.shader                     = shader;
+        piplene_desc.assembly.topology          = gfx_topology_triangles;
+
+        piplene_desc.assembly.attribute_count   = _countof(attributes);
+        piplene_desc.assembly.attributes        = attributes;
+
+        piplene_desc.assembly.slot_count        = _countof(slots);
+        piplene_desc.assembly.slots             = slots;
+
     pipeline = gfx_pipeline_create(ctx, &piplene_desc);
     
    /* mvp_location            = gfx_uniform_location(shader, "mvp");
@@ -170,7 +174,7 @@ void platform_main(uintptr_t handle, int argc, char** argv)
 
   //  scene_test(ctx, "../data/unity", "Southside.big.json");
   //  scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
-   // scene_test(ctx, "../data/unity", "../data/unity/City.json");
+  //  scene_test(ctx, "../data/unity", "../data/unity/City.json");
     scene_test(ctx, "../data/gungsta", "../data/gungsta/Demo.json");
 }
 

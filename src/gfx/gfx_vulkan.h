@@ -16,6 +16,7 @@
 extern "C" {
 #endif*/
 #define     MAX_FRAME_IN_FLIGHT                 (2)
+#define     GFX_MAX_DESCRIPTOR_SETS             (8)
 #define     MAX_TIMESTAMP_QUERIES               (128)
 #define     MAX_TIMESTAMP_NESTING_LEVEL         (16)
 #define     MAX_BATCH_BARRIERS                  (64)
@@ -32,23 +33,28 @@ typedef struct vk_context_t
 {
     gfx_context_t                       handle;
 
-    VkInstance                          instance            = VK_NULL_HANDLE;
-    VkDevice                            device              = VK_NULL_HANDLE;
-    VkPhysicalDevice                    physicaldevice      = VK_NULL_HANDLE;
-    VkSurfaceKHR                        surface             = VK_NULL_HANDLE;
+    // --- Core Vulkan Handles ---
+    VkInstance                          vk_instance            = VK_NULL_HANDLE;
+    VkDevice                            vk_device              = VK_NULL_HANDLE;
+    VkPhysicalDevice                    vk_physical_device     = VK_NULL_HANDLE;
+    VkSurfaceKHR                        vk_surface             = VK_NULL_HANDLE;
 
     gfx_allocator_t                     allocator;
 
+    // --- Device Queues ---
     struct { 
         uint32_t family;
         VkQueue  queue;
     }                                   graphics_queue,
                                         present_queue,
                                         compute_queue;
+
     VkSampleCountFlagBits               msaa_samples;
 
+    // --- Device Properties & Features ---
+    uint32_t                            extension_count;
     VkExtensionProperties *             extensions;
-    uint32_t                            extensions_count;
+
 
     VkPhysicalDeviceFeatures            device_features     = {};
     VkPhysicalDeviceMemoryProperties    memory_properties   = {};
@@ -56,28 +62,27 @@ typedef struct vk_context_t
 
     VkSemaphore                         frame_timeline_semaphore;
 
+    // --- Bindless Resources ---
     uint32_t                            bindless_max_texture_count;
-    VkDescriptorSet                     bindless_descriptor_set;
-    VkDescriptorPool                    bindless_descriptor_pool;
-    VkDescriptorSetLayout               bindless_descriptor_set_layout;
+    VkDescriptorSet                     bindless_descriptor_set         = VK_NULL_HANDLE;
+    VkDescriptorPool                    bindless_descriptor_pool        = VK_NULL_HANDLE;
+    VkDescriptorSetLayout               bindless_descriptor_set_layout  = VK_NULL_HANDLE;
 
-    gfx_callback                        dbg_log                 = nullptr;
-
+    // --- Default / Fallback Resources ---
+    vk_buffer_t*                        uniform_buffer          = nullptr;
     vk_buffer_t*                        staging_buffer          = nullptr;
     gfx_sampler_t*                      default_sampler         = nullptr;
     vk_texture_t*                       default_texture         = nullptr;
     gfx_texture_t*                      default_storage_texture = nullptr;
     gfx_buffer_t*                       default_storage_buffer  = nullptr;
 
-    VkRenderPass                        default_renderpass      = nullptr;
+    VkRenderPass                        vk_default_renderpass      = nullptr;
 
-
- #ifdef AMD_VULKAN_MEMORY_ALLOCATOR_H
-    VmaAllocator                        vma_allocator;
- #endif
-
+    // --- Command Buffers ---
     vk_command_buffer_t*                cmd_buffer_pool[32];
     uint32_t                            cmd_pool_size;
+
+    // --- Global Object Resource Pools --
     gfx_handle_pool_t*                  surface_pool;
     gfx_handle_pool_t*                  render_target_pool;
 
@@ -89,7 +94,10 @@ typedef struct vk_context_t
     gfx_handle_pool_t *                 pipeline_pool;
     gfx_handle_pool_t *                 compute_pipeline_pool;
 
+    //gfx_linked_list_t*                  descriptor_set_pool_list; //
 
+        // --- Debug & Callbacks ---
+    gfx_callback                        dbg_log = nullptr;
     PFN_vkSetDebugUtilsObjectNameEXT    vk_dbg_set_object_name;
     PFN_vkCmdBeginDebugUtilsLabelEXT    vk_dbg_cmd_push_label;
     PFN_vkCmdEndDebugUtilsLabelEXT      vk_dbg_cmd_pop_label;
@@ -99,26 +107,26 @@ typedef struct vk_context_t
 typedef struct vk_surface_t {
     gfx_surface_t                       handle;
 
-    intptr_t                            window_handle;
-    uint32_t                            width;
-    uint32_t                            height;
-    VkBool32                            vsync;
+    intptr_t                            window_handle;  // OS-specific window handle (HWND, NSWindow, etc.)
+    uint32_t                            width;          // Framebuffer width in pixels
+    uint32_t                            height;         // Framebuffer height in pixels
+    VkBool32                            vsync;          // Vertical synchronization flag
 
-    gfx_pixel_format                    format;
-    gfx_sample_count                    sample_count;
+    gfx_pixel_format                    format;         // High-level surface pixel format
+    gfx_sample_count                    sample_count;   // MSAA sample count
 
-    VkFormat                            depth_format;
+    VkFormat                            depth_format;    // Selected depth/stencil format for the surface
 
     VkSurfaceKHR                        surface;
     VkSwapchainKHR                      swapchain;
-    VkRenderPass                        renderpass;
+    VkRenderPass                        render_pass;
 
-    VkFence                             fences[MAX_FRAME_IN_FLIGHT];
-    VkSemaphore                         semaphore_image_available[MAX_FRAME_IN_FLIGHT];        // Wait Semaphores
-    VkSemaphore                         semaphore_rendering_finished[MAX_FRAME_IN_FLIGHT];     // Signal Semaphores
+    VkFence                             fences[MAX_FRAME_IN_FLIGHT];                        // CPU-GPU frame execution fences
+    VkSemaphore                         semaphore_image_available[MAX_FRAME_IN_FLIGHT];     // Wait Semaphores
+    VkSemaphore                         semaphore_rendering_finished[MAX_FRAME_IN_FLIGHT];  // Signal Semaphores
 
-    uint32_t                            frame_index;
-    uint32_t                            swapchain_image_index;
+    uint32_t                            current_frame;          // Index of the current CPU frame (0 to MAX_FRAME_IN_FLIGHT - 1)
+    uint32_t                            swapchain_image_index;  // Index of the acquired swapchain image
     
     gfx_frame_t                         frames[MAX_FRAME_IN_FLIGHT];
 
@@ -155,10 +163,10 @@ typedef struct vk_texture_t {
     VkImage                             image;
     VkImageView                         view;
     VkDeviceMemory                      memory;
-    uint32_t                            memory_size;
+    VkDeviceSize                        memory_size;
     uint32_t                            width;
     uint32_t                            height;
-    uint32_t                            mip_levels;
+    uint32_t                            mip_count;
 } vk_texture_t;
 
 
@@ -166,10 +174,10 @@ typedef struct vk_buffer_t {
     gfx_buffer_t                        handle;
     VkBuffer                            buffer;
     VkDeviceMemory                      memory;
-    VkBufferUsageFlagBits               usage;
+    VkBufferUsageFlags                  usage;
 
-    bool                                mapped;
-    uint32_t                            buffer_size;
+    bool                                is_mapped;
+    VkDeviceSize                        buffer_size;
     void*                               data_ptr;
 } vk_buffer_t;
 
@@ -178,20 +186,24 @@ typedef struct vk_shader_t {
     gfx_shader_t                        handle;
 
     vk_context_t *                      ctx;
-    const char*                         lable = nullptr;
-    uint32_t                            stages_count;
-    VkPipelineShaderStageCreateInfo     stages[gfx_shader_count];
+    const char*                         label = nullptr;
 
-    uint16_t                            hash;
+    uint32_t                            stage_count;               // used in pipeline creation
+    VkPipelineShaderStageCreateInfo     stages[gfx_shader_count];   //
+
+    uint32_t                            hash32;
     uint32_t                            uniform_count;
     gfx_uniform_t *                     uniforms;
-    VkDescriptorSetLayoutBinding*       bindings;
 
-    VkDescriptorSetLayout               layout;
+    uint32_t                            set_count;          // max set + 1
+    VkDescriptorSetLayout               set_layouts[GFX_MAX_DESCRIPTOR_SETS];
+    uint32_t                            set_binding_count[GFX_MAX_DESCRIPTOR_SETS] = { 0 };       // per set
+    VkDescriptorSetLayoutBinding*       set_bindings[GFX_MAX_DESCRIPTOR_SETS] = { 0 };    // per set
+
     VkPipelineLayout                    pipeline_layout;
 
-    vk_descriptor_pool_t *              pool;
-    gfx_handle_pool_t *                 descriptor_set_pool;
+    vk_descriptor_pool_t *              pool;                   //todo: outdated, current pool
+    gfx_handle_pool_t *                 descriptor_set_pool;    //todo: outdated, pool of pools
 } vk_shader_t;
 
 
@@ -206,53 +218,48 @@ typedef struct vk_render_target_t {
     vk_texture_t                        resolve_attachments;    // surface swapchain if msaa
 
    // tr_render_target
-    VkExtent2D                          extend;
+    VkExtent2D                          extent;
     VkRenderPass                        renderpass;
     VkFramebuffer                       framebuffer;
 } vk_render_target_t;
 
 
 
-typedef struct vk_swapchain_t {
-    gfx_swapchain_t                     handle;
-
-    intptr_t                            window_handle;
-    VkSwapchainKHR                      swapchain;
-    VkRenderPass                        renderpass;
-    VkFramebuffer                       framebuffers[4];
-    VkExtent2D                          extend;
-    vk_render_target_t                  target;
-} vk_swapchain_t;
-
 typedef struct vk_descriptor_pool_t {
-    VkDescriptorPool                    pool;
-    uint32_t                            capacity;
-    uint32_t                            free_set_count;
-    uint32_t                            next_free;
+    uint32_t                            bindings_hash;          // Hash of descriptor layout bindings for validation
 
-    vk_buffer_t *                       ubo_buffer;
-    vk_descriptor_set_t *               sets;
+    VkDescriptorPool                    pool;                   // Native Vulkan descriptor pool handle
+    uint32_t                            capacity;               // Total number of descriptor sets available in this pool
+    uint32_t                            free_set_count;         // Remaining number of unallocated descriptor sets
+    uint32_t                            next_free_index;        // Optimization hint pointing to the next likely free slot
 
-    VkWriteDescriptorSet *              writes;
-    struct vk_write_info_t*             write_infos;
+    uint64_t*                           bitset_mask;            // Array of bitmasks tracking allocation status per set
+    uint32_t                            bitset_word_count;      // Number of 64-bit words in the bitset_mask array
+
+    vk_buffer_t*                        ubo_buffer;             // Cached reference to the backing uniform buffer object
+    vk_descriptor_set_t*                descriptor_sets;        // Array of managed descriptor set wrappers (size equals capacity)
+
+    VkWriteDescriptorSet*               descriptor_writes;      // Pre-allocated array of write structures for batch updates
+    struct vk_write_info_t*             write_infos;            // Additional update metadata paired with descriptor_writes
 } vk_descriptor_pool_t;
+
 
 
 typedef struct vk_descriptor_set_t {
     gfx_descriptor_set_t                handle;
 
     vk_shader_t *                       shader;
-    vk_descriptor_pool_t *              pool;
-    uint8_t *                           uboptr;
-    uint32_t                            ubo_offset;
+    vk_descriptor_pool_t *              pool;                   // Owner pool from which this set was allocated
+    uint8_t *                           ubo_mapped_data;        // Pointer to the mapped uniform buffer data chunk
+    uint32_t                            ubo_offset;             // Byte offset inside the pool's global UBO buffer
 
-    VkBool32                            isfree;
-    VkBool32                            dirty;
+    VkBool32                            is_free;                // Flag indicating if this set slot is unallocated
+    VkBool32                            is_dirty;               // Flag indicating if descriptors need to be updated/rebound
     uint32_t                            index_in_pool;
     VkDescriptorSet                     descriptor_set;
 
-    VkWriteDescriptorSet *              writes;
-    struct vk_write_info_t *            write_infos;
+    VkWriteDescriptorSet *              writes;                 // Points to a sub-array inside the parent pool
+    struct vk_write_info_t *            write_infos;            // Points to a sub-array inside the parent pool
 } vk_descriptor_set_t;
 
 
@@ -260,8 +267,8 @@ typedef struct vk_descriptor_set_t {
 typedef struct vk_command_buffer_t {
     gfx_command_buffer_t                handle;
 
-    vk_context_t *                      ctx;
-    uint32_t                            thread_id;
+    vk_context_t *                      ctx;                    // Pointer to the parent Vulkan context
+    uint32_t                            thread_id;              // ID of the CPU thread owning this command buffer
 
     VkDevice                            device              = VK_NULL_HANDLE;
     VkCommandPool                       pool                = VK_NULL_HANDLE;
@@ -299,6 +306,9 @@ gfx_api void    vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkForma
 
 gfx_api void    vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
 gfx_api void    vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+gfx_api uint32_t vk_shader_get_descriptor_set_count(gfx_shader_t* shader);
+
+
 gfx_api void    vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
 gfx_api void    vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
 gfx_api void    vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);

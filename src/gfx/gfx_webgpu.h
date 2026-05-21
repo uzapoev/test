@@ -51,7 +51,7 @@ typedef struct wgpu_shader_t {
 
     wgpu_context_t*                 context;
 
-    uint16_t                        hash; // stage flags
+    uint32_t                        hash; // stage flags
     uint32_t                        flags; // stage flags
     uint32_t                        count;
 
