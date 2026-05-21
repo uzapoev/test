@@ -3,11 +3,24 @@
 
 #include "gfx.h"
 
-#ifdef VULKAN_AVAILABLE
 
-#ifdef GFX_PLATFORM_WIN
-#define VK_USE_PLATFORM_WIN32_KHR
+#if defined(_WIN32) && __has_include(<vulkan/vulkan.h>)
+    #define VULKAN_AVAILABLE
+    #define VK_USE_PLATFORM_WIN32_KHR
 #endif
+
+#if defined(__ANDROID__) && __has_include(<vulkan/vulkan.h>)
+    #define VULKAN_AVAILABLE
+    #define VK_USE_PLATFORM_ANDROID_KHR
+#endif
+
+#if defined(__APPLE__) && __has_include(<vulkan/vulkan.h>)
+    #define VULKAN_AVAILABLE
+    #error todo: VK_USE_PLATFORM_ 
+#endif
+
+
+#ifdef VULKAN_AVAILABLE
 
 #include <vulkan/vulkan.h>
 

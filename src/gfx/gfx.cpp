@@ -232,13 +232,13 @@ extern void gfx_init_dx12(gfx_api_pfn* func_table);
 
 gfx_api gfx_backend  gfx_detect_backend()
 {
-#if defined(GFX_PLATFORM_APPLE)
+#if defined(__APPLE__)
     return gfx_backend_metal;
-#elif defined(GFX_PLATFORM_ANDROID)
+#elif defined(__ANDROID__)
     return gfx_backend_vulkan;
-#elif defined(GFX_PLATFORM_WEB)
+#elif defined(__EMSCRIPTEN__)
     return gfx_backend_webgpu;
-#elif defined(GFX_PLATFORM_WIN)
+#elif defined(_WIN32)
     return gfx_backend_vulkan;
 #else
     #error "unknown gfx platform"

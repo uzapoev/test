@@ -2,7 +2,11 @@
 #define __gfx_metal_h__
 
 #include "gfx.h"
-#include "gfx_stub.h"
+
+#if defined(__APPLE__) && __has_include(<Metal/Metal.h>)
+    #define METAL_AVAILABLE
+#endif
+
 
 #if METAL_AVAILABLE
 #import <Foundation/Foundation.h>

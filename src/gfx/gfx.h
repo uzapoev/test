@@ -48,22 +48,6 @@
 #endif
 
 
-#ifdef _WIN32
-    #define     GFX_PLATFORM_WIN
-    #define     VULKAN_AVAILABLE
-
-#elif defined(__APPLE__)
-    #define     GFX_PLATFORM_APPLE
-#elif defined(__ANDROID__)
-    #define     GFX_PLATFORM_ANDROID
-    #define     VULKAN_AVAILABLE
-#elif defined(EMSCRIPTEN)
-    #define     GFX_PLATFORM_WEB
-#else
-    #error gfx unsupported platform
-#endif
-
-
 /**
  * @brief API function execution results.
  */
