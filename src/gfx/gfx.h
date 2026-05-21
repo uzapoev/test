@@ -132,12 +132,12 @@ typedef enum gfx_texture_type {
 
 
 typedef enum gfx_texture_usage_flags {
-    gfx_texture_usage_none          = 0,   /**< Defaults to gfx_texture_usage_shader_read for standard assets */
-    gfx_texture_usage_shader_read   = 1 << 0, /**< Texture can be sampled inside shaders (e.g., texture2D in Slang) */
-    gfx_texture_usage_render_target = 1 << 1, /**< Texture can be bound as a Color or Depth attachment in dynamic passes */
-    gfx_texture_usage_storage       = 1 << 2, /**< Texture can be used as a Read-Write Compute image object (e.g., RWTexture2D) */
-    gfx_texture_usage_transfer_src  = 1 << 3, /**< Texture can be used as a source for blit/copy operations */
-    gfx_texture_usage_transfer_dst  = 1 << 4, /**< Texture can be used as a destination for blit/copy operations */
+    gfx_texture_usage_none          = 0,        /**< Defaults to gfx_texture_usage_shader_read for standard assets */
+    gfx_texture_usage_shader_read   = 1 << 0,   /**< Texture can be sampled inside shaders (e.g., texture2D in Slang) */
+    gfx_texture_usage_render_target = 1 << 1,   /**< Texture can be bound as a Color or Depth attachment in dynamic passes */
+    gfx_texture_usage_storage       = 1 << 2,   /**< Texture can be used as a Read-Write Compute image object (e.g., RWTexture2D) */
+    gfx_texture_usage_transfer_src  = 1 << 3,   /**< Texture can be used as a source for blit/copy operations */
+    gfx_texture_usage_transfer_dst  = 1 << 4,   /**< Texture can be used as a destination for blit/copy operations */
 } gfx_texture_usage_flags;
 
 /**
@@ -803,6 +803,9 @@ typedef struct gfx_frame_t {
     uint32_t                    swapchain_image_index;      /**< Current active texture surface image target slot returned from swapchain engine */
     gfx_surface_t*              surface;                    /**< Active presentation window viewport surface abstraction */
     gfx_render_target_t*        target;                     /**< Active render target frame buffer containing current color and depth views */
+
+    gfx_texture_t*              color_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
+    gfx_texture_t*              depth_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
     gfx_command_buffer_t*       cmd;                        /**< Primary command buffer instance logging commands generated during this frame step */
 } gfx_frame_t;
 

@@ -303,105 +303,114 @@ typedef struct vk_command_buffer_t {
 } vk_command_buffer_t;
 
 
-gfx_api void    vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** ctx);
-gfx_api void    vk_destroy_renderer(gfx_context_t* ctx);
+gfx_api void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** ctx);
+gfx_api void vk_destroy_renderer(gfx_context_t* ctx);
 
-gfx_api void    vk_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
+gfx_api void vk_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
-gfx_api void    vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** surface);
-gfx_api void    vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface);
+// surface
+gfx_api void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** surface);
+gfx_api void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface);
 
-void            vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
-void            vk_frame_end(gfx_frame_t* surface);
+// frame
+gfx_api void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
+gfx_api void vk_frame_end(gfx_frame_t* surface);
 
+// buffer
+gfx_api void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+gfx_api void vk_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+gfx_api void vk_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer);
 
-// todo: add prefered options for surface format
-gfx_api void    vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkFormat depthformat, VkRenderPass * renderpass);
-
-gfx_api void    vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
-gfx_api void    vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+// shaders
+gfx_api void     vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
 gfx_api uint32_t vk_shader_get_descriptor_set_count(gfx_shader_t* shader);
-
-
-gfx_api void    vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
-gfx_api void    vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
-gfx_api void    vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-gfx_api void    vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
-gfx_api void    vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
-gfx_api void    vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
-gfx_api void    vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-gfx_api void    vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
-
-
-gfx_api void    vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);
-gfx_api void    vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);
-gfx_api void    vk_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler);
-gfx_api void    vk_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture);
-gfx_api void    vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
-gfx_api void    vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
-gfx_api void    vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* desc);
-gfx_api void    vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
-gfx_api void    vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
-gfx_api void    vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
-
-gfx_api void    vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
-gfx_api void    vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-
-gfx_api void    vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-
-// textures / mipmaps / blit (WIP)
-gfx_api void    vk_update_texture_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
-gfx_api void    vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-gfx_api void    vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
-gfx_api void    vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
-gfx_api void    vk_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
-
 gfx_api uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name);
-gfx_api void    vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
-gfx_api void    vk_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset);
-gfx_api void    vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
-gfx_api void    vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
+gfx_api void     vk_shader_destroy(gfx_context_t* ctx, gfx_shader_t* buffer);
 
-gfx_api void    vk_cmd_begin(gfx_command_buffer_t* cmd);
+// descripor set
+gfx_api void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
+gfx_api void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+gfx_api void vk_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
+gfx_api void vk_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset);
+gfx_api void vk_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
+gfx_api void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
 
-gfx_api void    vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+// sampler
+gfx_api void vk_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+gfx_api void vk_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler);
 
-gfx_api void    vk_cmd_end_pass(gfx_command_buffer_t* cmd);
+// texture
+gfx_api void vk_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+gfx_api void vk_texture_destroy(gfx_context_t* ctx, gfx_texture_t* texture);
 
-gfx_api void    vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+gfx_api void vk_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+gfx_api void vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
+gfx_api void vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+gfx_api void vk_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
 
-gfx_api void    vk_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+// pipeline
+gfx_api void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api void vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 
-gfx_api void    vk_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+// compute pipeline
+gfx_api void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
+gfx_api void vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
-gfx_api void    vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
+// mesh pipeline
+gfx_api void vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
+gfx_api void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* desc);
 
-gfx_api void    vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
-
-gfx_api void    vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
-
-gfx_api void    vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-
-gfx_api void    vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
-
-gfx_api void    vk_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
-
-gfx_api void    vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
-
-gfx_api void    vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
-
-gfx_api void    vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
-
-gfx_api void    vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char * marker);
-
-gfx_api void    vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
-
-gfx_api void    vk_cmd_end(gfx_command_buffer_t* cmd);
-
-gfx_api void    vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+// raytrace pipeline
+gfx_api void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+gfx_api void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
 
+gfx_api [[deprecated("")]] void    vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
+gfx_api [[deprecated("")]] void    vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
 
+gfx_api [[deprecated("non public")]] void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
+gfx_api [[deprecated("non public")]] void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("non public")]] void vk_cmd_begin(gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("non public")]] void vk_cmd_end(gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("non public")]] void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+
+
+gfx_api void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+             
+gfx_api void vk_cmd_end_pass(gfx_command_buffer_t* cmd);
+             
+gfx_api void vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+             
+gfx_api void vk_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+             
+gfx_api void vk_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+             
+gfx_api void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
+             
+gfx_api void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
+             
+gfx_api void vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
+             
+gfx_api void vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+             
+gfx_api void vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+             
+gfx_api void vk_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
+             
+gfx_api void vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+             
+gfx_api void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+             
+gfx_api void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+             
+gfx_api void vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char * marker);
+             
+gfx_api void vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
+
+
+
+extern void    _vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkFormat depthformat, VkRenderPass* renderpass);
 extern void     vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name);
 extern void     vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name);
 extern void     vk_debug_set_buffer_name(vk_context_t* ctx, vk_buffer_t* buffer, const char* name);

@@ -1062,7 +1062,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         ubo_descriptor.mapped               = true;
         ubo_descriptor.size                 = cfg->limits.uniform_buffer_size;
         ubo_descriptor.usage                = gfx_buffer_usage_uniform;
-    vk_create_buffer(&vctx->handle, &ubo_descriptor, &uniform_buffer);
+    vk_buffer_create(&vctx->handle, &ubo_descriptor, &uniform_buffer);
     vctx->uniform_buffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, uniform_buffer->idx);
 
     //staging buffer
@@ -1072,7 +1072,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         staging_descriptor.mapped           = true;
         staging_descriptor.size             = cfg->limits.staging_buffer_size;
         staging_descriptor.usage            = gfx_buffer_usage_staging;
-    vk_create_buffer(&vctx->handle, &staging_descriptor, &staging_buffer);
+    vk_buffer_create(&vctx->handle, &staging_descriptor, &staging_buffer);
     vctx->staging_buffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, staging_buffer->idx);
 
     // default sampler
@@ -1081,7 +1081,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         sampler_descriptor.minmag           = gfx_filter_point;
         sampler_descriptor.mipmap           = gfx_filter_point;
         sampler_descriptor.mode             = gfx_address_mode_repeat;
-    vk_create_sampler(&vctx->handle, &sampler_descriptor, &vctx->default_sampler);
+    vk_sampler_create(&vctx->handle, &sampler_descriptor, &vctx->default_sampler);
     
     // default texture
     gfx_texture_t* default_texture = nullptr;
@@ -1093,7 +1093,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         default_texture_desc.format       = gfx_pixel_format_rgba8;
         default_texture_desc.mip_levels   = 3;
         default_texture_desc.data         = &_colors[0];
-    vk_create_texture(&vctx->handle, &default_texture_desc, &default_texture);
+    vk_texture_create(&vctx->handle, &default_texture_desc, &default_texture);
     vctx->default_texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, default_texture->idx);
 
     // default texture storage
@@ -1103,8 +1103,8 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         default_texture_storage_desc.height   = 32;
         default_texture_storage_desc.depth    = 1;
         default_texture_storage_desc.format   = gfx_pixel_format_rgba8;
-        default_texture_storage_desc.storage  = 1;
-    vk_create_texture(&vctx->handle, &default_texture_storage_desc, &vctx->default_storage_texture);
+        default_texture_storage_desc.usage_flags  = gfx_texture_usage_storage;
+    vk_texture_create(&vctx->handle, &default_texture_storage_desc, &vctx->default_storage_texture);
 
     // bindless texture pool and set
     if(vctx->bindless_max_texture_count > 0)
@@ -1166,8 +1166,8 @@ void vk_destroy_renderer(gfx_context_t * ctx)
     assert(ctx);
     vk_context_t* vctx = (vk_context_t*)ctx;
     
-    vk_destroy_sampler(ctx, vctx->default_sampler);
-    vk_destroy_texture(ctx, &vctx->default_texture->handle);
+    vk_sampler_destroy(ctx, vctx->default_sampler);
+    vk_texture_destroy(ctx, &vctx->default_texture->handle);
     _gfx_free(vctx, vctx->extensions);
 
     vkDestroyDevice(vctx->vk_device, nullptr);
@@ -1253,7 +1253,7 @@ void _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
 
     // render pass
     if (surface->render_pass == VK_NULL_HANDLE)
-        vk_create_renderpass(ctx, surface_format.format, surface->depth_format, &surface->render_pass);
+        _vk_create_renderpass(ctx, surface_format.format, surface->depth_format, &surface->render_pass);
 
     // color attachments
     VkImage images[8] = {};
@@ -1463,7 +1463,7 @@ void vk_frame_end(gfx_frame_t* frame)
 
 // --- SWAPCHAIN ---
 
-void vk_create_renderpass(vk_context_t* vctx, VkFormat colorformat, VkFormat depthformat, VkRenderPass* renderpass)
+void _vk_create_renderpass(vk_context_t* vctx, VkFormat colorformat, VkFormat depthformat, VkRenderPass* renderpass)
 {
     VkAttachmentDescription color_attachment = {};
     color_attachment.format           = colorformat;
@@ -1530,7 +1530,7 @@ void vk_create_renderpass(vk_context_t* vctx, VkFormat colorformat, VkFormat dep
 
 
 // --- BUFFER ---
-void vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
+void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
 {
     vk_context_t * vctx = from_ctx(ctx);
 
@@ -1582,14 +1582,14 @@ void vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
     buffer->is_mapped = mapped;
 
     _vk_create_buffer(vctx, desc->size, usage_flag, memory_flag, buffer);
-    vk_update_buffer_data(ctx, &buffer->handle, desc->data, desc->size, 0);
+    vk_buffer_update_data(ctx, &buffer->handle, desc->data, desc->size, 0);
 
     *out_buffer = &buffer->handle;
     vk_gpu_memstatus(ctx);
 }
 
 
-void vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
+void vk_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset)
 {
     auto vkctx = (vk_context_t*)(ctx);
     auto vkbuf = (vk_buffer_t*)gfx_pool_map(vkctx->buffers_pool, buffer->idx);
@@ -1647,7 +1647,7 @@ void vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data,
 }
 
 
-void vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)
+void vk_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer)
 {
     vk_context_t* vctx = from_ctx(ctx);
     vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_pool_map(vctx->buffers_pool, buffer->idx);
@@ -1729,7 +1729,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
             buff_desc.label = "ubo";
             buff_desc.usage = gfx_buffer_usage_uniform;
             buff_desc.size  = ubo_buffer_size;
-        vk_create_buffer(&ctx->handle, &buff_desc, &buffer);
+        vk_buffer_create(&ctx->handle, &buff_desc, &buffer);
 
         ubo_buffer = (vk_buffer_t*)gfx_pool_map(ctx->buffers_pool, buffer->idx);
     }
@@ -1943,7 +1943,7 @@ static void _vk_create_descriptor_layouts(vk_context_t * ctx, vk_shader_t* shade
 
 
 
-void vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader)
+void vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader)
 {
     vk_context_t* vctx = from_ctx(ctx);
 
@@ -2083,7 +2083,7 @@ uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name)
 }
 
 
-void vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* _shader)
+void vk_shader_destroy(gfx_context_t* ctx, gfx_shader_t* _shader)
 {
     vk_context_t* vkctx = from_ctx(ctx);
 
@@ -2097,7 +2097,7 @@ void vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* _shader)
 
 // --- SAMPLER ---
 
-void vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler)
+void vk_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler)
 {
     assert(ctx && desc && out_sampler);
     *out_sampler = nullptr;
@@ -2144,7 +2144,7 @@ void vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler
 }
 
 
-void vk_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler)
+void vk_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler)
 {
     vk_context_t* vctx = from_ctx(ctx);
     vk_sampler_t* vks = (vk_sampler_t*)sampler;
@@ -2156,7 +2156,7 @@ void vk_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler)
 
 // --- TEXTURE ---
 
-void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
+void vk_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
 {
     if( (ctx == nullptr) || (desc == nullptr) || (out_texture == nullptr))
         return;
@@ -2249,7 +2249,7 @@ void vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
 }
 
 
-void vk_update_texture_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+void vk_texture_update_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
 {
     auto vkctx = (vk_context_t*)ctx;
     gfx_stub_not_implemented(vkctx ? vkctx->dbg_log : nullptr, "vk_update_image_data");
@@ -2460,7 +2460,7 @@ void vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
 }
 
 
-void vk_destroy_texture(gfx_context_t* ctx, gfx_texture_t* _texture)
+void vk_texture_destroy(gfx_context_t* ctx, gfx_texture_t* _texture)
 {
     vk_context_t* vctx = from_ctx(ctx);
 
@@ -2758,7 +2758,7 @@ uint64_t _descriptor_set_layout_hash(VkDescriptorSetLayoutBinding* bindings, siz
     return hash;
 };
 
-void vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
+void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
 {
     assert(ctx && shader && out_set);
 
@@ -2804,7 +2804,7 @@ void vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
 }
 
 
-void vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size)
+void vk_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size)
 {
     if (set == NULL || handle == 0)
         return;
@@ -2836,12 +2836,12 @@ void vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void
 }
 
 
-void vk_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset)
+void vk_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset)
 {
 }
 
 
-void vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)
+void vk_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)
 {
     if (set == NULL || handle == 0)
         return;
@@ -2876,7 +2876,7 @@ void vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_text
 }
 
 
-void vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)
+void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)
 {
     if (set == NULL || handle == 0)
         return;
@@ -2905,7 +2905,7 @@ void vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_samp
 }
 
 
-void vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)
+void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)
 {
     if (!ctx || !descriptor)
         return;

@@ -793,28 +793,28 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_frame_end               = vk_frame_end;
 
     // BUFFER
-    func_table->pfn_create_buffer           = vk_create_buffer;
-    func_table->pfn_update_buffer_data      = vk_update_buffer_data;
-    func_table->pfn_destroy_buffer          = vk_destroy_buffer;
+    func_table->pfn_create_buffer           = vk_buffer_create;
+    func_table->pfn_update_buffer_data      = vk_buffer_update_data;
+    func_table->pfn_destroy_buffer          = vk_buffer_destroy;
 
     // SHADER
-    func_table->pfn_create_shader           = vk_create_shader;
+    func_table->pfn_create_shader           = vk_shader_create;
     func_table->pfn_shader_get_descriptor_set_count = vk_shader_get_descriptor_set_count;
     func_table->pfn_uniform_location        = vk_uniform_location;
-    func_table->pfn_destroy_shader          = vk_destroy_shader;
+    func_table->pfn_destroy_shader          = vk_shader_destroy;
 
     // SAMPLER
-    func_table->pfn_create_sampler          = vk_create_sampler;
-    func_table->pfn_destroy_sampler         = vk_destroy_sampler;
+    func_table->pfn_create_sampler          = vk_sampler_create;
+    func_table->pfn_destroy_sampler         = vk_sampler_destroy;
 
     // TEXTURE
-    func_table->pfn_create_texture          = vk_create_texture;
-    func_table->pfn_update_texture_data     = vk_update_texture_data;
+    func_table->pfn_create_texture          = vk_texture_create;
+    func_table->pfn_update_texture_data     = vk_texture_update_data;
     func_table->pfn_update_bindless_texture = vk_texture_update_bindless;
     func_table->pfn_texture_generate_mipmap = vk_texture_generate_mipmap;
     func_table->pfn_blit_image              = vk_texture_blit;
     func_table->pfn_texture_get_data        = vk_texture_get_data;
-    func_table->pfn_destroy_texture         = vk_destroy_texture;
+    func_table->pfn_destroy_texture         = vk_texture_destroy;
 
     // PIPELINE
     func_table->pfn_create_pipeline         = vk_create_pipeline;
@@ -831,12 +831,12 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_destroy_render_target   = vk_destroy_render_target;
 
     // DESCRIPTOR SET
-    func_table->pfn_create_descriptor_set   = vk_create_descriptor_set;
-    func_table->pfn_uniform_set_buffer      = vk_uniform_set_buffer;
-    func_table->pfn_uniform_set_buffer_data = vk_uniform_set_buffer_data;
-    func_table->pfn_uniform_set_texture     = vk_uniform_set_texture;
-    func_table->pfn_uniform_set_sampler     = vk_uniform_set_sampler;
-    func_table->pfn_destroy_descriptor_set  = vk_destroy_descriptor_set;
+    func_table->pfn_create_descriptor_set   = vk_descriptor_set_create;
+    func_table->pfn_uniform_set_buffer      = vk_descriptor_set_write_buffer;
+    func_table->pfn_uniform_set_buffer_data = vk_descriptor_set_write_buffer_data;
+    func_table->pfn_uniform_set_texture     = vk_descriptor_set_write_texture;
+    func_table->pfn_uniform_set_sampler     = vk_descriptor_set_write_sampler;
+    func_table->pfn_destroy_descriptor_set  = vk_descriptor_set_destroy;
 
     // COMMAND BUFFER
     func_table->pfn_create_cmd              = vk_cmd_create;
