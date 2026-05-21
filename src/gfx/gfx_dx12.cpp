@@ -6,7 +6,6 @@
 #include <d3d12.h>
 
 #include <string.h>
-#include "gfx_stub.h"
 
 // Minimal stub backend: provides all required entrypoints so the project links.
 // The implementation intentionally does not talk to D3D12 yet.

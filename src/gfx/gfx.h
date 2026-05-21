@@ -731,13 +731,16 @@ typedef struct gfx_compute_pipeline_desc_t {
     gfx_shader_t*               shader;                     /**< Pointer to the compiled single-stage compute shader state machine */
 } gfx_compute_pipeline_desc_t;
 
+
 // todo: for future mesh shading
-typedef struct gfx_mesh_pipeline_desc_t {
+typedef struct gfx_mesh_pipeline_desc_t{
+    const char*                 label;                  /**< Optional debug metadata string literal identifier */
+    gfx_shader_t*               shader;                 /**< Pointer to the compiled shader containing gfx_shader_mesh (and optionally gfx_shader_amplify) */
+    gfx_render_states_desc_t    render_states;          /**< Comprehensive fixed-function blending, depth, and stencil states */
 } gfx_mesh_pipeline_desc_t;
 
 // todo: for raytracing
-typedef struct gfx_raytrace_pipeline_desc_t {
-} gfx_raytrace_pipeline_desc_t;
+typedef struct gfx_raytrace_pipeline_desc_t;
 
 typedef struct gfx_render_pass_desc_t {
     uint32_t                    clear_color;                /**< Packed hexadecimal RGBA8 color value used to scrub color targets on load */
@@ -853,42 +856,204 @@ gfx_api void                    gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd
 gfx_api void                    gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
 
 
+// ============================================================================
+// --- Mesh Shading Command Recording Dispatches ---
+// ============================================================================
+
+/**
+ * @brief Launches hardware mesh shading execution blocks (Task/Mesh threads) to generate geometry on the GPU.
+ * @note Directly maps to vkCmdDrawMeshTasksEXT and DX12 DispatchMesh behavior.
+ * @param cmd Active command buffer token capturing execution streams changes.
+ * @param task_count_x Number of local workgroups dispatched in the X dimension (launches Task/Amplify shader if present, otherwise Mesh shader directly).
+ * @param task_count_y Number of local workgroups dispatched in the Y dimension.
+ * @param task_count_z Number of local workgroups dispatched in the Z dimension.
+ */
+gfx_api void gfx_cmd_draw_mesh_tasks(gfx_command_buffer_t* cmd, uint32_t task_count_x, uint32_t task_count_y, uint32_t task_count_z);
+
+/**
+ * @brief Launches hardware mesh shading execution blocks where dispatch parameters are read dynamically from a GPU buffer.
+ * @note Directly maps to vkCmdDrawMeshTasksIndirectEXT. Binary layout of the arguments in buffer must match VkDrawMeshTasksIndirectCommandEXT.
+ * @param cmd Active command buffer token capturing execution streams changes.
+ * @param buffer Reference pointer to the hardware buffer containing draw argument data arrays.
+ * @param offset Byte starting offset position inside the bound argument buffer.
+ * @param draw_count Total sequence length of independent indirect draw tokens to execute in sequence loops blocks.
+ * @param stride Memory stride spacing separating independent argument packets elements properties in bytes.
+ */
+gfx_api void gfx_cmd_draw_mesh_tasks_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
 
 
-// https://www.khronos.org/blog/understanding-vulkan-synchronization
-// https://github.com/khronosgroup/vulkan-docs/wiki/synchronization-examples
 
-// WIP: raytracing
-// typedef struct gfx_rt_acceleration_struct {
-//     struct {
-//         gfx_buffer_t *      vertex_buffer;
-//         uint64_t            vertex_offset;
-//         uint32_t            vertex_count;
-//         uint64_t            vertex_stride;
-//         gfx_pixel_format    vertex_format;    // position format, e.g. R32G32B32_FLOAT
-//
-//         gfx_buffer_t *      index_buffer;     // null = non-indexed
-//         uint64_t            index_offset;
-//         uint32_t            index_count;
-//         gfx_index_format    index_format;
-//
-//         gfx_buffer_t *      transform_buffer; // null = identity; 3x4 row-major float
-//         uint64_t            transform_offset;
-//     } triangles;
-//
-//     struct {
-//         gfx_buffer_t *      buffer;
-//         uint64_t            offset;
-//         uint32_t            count;
-//         uint64_t            stride;
-//     } aabbs;
-//
-//     struct {
-//         gfx_buffer_t *      buffer;
-//         uint64_t            offset;
-//         uint32_t            count;
-//     } instances;
-// } gfx_rt_acceleration_struct;
+// ============================================================================
+// --- Ray Tracing Geometry & Acceleration Structures ---
+// ============================================================================
+
+/**
+ * @brief Configuration definitions for ray tracing geometry flags.
+ */
+typedef enum gfx_rt_geometry_flags {
+    gfx_rt_geometry_opaque = 1 << 0, /**< Geometry contains no transparent pixels; skips any-hit shader execution */
+    gfx_rt_geometry_no_duplicate_any_hit = 1 << 1, /**< Prevents duplicate any-hit shader invocations on a single primitive */
+} gfx_rt_geometry_flags;
+
+/**
+ * @brief Describes the vertex and index buffer inputs used to build a Bottom-Level Acceleration Structure (BLAS).
+ */
+typedef struct gfx_rt_geometry_desc_t {
+    gfx_buffer_t* vertex_buffer;          /**< Hardware buffer containing triangle vertex position data */
+    uint32_t                    vertex_stride;          /**< Stride spacing in bytes separating vertex data rows */
+    uint32_t                    vertex_count;           /**< Total number of vertices in the stream */
+    gfx_vertex_format           vertex_format;          /**< Data layout component encoding format (usually float3 or float4) */
+
+    gfx_buffer_t* index_buffer;           /**< Optional hardware buffer containing geometry indices data */
+    uint32_t                    index_count;            /**< Number of indices (set to 0 for non-indexed triangle lists) */
+    gfx_index_format            index_format;           /**< Width format specification of index elements rows */
+
+    uint32_t                    flags;                  /**< Bitmask configurations combining gfx_rt_geometry_flags */
+} gfx_rt_geometry_desc_t;
+
+/**
+ * @brief Ray tracing hardware instance transformation matrix layout.
+ * @note Directly maps to VkTransformMatrixKHR and D3D12_RAYTRACING_INSTANCE_DESC row-major 3x4 layout.
+ */
+typedef struct gfx_rt_transform_t {
+    float matrix[3][4];                                 /**< affine 3x4 transformation matrix array row-major data */
+} gfx_rt_transform_t;
+
+/**
+ * @brief Describes a single BLAS instance placed inside a Top-Level Acceleration Structure (TLAS).
+ */
+typedef struct gfx_rt_instance_desc_t {
+    gfx_rt_transform_t          transform;              /**< Spatial affine 3x4 transformation matrix mapping instance space */
+    uint32_t                    instance_id : 24; /**< Custom user 24-bit identifier accessible inside shaders via gl_InstanceCustomIndexEXT */
+    uint32_t                    mask : 8;  /**< 8-bit visibility test visibility mask to filter ray intersections testing */
+    uint32_t                    instance_offset : 24; /**< Shader Binding Table hit group index calculation offset mapping multiplier */
+    uint32_t                    flags : 8;  /**< Geometry culling flag overrides (e.g., force opaque, cull backface) */
+    gfx_acceleration_structure_t blas;                  /**< Handle referencing the target Bottom-Level Acceleration Structure asset */
+} gfx_rt_instance_desc_t;
+
+/**
+ * @brief Properties required to allocate and generate an Acceleration Structure (TLAS or BLAS).
+ */
+typedef struct gfx_acceleration_structure_desc_t {
+    const char* label;                  /**< Optional debug metadata string literal identifier */
+    bool                        is_top_level;           /**< True to build a TLAS (instancing), False to build a BLAS (geometry triangles) */
+    bool                        allow_update;           /**< Flag enabling fast incremental updates (refitting) instead of full rebuilds */
+
+    // BLAS execution inputs configuration properties
+    uint32_t                    geometry_count;         /**< Length of active geometries description blocks array (BLAS input data) */
+    gfx_rt_geometry_desc_t* geometries;             /**< Array containing geometries description blocks arrays references */
+
+    // TLAS execution inputs configuration properties
+    uint32_t                    instance_count;         /**< Total number of physical BLAS instances to pack inside the structure (TLAS input data) */
+    gfx_buffer_t* instance_buffer;        /**< Hardware buffer holding populated arrays of gfx_rt_instance_desc_t elements */
+} gfx_acceleration_structure_desc_t;
+
+
+
+// ============================================================================
+// --- Ray Tracing Pipelines & Shader Binding Tables ---
+// ============================================================================
+
+/**
+ * @brief Describes a grouped collection of shaders combined inside the ray tracing pipeline state.
+ */
+typedef struct gfx_rt_shader_group_t {
+    gfx_shader_stage            type;                   /**< Functional role identifier mapping groups (RAYGEN, MISS, or CALLABLE) */
+    uint32_t                    general_shader_idx;     /**< Index of the raygen/miss shader entry in the parent pipeline descriptor */
+
+    // Hit Group configuration properties (for closest-hit, any-hit, intersection combinations)
+    uint32_t                    closest_hit_idx;        /**< Index of closest-hit shader, set to 0xFFFFFFFF if unused */
+    uint32_t                    any_hit_idx;            /**< Index of any-hit shader, set to 0xFFFFFFFF if unused */
+    uint32_t                    intersection_idx;       /**< Index of intersection shader, set to 0xFFFFFFFF if unused */
+} gfx_rt_shader_group_t;
+
+/**
+ * @brief Configuration parameters required to compile a full Ray Tracing pipeline state machine.
+ */
+typedef struct gfx_raytrace_pipeline_desc_t {
+    const char*                 label;                  /**< Optional debug metadata string literal identifier */
+    uint32_t                    max_recursion_depth;    /**< Maximum allowed trace depth recursion limits (usually 1 or 2 for performance) */
+
+    uint32_t                    shader_count;           /**< Total independent compiled ray tracing shader binaries length array */
+    gfx_shader_stage_data*      shaders;                /**< Array containing target shader binary sources packages */
+
+    uint32_t                    group_count;            /**< Total compiled pipeline shader linkage combinations groups length array */
+    gfx_rt_shader_group_t*      groups;                 /**< Array defining explicit shader table associations linkage loops rules */
+} gfx_raytrace_pipeline_desc_t;
+
+/**
+ * @brief Configuration descriptor defining Shader Binding Table (SBT) memory allocations maps.
+ */
+typedef struct gfx_sbt_desc_t {
+    gfx_pipeline_raytrace_t* pipeline;               /**< Compile ray tracing pipeline state mapping layouts generation handles */
+
+    uint32_t                    raygen_group_idx;       /**< Pipeline group index mapped into the Ray Generation SBT record section */
+    uint32_t                    miss_group_start_idx;   /**< Pipeline group starting index mapped to the Miss SBT records section */
+    uint32_t                    miss_group_count;       /**< Total sequence length of independent Miss shader records entries arrays */
+    uint32_t                    hit_group_start_idx;    /**< Pipeline group starting index mapped to the Hit Group SBT records section */
+    uint32_t                    hit_group_count;        /**< Total sequence length of independent Hit Group shader records entries arrays */
+} gfx_sbt_desc_t;
+
+
+// ============================================================================
+// --- Ray Tracing Resource Allocation & Construction Routines ---
+// ============================================================================
+
+/**
+ * @brief Allocates empty internal buffers required to drive hardware acceleration structure builds.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Properties configuring geometries lists data weights bounds or instancing scales.
+ * @return A unique type-safe handle to the created acceleration structure.
+ */
+gfx_api gfx_acceleration_structure_t gfx_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc);
+
+/**
+ * @brief Releases hardware allocations bound to an active acceleration structure object.
+ * @param ctx Reference to the active graphics context.
+ * @param acceleration_structure Handle of the structure to destroy.
+ */
+gfx_api void gfx_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t acceleration_structure);
+
+/**
+ * @brief Allocates an organized Shader Binding Table (SBT) buffer backing ray tracing shader dispatches.
+ * @param ctx Reference to the active graphics context.
+ * @param desc Properties defining pipeline group index layouts associations maps rules.
+ * @return A unique type-safe handle to the initialized shader binding table.
+ */
+gfx_api gfx_sbt_t gfx_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc);
+
+/**
+ * @brief Releases hardware storage allocations bound to an active Shader Binding Table buffer.
+ * @param ctx Reference to the active graphics context.
+ * @param sbt Handle of the shader binding table instance to destroy.
+ */
+gfx_api void gfx_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t sbt);
+
+// ============================================================================
+// --- Ray Tracing Command Recording Dispatches ---
+// ============================================================================
+
+/**
+ * @brief Records a command token requesting full GPU acceleration structure geometry generation builds or refit updates.
+ * @param cmd Active command buffer token capturing execution streams steps changes.
+ * @param dst Target acceleration structure handle to build or update.
+ * @param src Optional source acceleration structure handle required if performing incremental refit updates.
+ */
+gfx_api void gfx_cmd_build_acceleration_structure(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t dst, gfx_acceleration_structure_t src);
+
+/**
+ * @brief Dispatches threads executing Ray Generation shader entry loops to trace primitives inside a TLAS.
+ * @param cmd Active command buffer token capturing execution streams steps changes.
+ * @param pipeline Active compiled ray tracing pipeline state engine layout to bind.
+ * @param sbt Active Shader Binding Table buffer supplying memory jumps pointers locations maps.
+ * @param width Horizontal dimension thread grid count dispatch width bounds metrics resolution.
+ * @param height Vertical dimension thread grid count dispatch height bounds metrics resolution.
+ * @param depth Volumetric thickness layer dimension thread grid count dispatch depth bounds metrics resolution.
+ */
+gfx_api void gfx_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
+
+
+
 
 
 // utility
