@@ -20,6 +20,14 @@
 
 #include "spirvflect.h"
 
+#if GFX_ENABLE_VERBOSE
+#define GFX_VERBOSE(exp)            { exp; }
+#define GFX_VERBOSE_IF(cond, exp)   { if(cond) exp; }
+#else
+#define GFX_VERBOSE(exp)            {}
+#define GFX_VERBOSE_IF(cond, exp)   {}
+#endif
+
 extern const char* gfx_to_string(gfx_buffer_usage usage);
 extern const char* gfx_to_string(gfx_shader_stage stage);
 extern const char* gfx_to_string(gfx_texture_type type);
@@ -564,6 +572,7 @@ void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
     wctx->device = device;
     wctx->queue = wgpuDeviceGetQueue(wctx->device);
     wctx->dbglog = settings->dbglog ? settings->dbglog : default_log;
+
 
     GFX_VERBOSE(wctx->dbglog(gfx_msg_info, "wgpu_init()"))
 

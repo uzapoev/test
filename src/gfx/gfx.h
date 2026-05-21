@@ -48,11 +48,6 @@
 #endif
 
 
-#undef GFX_PLATFORM_WIN         // vulkan, dx12, webgpu
-#undef GFX_PLATFORM_APPLE       // metal
-#undef GFX_PLATFORM_ANDROID     // vulkan
-#undef GFX_PLATFORM_WEB         // webgpu
-
 #ifdef _WIN32
     #define     GFX_PLATFORM_WIN
     #define     VULKAN_AVAILABLE
@@ -68,14 +63,6 @@
     #error gfx unsupported platform
 #endif
 
-
-#if GFX_ENABLE_VERBOSE
-    #define GFX_VERBOSE(exp)            { exp; }
-    #define GFX_VERBOSE_IF(cond, exp)   { if(cond) exp; }
-#else
-    #define GFX_VERBOSE(exp)            {}
-    #define GFX_VERBOSE_IF(cond, exp)   {}
-#endif
 
 /**
  * @brief API function execution results.
@@ -1076,8 +1063,6 @@ gfx_api void        gfx_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api void*       gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api size_t      gfx_pool_get_size(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_pool_get_capacity(gfx_handle_pool_t* pool);
-
-#define             gfx_pool_alloc_typed(pool, type, handle)  ((type*)gfx_pool_alloc_data(pool, handle)
 
 
 /*
