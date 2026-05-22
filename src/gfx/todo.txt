@@ -119,7 +119,7 @@ UTILITY
  IMPLEMENTATION STATUS TABLE
 ================================================================================
 
- Function                         | Vulkan | Metal | WebGPU | DX12
+ Function                           | Vulkan | Metal | WebGPU | DX12
 ------------------------------------|--------|-------|--------|------
  init                               |   Y    |   Y   |   Y    |  ~[1]
  get_caps                           |   Y    |   Y   |   N[2] |  ~[1]

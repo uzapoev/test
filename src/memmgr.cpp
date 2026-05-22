@@ -102,7 +102,7 @@ static int log2(size_t x) {
 inline void bitmask_set(uint64_t * _bitmask, size_t index, bool value) {
     size_t w = index / 64;
     size_t b = index % 64;
-    if (value)  _bitmask[w] |= (1ull << b);
+    if (value)  _bitmask[w] |=  (1ull << b);
     else        _bitmask[w] &= ~(1ull << b);
 }
 

@@ -95,6 +95,9 @@ typedef enum gfx_shader_format_flags {
     gfx_shader_format_dxil      = 1 << 1,   /**< DXIL binary formats (Standard for DirectX 12 DXR) */
     gfx_shader_format_msl       = 1 << 2,   /**< Metal Shading Language precompiled binaries (Apple Metal) */
     gfx_shader_format_wgsl      = 1 << 3,   /**< WebGPU Shading Language text/binary tokens formats */
+
+    gfx_shader_format_glsl      = 1 << 4,   /**< */
+    gfx_shader_format_hlsl      = 1 << 5,   /**< */
 } gfx_shader_format_flags;
 
 
@@ -146,7 +149,7 @@ typedef enum gfx_texture_usage_flags {
 typedef enum gfx_uniform_type {
     gfx_uniform_undefined,              /**< Uninitialized or invalid binding type */
     gfx_uniform_ubo,                    /**< Uniform Buffer Object block binding */
-    gfx_uniform_storage,                /**< Structured or ByteAddress storage buffer binding (RW/ReadOnly) */
+    gfx_uniform_storage_buffer,         /**< Structured or ByteAddress storage buffer binding (RW/ReadOnly) */
     gfx_uniform_storage_image,          /**< Read-Write texture image slot (e.g., RWTexture2D) */
     gfx_uniform_sampler,                /**< Texture state sampler (filtering, addressing) */
     gfx_uniform_texture2d,              /**< Standard 2D texture view binding */
@@ -777,6 +780,10 @@ typedef struct gfx_raytrace_pipeline_desc_t;
 typedef struct gfx_render_pass_desc_t {
     uint32_t                    clear_color;                /**< Packed hexadecimal RGBA8 color value used to scrub color targets on load */
     uint32_t                    clear_depth;                /**< Packed depth precision scaling token used to wipe z-buffer values on load */
+
+    gfx_render_target_t*        target;                     // todo: replace to color + depth attachment
+    gfx_texture_t*              color_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
+    gfx_texture_t*              depth_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
 } gfx_render_pass_desc_t;
 
 
@@ -1342,12 +1349,12 @@ typedef enum gfx_rt_geometry_flags {
  * @brief Describes the vertex and index buffer inputs used to build a Bottom-Level Acceleration Structure (BLAS).
  */
 typedef struct gfx_rt_geometry_desc_t {
-    gfx_buffer_t* vertex_buffer;          /**< Hardware buffer containing triangle vertex position data */
+    gfx_buffer_t*               vertex_buffer;          /**< Hardware buffer containing triangle vertex position data */
     uint32_t                    vertex_stride;          /**< Stride spacing in bytes separating vertex data rows */
     uint32_t                    vertex_count;           /**< Total number of vertices in the stream */
     gfx_vertex_format           vertex_format;          /**< Data layout component encoding format (usually float3 or float4) */
 
-    gfx_buffer_t* index_buffer;           /**< Optional hardware buffer containing geometry indices data */
+    gfx_buffer_t*               index_buffer;           /**< Optional hardware buffer containing geometry indices data */
     uint32_t                    index_count;            /**< Number of indices (set to 0 for non-indexed triangle lists) */
     gfx_index_format            index_format;           /**< Width format specification of index elements rows */
 
@@ -1428,7 +1435,7 @@ typedef struct gfx_raytrace_pipeline_desc_t {
  * @brief Configuration descriptor defining Shader Binding Table (SBT) memory allocations maps.
  */
 typedef struct gfx_sbt_desc_t {
-    gfx_pipeline_raytrace_t* pipeline;               /**< Compile ray tracing pipeline state mapping layouts generation handles */
+    gfx_pipeline_raytrace_t*    pipeline;               /**< Compile ray tracing pipeline state mapping layouts generation handles */
 
     uint32_t                    raygen_group_idx;       /**< Pipeline group index mapped into the Ray Generation SBT record section */
     uint32_t                    miss_group_start_idx;   /**< Pipeline group starting index mapped to the Miss SBT records section */
@@ -1552,6 +1559,7 @@ typedef struct gfx_api_pfn
 {
     // CONTEXT
     void     (*pfn_init)     (gfx_settings_t* settings, gfx_context_t** ctx);
+    void     (*pfn_destroy)  (gfx_context_t* ctx);
     void     (*pfn_get_caps) (gfx_context_t* ctx, gfx_caps_t* caps);
 
     // SWAPCHAIN
@@ -1606,14 +1614,6 @@ typedef struct gfx_api_pfn
     void     (*pfn_uniform_set_texture)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
     void     (*pfn_uniform_set_sampler)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
     void     (*pfn_destroy_descriptor_set)  (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
-
-    // COMMAND BUFFER
-    [[deprecated]] void     (*pfn_create_cmd) (gfx_context_t* ctx, gfx_command_buffer_t** cmd);
-    [[deprecated]] void     (*pfn_destroy_cmd)(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-
-    [[deprecated]] void     (*pfn_cmd_begin)    (gfx_command_buffer_t* cmd);
-    [[deprecated]] void     (*pfn_cmd_end)    (gfx_command_buffer_t* cmd);
-    [[deprecated]] void     (*pfn_submit_cmd) (gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
     void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_render_target_t* target);
     void     (*pfn_cmd_end_pass)   (gfx_command_buffer_t* cmd);

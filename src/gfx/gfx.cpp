@@ -247,13 +247,16 @@ gfx_api gfx_backend  gfx_detect_backend()
 
 void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
 {
-    g_tbl = (gfx_api_pfn*)calloc(1, sizeof(gfx_api_pfn));
-    if(!g_tbl)
+    if(g_tbl != nullptr) {
+        _gfx_error(nullptr, gfx_msg_error, "Graphics subsystem is already initialized. Only one instance is allowed.");
         return;
+    }
 
-    #ifndef _WIN32
-    settings->backend = gfx_backend_auto;
-    #endif
+    g_tbl = (gfx_api_pfn*)calloc(1, sizeof(gfx_api_pfn));
+    if(!g_tbl) {
+        _gfx_error(nullptr, gfx_msg_error, "Failed to allocate memory for the graphics API function table.");
+        return;
+    }
 
     gfx_backend backend = settings->backend;
     if( backend == gfx_backend_auto )
@@ -477,24 +480,12 @@ void gfx_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descri
 }
 
 // --- COMMAND BUFFER ---
-gfx_api gfx_command_buffer_t* gfx_cmd_create(gfx_context_t* ctx) {
-    gfx_command_buffer_t* result = nullptr;
-    g_tbl->pfn_create_cmd(ctx, &result);
-    return result;
-}
-
-void gfx_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd) {
-    g_tbl->pfn_destroy_cmd(ctx, cmd);
-}
 
 void gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker) {
     g_tbl->pfn_cmd_push_marker(cmd, marker);
 }
 void gfx_cmd_pop_marker(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_pop_marker(cmd);
-}
-void gfx_cmd_begin(gfx_command_buffer_t* cmd) {
-    g_tbl->pfn_cmd_begin(cmd);
 }
 void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target) {
     g_tbl->pfn_cmd_begin_pass(cmd, target);
@@ -537,12 +528,6 @@ void gfx_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, u
 }
 void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst) {
     g_tbl->pfn_cmd_texture_barrier(cmd, textures, count, src, dst);
-}
-void gfx_cmd_end(gfx_command_buffer_t* cmd) {
-    g_tbl->pfn_cmd_end(cmd);
-}
-void gfx_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options) {
-    g_tbl->pfn_submit_cmd(ctx, cmd, options);
 }
 
 
@@ -735,10 +720,9 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
 
         case gfx_pixel_format_rgba8:            return width * sizeof(uint32_t);
 
-        case gfx_pixel_format_etc1:             return (gfx_max(2, (width >> 2)) * 8);
-        case gfx_pixel_format_etc2_rgba8:       return (gfx_max(2, (width >> 2)) * 16);
-        case gfx_pixel_format_etc2_rgb8a1:      return (gfx_max(2, (width >> 2)) * 8);
-
+        case gfx_pixel_format_etc1:             return gfx_max(2, (width >> 2)) * 8;
+        case gfx_pixel_format_etc2_rgba8:       return gfx_max(2, (width >> 2)) * 16;
+        case gfx_pixel_format_etc2_rgb8a1:      return gfx_max(2, (width >> 2)) * 8;
 
         case gfx_pixel_format_bc1:              return gfx_max(1, width >> 2) * 8;
         case gfx_pixel_format_bc3:              return gfx_max(1, width >> 2) * 16;
@@ -771,17 +755,27 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
 uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
 {
     return ((n + alignment - 1) / alignment) * alignment; 
-  //  return (n + alignment - 1) & ~(alignment - 1);
 }
 #pragma endregion
 
 
 #ifdef VULKAN_AVAILABLE
 #include "gfx_vulkan.h"
+#endif
+
+#define assign_extern( pfn_dst, ret_type, func_name, func_args)  { extern ret_type func_name func_args; pfn_dst = func_name; }
 
 void gfx_init_vulkan(gfx_api_pfn* func_table)
 {
     memset(func_table, 0, sizeof(gfx_api_pfn));
+    #ifdef VULKAN_AVAILABLE
+    assign_extern( func_table->pfn_init,     void, vk_create_renderer,  (gfx_settings_t * settings, gfx_context_t ** ctx) );
+    assign_extern( func_table->pfn_destroy,  void, vk_destroy_renderer, (gfx_context_t * ctx) );
+    assign_extern( func_table->pfn_get_caps, void, vk_get_caps,         (gfx_context_t * ctx, gfx_caps_t * caps) );
+
+    assign_extern(func_table->pfn_surface_create,  void, vk_surface_create, (gfx_context_t * ctx, gfx_surface_desc_t * desc, gfx_surface_t ** out_surface) );
+    assign_extern(func_table->pfn_surface_destroy, void, vk_surface_destroy, (gfx_context_t * ctx, gfx_surface_t * surface) );
+
 
     // CONTEXT
     func_table->pfn_init                    = vk_create_renderer;
@@ -839,10 +833,6 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_destroy_descriptor_set  = vk_descriptor_set_destroy;
 
     // COMMAND BUFFER
-    func_table->pfn_create_cmd              = vk_cmd_create;
-    func_table->pfn_destroy_cmd             = vk_cmd_destroy;
-
-    func_table->pfn_cmd_begin               = vk_cmd_begin;
     func_table->pfn_cmd_begin_pass          = vk_cmd_begin_pass;
     func_table->pfn_cmd_end_pass            = vk_cmd_end_pass;
 
@@ -862,25 +852,21 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 
     func_table->pfn_cmd_buffer_barrier      = vk_cmd_buffer_barrier;
     func_table->pfn_cmd_texture_barrier     = vk_cmd_texture_barrier;
-
-    func_table->pfn_cmd_end                 = vk_cmd_end;
-    func_table->pfn_submit_cmd              = vk_cmd_submit;
+    #endif
 }
-#else
-void gfx_init_vulkan(gfx_api_pfn* func_table) { 
-    memset(func_table, 0, sizeof(gfx_api_pfn)); 
-}
-#endif
 
 
 #ifdef WEBGPU_AVAILABLE
 #include "gfx_webgpu.h"
+#endif
 
 void gfx_init_webgpu(gfx_api_pfn* func_table)
 {
+    memset(func_table, 0, sizeof(gfx_api_pfn));
+
+    #ifdef WEBGPU_AVAILABLE 
     // CONTEXT
     func_table->pfn_init                    = wgpu_init;
-
 
     // BUFFER
     func_table->pfn_create_buffer           = wgpu_create_buffer;
@@ -928,10 +914,6 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_destroy_descriptor_set  = wgpu_destroy_descriptor_set;
 
     // COMMAND BUFFER
-    func_table->pfn_create_cmd              = wgpu_create_cmd;
-    func_table->pfn_destroy_cmd             = wgpu_destroy_cmd;
-
-    func_table->pfn_cmd_begin               = wgpu_cmd_begin;
     func_table->pfn_cmd_begin_pass          = wgpu_cmd_begin_pass;
     func_table->pfn_cmd_end_pass            = wgpu_cmd_end_pass;
 
@@ -951,12 +933,6 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
 
     func_table->pfn_cmd_buffer_barrier      = wgpu_cmd_buffer_barrier;
     func_table->pfn_cmd_texture_barrier     = wgpu_cmd_texture_barrier;
+    #endif
+}
 
-    func_table->pfn_cmd_end                 = wgpu_cmd_end;
-    func_table->pfn_submit_cmd              = wgpu_submit_cmd;
-}
-#else 
-void gfx_init_webgpu(gfx_api_pfn* func_table) {
-    memset(func_table, 0, sizeof(gfx_api_pfn));
-}
-#endif

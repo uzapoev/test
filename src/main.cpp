@@ -121,6 +121,12 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     gfx_shader_t* shader = nullptr;
     load_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
 
+    uint32_t set_count = gfx_shader_get_descriptor_set_count(shader);
+    for(uint32_t i = 0; i < set_count; ++i){
+        auto set = gfx_descriptor_set_create(ctx, shader, i);
+        gfx_cmd_bind_descriptor_set(nullptr, i, set);
+    }
+
 
     gfx_vertex_attribute attributes[] = {
         { 0, 0, gfx_vertex_format_float4,   offsetof(vertex, position)  },
@@ -241,11 +247,16 @@ void platform_tick(void* userdata)
 
     g_camera.setup(g_camera.m_fov, width / height, g_camera.m_near, g_camera.m_far);
     g_camera.update();
+
     
     auto frame = gfx_begin_frame(ctx, &surface);
+        gfx_render_pass_desc_t pass = { 0 };
+            pass.target = frame->target;
+
         gfx_cmd_begin_pass(frame->cmd, frame->target);
         g_scene.draw(frame->cmd, g_camera);
         gfx_cmd_end_pass(frame->cmd);
+
     gfx_end_frame(frame);
 }
  

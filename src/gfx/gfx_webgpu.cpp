@@ -377,10 +377,10 @@ static uint32_t wglsl_reflect(const char *data, gfx_uniform_t* uniforms, WGPUBin
         if(var && match("var<uniform>", var, &last)) {
             printf("");
         } else if (var && match("var <storage, read>", buffer, &last)) {
-            uniforms[count].type = gfx_uniform_storage;
+            uniforms[count].type = gfx_uniform_storage_buffer;
             bgle[count].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
         } else if (var && match("var <storage", buffer, &last)) {
-            uniforms[count].type = gfx_uniform_storage;
+            uniforms[count].type = gfx_uniform_storage_buffer;
             bgle[count].buffer.type = WGPUBufferBindingType_Storage;
         } else if (var && strstr(var, "var ")) {
             const char * dblpoint = strstr(buffer, ":");
@@ -940,7 +940,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
 
             switch (uniforms[u].type)
             {
-                case gfx_uniform_storage:
+                case gfx_uniform_storage_buffer:
                     layout_entries[wgsl_info_count].buffer.type = WGPUBufferBindingType_Storage;
                     break;
 

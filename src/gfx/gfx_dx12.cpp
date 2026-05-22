@@ -217,7 +217,6 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
     func_table->pfn_init     = dx12_init;
     func_table->pfn_get_caps = dx12_get_caps;
 
-
     // BUFFER
     func_table->pfn_create_buffer      = dx12_create_buffer;
     func_table->pfn_update_buffer_data = dx12_update_buffer_data;
@@ -264,10 +263,6 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
     func_table->pfn_destroy_descriptor_set  = dx12_destroy_descriptor_set;
 
     // COMMAND BUFFER
-    func_table->pfn_create_cmd = dx12_create_cmd;
-    func_table->pfn_destroy_cmd = dx12_destroy_cmd;
-
-    func_table->pfn_cmd_begin      = dx12_cmd_begin;
     func_table->pfn_cmd_begin_pass = dx12_cmd_begin_pass;
     func_table->pfn_cmd_end_pass   = dx12_cmd_end_pass;
 
@@ -287,9 +282,6 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
 
     func_table->pfn_cmd_buffer_barrier  = dx12_cmd_buffer_barrier;
     func_table->pfn_cmd_texture_barrier = dx12_cmd_texture_barrier;
-
-    func_table->pfn_cmd_end    = dx12_cmd_end;
-    func_table->pfn_submit_cmd = dx12_submit_cmd;
 }
 
 #endif // DX12_AVAILABLE

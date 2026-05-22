@@ -3,7 +3,6 @@
 
 #include "gfx.h"
 
-
 #if defined(_WIN32) && __has_include(<vulkan/vulkan.h>)
     #define VULKAN_AVAILABLE
     #define VK_USE_PLATFORM_WIN32_KHR
@@ -24,10 +23,11 @@
 
 #include <vulkan/vulkan.h>
 
-/*
+
 #ifdef __cplusplus 
 extern "C" {
-#endif*/
+#endif
+
 #define     MAX_FRAME_IN_FLIGHT                 (2)
 #define     GFX_MAX_DESCRIPTOR_SETS             (8)
 #define     MAX_TIMESTAMP_QUERIES               (128)
@@ -61,8 +61,6 @@ typedef struct vk_context_t
     }                                   graphics_queue,
                                         present_queue,
                                         compute_queue;
-
-    VkSampleCountFlagBits               msaa_samples;
 
     // --- Device Properties & Features ---
     uint32_t                            extension_count;
@@ -133,6 +131,7 @@ typedef struct vk_surface_t {
     VkSurfaceKHR                        surface;
     VkSwapchainKHR                      swapchain;
     VkRenderPass                        render_pass;
+    VkSampleCountFlags                  vk_msaa_samples;
 
     VkFence                             fences[MAX_FRAME_IN_FLIGHT];                        // CPU-GPU frame execution fences
     VkSemaphore                         semaphore_image_available[MAX_FRAME_IN_FLIGHT];     // Wait Semaphores
@@ -151,6 +150,8 @@ typedef struct vk_pipeline_t {
     gfx_pipeline_t                      handle;
 
     struct vk_shader_t*                 shader;
+
+    vk_descriptor_set_t*                default_sets[GFX_MAX_DESCRIPTOR_SETS];
 
     VkPipelineBindPoint                 bind_point;
     VkPipeline                          pipeline;
@@ -210,8 +211,8 @@ typedef struct vk_shader_t {
 
     uint32_t                            set_count;          // max set + 1
     VkDescriptorSetLayout               set_layouts[GFX_MAX_DESCRIPTOR_SETS];
-    uint32_t                            set_binding_count[GFX_MAX_DESCRIPTOR_SETS] = { 0 };       // per set
-    VkDescriptorSetLayoutBinding*       set_bindings[GFX_MAX_DESCRIPTOR_SETS] = { 0 };    // per set
+    uint32_t                            set_binding_count[GFX_MAX_DESCRIPTOR_SETS] = { 0 }; // per set
+    VkDescriptorSetLayoutBinding*       set_bindings[GFX_MAX_DESCRIPTOR_SETS] = { 0 };      // per set
 
     VkPipelineLayout                    pipeline_layout;
 
@@ -287,6 +288,10 @@ typedef struct vk_command_buffer_t {
     VkDevice                            device              = VK_NULL_HANDLE;
     VkCommandPool                       pool                = VK_NULL_HANDLE;
     VkCommandBuffer                     cmd                 = VK_NULL_HANDLE;
+
+    // 
+    uint32_t                            user_bound_mask;
+    VkDescriptorSet                     bound_sets[GFX_MAX_DESCRIPTOR_SETS];
 
     // replace to struct begin+end+name
     VkQueryPool                         time_query_pool     = VK_NULL_HANDLE;
@@ -366,8 +371,8 @@ gfx_api void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeli
 gfx_api void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
 
-gfx_api [[deprecated("")]] void    vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-gfx_api [[deprecated("")]] void    vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
+gfx_api [[deprecated("")]] void vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
+gfx_api [[deprecated("")]] void vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
 
 gfx_api [[deprecated("non public")]] void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
 gfx_api [[deprecated("non public")]] void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
@@ -410,14 +415,15 @@ gfx_api void vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
 
 
 
-extern void    _vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkFormat depthformat, VkRenderPass* renderpass);
+extern void    _vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkFormat depthformat, VkSampleCountFlagBits samples, VkRenderPass* renderpass);
 extern void     vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name);
 extern void     vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name);
 extern void     vk_debug_set_buffer_name(vk_context_t* ctx, vk_buffer_t* buffer, const char* name);
 extern void     vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char* name);
-/*#ifdef __cplusplus 
+#ifdef __cplusplus 
 }
 #endif
-*/
-#endif
-#endif
+
+#endif //VULKAN_AVAILABLE
+
+#endif //__gfx_vulkan_h__
