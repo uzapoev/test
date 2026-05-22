@@ -1749,6 +1749,12 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
     pool->descriptor_writes = (VkWriteDescriptorSet*)_gfx_alloc(ctx, (capacity * max_write_count) * sizeof(VkWriteDescriptorSet));
     pool->write_infos = (vk_write_info_t*)_gfx_alloc(ctx, (capacity * max_write_count) * sizeof(vk_write_info_t));
 
+
+
+    VkWriteDescriptorSet  descriptor_writes[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
+
+    pool->write_infos = (vk_write_info_t*)_gfx_alloc(ctx, (capacity * max_write_count) * sizeof(vk_write_info_t));
+
     int g = sizeof(VkWriteDescriptorSet);
 
     for (uint32_t i = 0; i < capacity; i++)
@@ -1994,68 +2000,12 @@ void vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
     _vk_init_shader_stages(vctx, desc, shader);
     _vk_create_descriptor_layouts(vctx, shader);
 
+    for(uint32_t i = 0; i < gfx_shader_get_descriptor_set_count(&shader->handle); ++i) {
+        gfx_descriptor_set_t * default_set = nullptr;
+        vk_descriptor_set_create(ctx, &shader->handle, i, &default_set);
+        shader->default_sets[i] = (vk_descriptor_set_t*)default_set;
+    }
     *out_shader = &shader->handle;
-    /*
-    shader->layout_bindings = (VkDescriptorSetLayoutBinding*)_gfx_alloc(vctx, desc->uniform_count * sizeof(VkDescriptorSetLayoutBinding));
-    for (uint32_t i = 0; i < desc->uniform_count; ++i)
-    {
-        shader->uniforms[i] = desc->uniforms[i];
-
-        uint32_t stage_mask = shader->uniforms[i].stage_mask;
-
-        #define  HAS_FLAG(v, f) ((v & f) == f)
-
-        shader->layout_bindings[i].stageFlags |= HAS_FLAG(stage_mask, 1 << gfx_shader_vertex)   ? VK_SHADER_STAGE_VERTEX_BIT   : 0;
-        shader->layout_bindings[i].stageFlags |= HAS_FLAG(stage_mask, 1 << gfx_shader_fragment) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0;
-        shader->layout_bindings[i].stageFlags |= HAS_FLAG(stage_mask, 1 << gfx_shader_compute)  ? VK_SHADER_STAGE_COMPUTE_BIT  : 0;
-
-        shader->layout_bindings[i].binding          = shader->uniforms[i].binding;
-        shader->layout_bindings[i].descriptorCount  = 1;
-        switch (shader->uniforms[i].type)
-        {
-            case gfx_uniform_sampler:
-                shader->layout_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-                break;
-
-            case gfx_uniform_texture2d:
-            case gfx_uniform_texture3d:
-            case gfx_uniform_texture2d_cube:
-            case gfx_uniform_texture2d_array: {
-                if(stage_mask == gfx_shader_compute)
-                    shader->layout_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                 else
-                    shader->layout_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-            } break;
-
-            case gfx_uniform_ubo:
-                shader->layout_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                break;
-
-            case gfx_uniform_storage:
-                shader->layout_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                break;
-
-            default: assert(false); break;
-        }
-    }
-    // create descripor layout
-    VkDescriptorSetLayoutCreateInfo desc_set_ci= { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    desc_set_ci.bindingCount    = shader->uniform_count;
-    desc_set_ci.pBindings       = shader->layout_bindings;
-    if (auto result = vkCreateDescriptorSetLayout(vctx->device, &desc_set_ci, nullptr, &shader->layout)) {
-        vctx->dbg_log(gfx_msg_error, "failed to create descriptor set layout! (%s)", string_VkResult(result));
-        return;
-    }
-
-    // create pipeline layout
-    VkPipelineLayoutCreateInfo pipeline_layout_ci   = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pipeline_layout_ci.setLayoutCount               = 1;
-    pipeline_layout_ci.pSetLayouts                  = &shader->layout;
-    if (auto result = vkCreatePipelineLayout(vctx->device, &pipeline_layout_ci, nullptr, &shader->pipeline_layout)) {
-        vctx->dbg_log(gfx_msg_error, "failed to create pipeline layout! (%s)", string_VkResult(result));
-        return;
-    }*/
- //   gfx_pool_create(sizeof(vk_descriptor_set_t), MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->descriptor_set_pool);
 }
 
 static gfx_uniform_loc_t make_uniform_loc(uint32_t shader_hash, gfx_uniform_type type, uint8_t set_idx,uint8_t binding_idx, uint8_t field_idx = 0)
@@ -2728,7 +2678,6 @@ void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* p
 
 vk_descriptor_pool_t * _get_or_create_descriptor_set_pool(vk_context_t* ctx, uint32_t hash)
 {
-    
     return nullptr;
 }
 
@@ -2848,6 +2797,21 @@ void vk_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t han
 
 void vk_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset)
 {
+    if (set == NULL || handle == 0)
+        return;
+
+    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
+
+    vk_shader_t* vkshader = vkset->shader;
+    vk_context_t* vkctx = vkshader->ctx;
+
+    gfx_uniform_loc_t loc = { handle };
+
+    if (vkshader->hash32 != loc.shader_hash) {
+        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
+        return;
+    }
+    assert(false);
 }
 
 
@@ -2874,14 +2838,24 @@ void vk_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle,
         return;
     }
 
+    auto binding = vkshader->uniforms[loc.binding].binding;
+
     vk_texture_t* vktexture = texture ? (vk_texture_t*)gfx_pool_map(vkctx->texture_pool, texture->idx) : vkctx->default_texture;
     VkImageView image_view  = vktexture->view;
+    auto sampler = (vk_sampler_t*)gfx_pool_map(vkctx->sampler_pool, vkctx->default_sampler->idx);
 
-    if(vkset->write_infos[loc.binding].image_info.imageView != image_view)
-    {
-        vkset->write_infos[loc.binding].image_info.imageView = image_view;
-        vkUpdateDescriptorSets(vkctx->vk_device, vkset->write_count, vkset->writes, 0, NULL);
-    }
+    VkDescriptorImageInfo image_info = { 0 };
+        image_info.imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.imageView    = image_view;
+        image_info.sampler      = sampler->sampler;
+
+     VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.dstSet            = vkset->descriptor_set;
+        write.dstBinding        = binding;
+        write.descriptorCount   = 1;
+        write.pImageInfo        = &image_info;
+    vkUpdateDescriptorSets(vkctx->vk_device, 1, &write, 0, nullptr);
 }
 
 
@@ -2908,13 +2882,20 @@ void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle,
         return;
     }
 
-    vkset->write_infos[loc.binding].image_info.sampler = vksampler->sampler;
+    auto binding = vkshader->uniforms[loc.binding].binding;
 
-    auto dbg0 = vkset->writes[0];
-    auto dbg1 = vkset->writes[1];
-    auto dbg2 = vkset->writes[2];
+    VkDescriptorImageInfo image_info = { 0 };
+        image_info.imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.sampler      = vksampler->sampler;
+        image_info.imageView    = vkctx->default_texture->view;
 
-    vkUpdateDescriptorSets(vkctx->vk_device, vkset->write_count, vkset->writes, 0, NULL);
+    VkWriteDescriptorSet write  = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLER;
+        write.dstSet            = vkset->descriptor_set;
+        write.dstBinding        = binding;
+        write.descriptorCount   = 1;
+        write.pImageInfo        = &image_info;
+    vkUpdateDescriptorSets(vkctx->vk_device, 1, &write, 0, nullptr);
 }
 
 
