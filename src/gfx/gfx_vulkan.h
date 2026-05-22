@@ -32,7 +32,7 @@ extern "C" {
 #define     GFX_MAX_DESCRIPTOR_SETS             (8)
 #define     MAX_TIMESTAMP_QUERIES               (128)
 #define     MAX_TIMESTAMP_NESTING_LEVEL         (16)
-#define     MAX_BATCH_BARRIERS                  (64)
+#define     MAX_BATCH_BARRIERS                  (16)
 #define     MAX_DESCRIPTOR_POOL_SET_SIZE        (1024)
 
 /**/

@@ -384,6 +384,8 @@ typedef enum gfx_shader_stage {
 } gfx_shader_stage;
 
 
+// todo: replace gfx_barrier_compute to gfx_barrier_compute_read + gfx_barrier_compute_write
+// todo: replace gfx_barrier_graphics to gfx_barrier_graphics_read + gfx_barrier_graphics_write - do not use write on gpu with TBDRA
 typedef enum gfx_barrier {
     gfx_barrier_indirect,               /**< Barrier for buffers driving indirect command execution arguments */
     gfx_barrier_compute,                /**< Barrier separating compute shader read/write hazards */
@@ -804,7 +806,7 @@ typedef struct indirect_data_t {
 } indirect_data_t;
 
 
-typedef struct gfx_frame_t {    
+typedef struct gfx_frame_t {
     gfx_context_t*              ctx;                        /**< Primary reference link referencing active subsystem graphics instance */
     uint32_t                    frame_index;                /**< Linear monotonically increasing frame execution tracker index (0,1..n) */
     uint32_t                    swapchain_image_index;      /**< Current active texture surface image target slot returned from swapchain engine */

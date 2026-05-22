@@ -56,6 +56,62 @@ void render_frame(gfx_context_t* ctx, gfx_surface_t* surface) {
 }
 ```
 
+Example of use: Ray tracing
+```
+// 1. Describe the geometry for BLAS
+gfx_rt_geometry_desc_t geometry = {
+    .vertex_buffer = mesh->vbo,
+    .vertex_stride = sizeof(vertex_t),
+    .vertex_count  = mesh->vertex_count,
+    .vertex_format = GFX_VERTEX_FORMAT_FLOAT3,
+    .index_buffer  = mesh->ibo,
+    .index_count   = mesh->index_count,
+    .index_format  = GFX_INDEX_FORMAT_UINT32,
+    .flags         = gfx_rt_geometry_opaque
+};
+
+// 2. Create and assemble BLAS
+gfx_acceleration_structure_desc_t blas_desc = {
+    .label = "StaticMesh_BLAS",
+    .is_top_level = false,
+    .geometry_count = 1,
+    .geometries = &geometry
+};
+gfx_acceleration_structure_t blas = gfx_acceleration_structure_create(ctx, &blas_desc);
+
+// Write the build command (in reality, it is executed once when loading the mesh)
+gfx_cmd_build_acceleration_structure(init_cmd_buf, blas, NULL);
+
+// ... Time has passed, we are forming a frame ...
+
+// 3. Fill the instance in instance_buffer (memory available to the GPU)
+gfx_rt_instance_desc_t* instances = gfx_buffer_map(scene_instance_buffer);
+instances[0] = (gfx_rt_instance_desc_t){
+    .transform = { .matrix = { {1,0,0,0}, {0,1,0,0}, {0,0,1,0} } }, // Identity
+    .instance_id = 42, // Доступен в шейдере через gl_InstanceCustomIndexEXT
+    .mask = 0xFF,
+    .blas = blas
+};
+gfx_buffer_unmap(scene_instance_buffer);
+
+// 4. Create and assemble TLAS
+gfx_acceleration_structure_desc_t tlas_desc = {
+    .label = "Scene_TLAS",
+    .is_top_level = true,
+    .instance_count = 1,
+    .instance_buffer = scene_instance_buffer
+};
+gfx_acceleration_structure_t tlas = gfx_acceleration_structure_create(ctx, &tlas_desc);
+gfx_cmd_build_acceleration_structure(frame_cmd_buf, tlas, NULL);
+
+// Don't forget the barrier: TLAS must be ready before tracing can begin
+gfx_acceleration_structure_t tlas_arr[] = { tlas };
+gfx_cmd_buffer_as_barrier(frame_cmd_buf, tlas_arr, 1, GFX_BARRIER_AS_WRITE, GFX_BARRIER_AS_READ);
+
+// 5. Let's go! Let's trace rays
+gfx_cmd_trace_rays(frame_cmd_buf, rt_pipeline, ray_shadows_sbt, screen_width, screen_height, 1);''
+```
+
 
 #emscripten build
 

@@ -271,10 +271,23 @@ static vk_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags
         out.access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
         out.image_layout = VK_IMAGE_LAYOUT_GENERAL;
         break;
+/*
+    case gfx_barrier_compute_read:
+        out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        out.access = VK_ACCESS_2_SHADER_READ_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        break;
 
-    case gfx_barrier_graphics:
-        // enable both the Vertex and Fragment stages for full cross reading
-        out.stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    case gfx_barrier_compute_write:
+        out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        out.access = VK_ACCESS_2_SHADER_WRITE_BIT;
+        out.image_layout = VK_IMAGE_LAYOUT_GENERAL;
+        break;*/
+
+     // Reading in graphics shaders (VS, FS, and also Mesh/Task shaders!)
+    case gfx_barrier_graphics: // read
+        // enable for the Vertex, Fragment and  Mesh stages for full cross reading
+        out.stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT | VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT;
         out.access = VK_ACCESS_2_SHADER_READ_BIT;
         out.image_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         break;
@@ -292,6 +305,7 @@ static vk_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags
         out.image_layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         break;
 
+        //Reading indirect arguments (Compute Cull -> ExecuteIndirect)
     case gfx_barrier_indirect:
         out.stage = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
         out.access = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
@@ -3072,26 +3086,26 @@ void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, ui
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
     vk_context_t *ctx = vk_cmd->ctx;
 
+    vk_state_mapping_t src_state = get_vulkan_state(old_state, 0);
+    vk_state_mapping_t dst_state = get_vulkan_state(new_state, 0);
+
     uint32_t buffer_barrier_count = 0;
     VkBufferMemoryBarrier2 buffer_barriers[MAX_BATCH_BARRIERS] = {};
     for(uint32_t i = 0; i < count; ++i)
     {
         vk_buffer_t *vk_buffer = (vk_buffer_t*)gfx_pool_map(ctx->buffers_pool, buffers[i]->idx);
 
-        vk_state_mapping_t src = get_vulkan_state(old_state, 0);
-        vk_state_mapping_t dst = get_vulkan_state(new_state, 0);
-
-        buffer_barriers[i].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-        buffer_barriers[i].pNext = NULL;
-        buffer_barriers[i].srcStageMask = src.stage;
-        buffer_barriers[i].srcAccessMask = src.access;
-        buffer_barriers[i].dstStageMask = dst.stage;
-        buffer_barriers[i].dstAccessMask = dst.access;
+        buffer_barriers[i].sType         = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+        buffer_barriers[i].pNext         = NULL;
+        buffer_barriers[i].srcStageMask  = src_state.stage;
+        buffer_barriers[i].srcAccessMask = src_state.access;
+        buffer_barriers[i].dstStageMask  = dst_state.stage;
+        buffer_barriers[i].dstAccessMask = dst_state.access;
         buffer_barriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         buffer_barriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        buffer_barriers[i].buffer = vk_buffer->buffer;
-        buffer_barriers[i].offset = 0;
-        buffer_barriers[i].size = VK_WHOLE_SIZE;
+        buffer_barriers[i].buffer   = vk_buffer->buffer;
+        buffer_barriers[i].offset   = 0;
+        buffer_barriers[i].size     = VK_WHOLE_SIZE;
         buffer_barrier_count++;
     }
 
@@ -3115,6 +3129,20 @@ void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures,
         VkImageAspectFlags aspect_mask = determine_aspect_mask(vk_texture->format);
         vk_state_mapping_t src = get_vulkan_state(old_state, aspect_mask);
         vk_state_mapping_t dst = get_vulkan_state(new_state, aspect_mask);
+
+        // Protection: newLayout should never be UNDEFINED for a texture with data
+        if (dst.image_layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+            dst.image_layout = VK_IMAGE_LAYOUT_GENERAL;
+        }
+
+        // Adjusting aspect ratio for combined depth-stencil textures when reading in shader
+        VkImageAspectFlags barrier_aspect = aspect_mask;
+        if (dst.image_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+            (barrier_aspect & VK_IMAGE_ASPECT_STENCIL_BIT))
+        {
+            // On mobile devices, stencil is rarely read in the texture sampler, so we leave only depth
+            barrier_aspect &= ~VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
 
         image_barriers[i].sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
         image_barriers[i].pNext         = NULL;
