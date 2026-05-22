@@ -39,7 +39,7 @@ void render_frame(gfx_context_t* ctx, gfx_surface_t* surface) {
 
     // 3. Insert memory barrier: Wait for Compute to write indirect args
     gfx_buffer_t* indirect_bufs[] = { indirect_draw_buffer };
-    gfx_cmd_buffer_barrier(cmd, indirect_bufs, 1, GFX_BARRIER_COMPUTE_WRITE, GFX_BARRIER_INDIRECT_ARGUMENTS);
+    gfx_cmd_buffer_barrier(cmd, indirect_bufs, 1, gfx_barrier_compute_write, gfx_barrier_indirect);
 
     // 4. Graphics Phase: Execute Modern Mesh Shading Pass
     gfx_cmd_begin_pass(cmd, visibility_render_target);
@@ -85,14 +85,23 @@ gfx_cmd_build_acceleration_structure(init_cmd_buf, blas, NULL);
 // ... Time has passed, we are forming a frame ...
 
 // 3. Fill the instance in instance_buffer (memory available to the GPU)
-gfx_rt_instance_desc_t* instances = gfx_buffer_map(scene_instance_buffer);
-instances[0] = (gfx_rt_instance_desc_t){
-    .transform = { .matrix = { {1,0,0,0}, {0,1,0,0}, {0,0,1,0} } }, // Identity
-    .instance_id = 42, // Доступен в шейдере через gl_InstanceCustomIndexEXT
-    .mask = 0xFF,
-    .blas = blas
-};
-gfx_buffer_unmap(scene_instance_buffer);
+VkAccelerationStructureInstanceKHR instances[2] = {0};
+
+    // First object (our Mesh)
+    instances[0].transform = identity_matrix_3x4;
+    instances[0].instanceCustomIndex = 0;
+    instances[0].mask = 0xFF;
+    instances[0].accelerationStructureReference = blas_mesh_1.device_address; // Используем GPU Address!
+
+    // Second object (copy, offset to the side)
+    instances[1].transform = translated_matrix_3x4;
+    instances[1].instanceCustomIndex = 1;
+    instances[1].mask = 0xFF;
+    instances[1].accelerationStructureReference = blas_mesh_1.device_address;
+
+gfx_buffer_update_data(ctx, tlas_instance_buffer, 0, sizeof(instances), instances);
+// gfx_barrier_compute_read or special gfx_barrier_acceleration_structure
+gfx_cmd_buffer_barrier(cmd, &tlas_instance_buffer, 1, gfx_barrier_transfer, gfx_barrier_compute_read); 
 
 // 4. Create and assemble TLAS
 gfx_acceleration_structure_desc_t tlas_desc = {
