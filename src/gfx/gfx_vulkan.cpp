@@ -227,14 +227,6 @@ VkImageAspectFlags determine_aspect_mask(VkFormat format)
     }
 }
 
-struct vk_write_info_t 
-{
-    union 
-    {
-        VkDescriptorImageInfo   image_info;
-        VkDescriptorBufferInfo  buffer_info;
-    };
-};
 
 typedef struct vk_copy_info_t
 {
@@ -473,6 +465,181 @@ static uint32_t _vk_find_memory_type(VkPhysicalDeviceMemoryProperties properties
             return i;
     }
     return 0;
+}
+
+static const char* _vk_resolve_vendor_name(uint32_t vendor_id) {
+    switch (vendor_id) {
+        case 0x10DE: return "NVIDIA";
+        case 0x1002: return "AMD";
+        case 0x8086: return "Intel";
+        case 0x13B5: return "ARM";
+        case 0x1014: return "IBM";
+        case 0x14E4: return "Broadcom";
+        case 0x106B: return "Apple";
+        case 0x5143: return "Qualcomm";
+        default:     return "Unknown Vendor";
+    }
+}
+
+void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gfx_caps_t* caps)
+{
+    if (!physical_device || !caps) return;
+    memset(caps, 0, sizeof(gfx_caps_t));
+
+    // =========================================================================
+    // 1. BASE PROPERTIES AND LIMITS
+    // =========================================================================
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(physical_device, &properties);
+
+    // Copy device strings safely
+    strncpy(caps->gpu_name, properties.deviceName, sizeof(caps->gpu_name) - 1);
+    strncpy(caps->gpu_vendor, _vk_resolve_vendor_name(properties.vendorID), sizeof(caps->gpu_vendor) - 1);
+
+    // Identify GPU architectural type
+    caps->gpu_type = (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)? gfx_gpu_discrete: gfx_gpu_integrated;
+
+    // Hardware limits mapping
+    caps->max_texture_dimension_2d = properties.limits.maxImageDimension2D;
+    caps->max_compute_work_group_invocations = properties.limits.maxComputeWorkGroupInvocations;
+    caps->min_uniform_buffer_offset_alignment = properties.limits.minUniformBufferOffsetAlignment;
+    caps->min_storage_buffer_offset_alignment = properties.limits.minStorageBufferOffsetAlignment;
+    caps->max_uniform_buffer_range = properties.limits.maxUniformBufferRange;
+
+    // SPIR-V support is guaranteed for core Vulkan devices
+    caps->supported_shader_formats = gfx_shader_format_spirv;
+
+    // =========================================================================
+    // 2. FEATURE EXTRACTION VIA pNext CHAIN (Vulkan 1.1+)
+    // =========================================================================
+
+    // Allocate structures on the stack and link them into the pNext chain
+    VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+
+    // Vulkan 1.2 features (Bindless/Descriptor Indexing, 8-bit/16-bit storage)
+    VkPhysicalDeviceVulkan12Features feats12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    features2.pNext = &feats12;
+
+    // Vulkan 1.3 features (Additional core features/atomics)
+    VkPhysicalDeviceVulkan13Features feats13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+    feats12.pNext = &feats13;
+
+    // Extension: Mesh Shaders (EXT/NV)
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
+    feats13.pNext = &mesh_feats;
+
+    // Extension: Floating-point atomics
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomic_float_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT };
+    mesh_feats.pNext = &atomic_float_feats;
+
+    // Extension: Fragment shader barycentrics
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV barycentric_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_NV };
+    atomic_float_feats.pNext = &barycentric_feats;
+
+    // Properties chain to fetch extended limits (like max bindless descriptor array size)
+    VkPhysicalDeviceProperties2 properties2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+
+    // Vulkan 1.2 Extended Properties (contains Descriptor Indexing limits)
+    VkPhysicalDeviceVulkan12Properties props12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
+    properties2.pNext = &props12;
+
+    // Extension: Conservative Rasterization properties
+    VkPhysicalDeviceConservativeRasterizationPropertiesEXT conservative_props = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONSERVATIVE_RASTERIZATION_PROPERTIES_EXT };
+    props12.pNext = &conservative_props;
+
+    // Query features and extended properties from the driver
+    vkGetPhysicalDeviceFeatures2(physical_device, &features2);
+    vkGetPhysicalDeviceProperties2(physical_device, &properties2);
+
+    // Vulkan 1.0 core capabilities
+    caps->support_compute = true; // Assumes compute queues are validated during device creation
+    caps->support_indirect = (bool)features2.features.inheritedQueries; // Basic multi-draw indirect feature
+
+    // Texture compression block support
+    caps->support_bc = (bool)features2.features.textureCompressionBC;
+    caps->support_astc = (bool)features2.features.textureCompressionASTC_LDR;
+    caps->support_etc = (bool)features2.features.textureCompressionETC2;
+    caps->support_pvr = false; // PVRTC is legacy/non-standard in native Vulkan core
+
+    // Vulkan 1.2 core math and storage types
+    caps->support_shader_float16 = (bool)feats12.shaderFloat16;
+    caps->support_shader_int8 = (bool)feats12.shaderInt8;
+
+    // Unbounded bindless validation (Requires full descriptor indexing layout support)
+    if (feats12.descriptorIndexing &&
+        feats12.descriptorBindingVariableDescriptorCount &&
+        feats12.descriptorBindingPartiallyBound)
+    {
+        caps->support_bindless = true;
+        // Extract the actual maximum size for texture arrays bound as bindless resources.
+        // Usually matches maxDescriptorSetUpdateAfterBindSampledImages.
+        caps->max_bindless_sampleable_textures = props12.maxDescriptorSetUpdateAfterBindSampledImages;
+    }
+    else
+    {
+        caps->support_bindless = false;
+        caps->max_bindless_sampleable_textures = 0;
+    }
+
+    // Subgroup/Wave-level operation support inside Compute stage
+    VkPhysicalDeviceSubgroupProperties subgroup_props = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES };
+    VkPhysicalDeviceProperties2 sub_props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+    sub_props2.pNext = &subgroup_props;
+    vkGetPhysicalDeviceProperties2(physical_device, &sub_props2);
+
+    if (subgroup_props.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) {
+        caps->support_shader_subgroup_ops = true;
+    }
+
+    // Hardware Ray Tracing validation (Requires separate feature query)
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
+    VkPhysicalDeviceFeatures2 rt_feats2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    rt_feats2.pNext = &rt_feats;
+    vkGetPhysicalDeviceFeatures2(physical_device, &rt_feats2);
+    caps->support_raytrace = (bool)rt_feats.rayTracingPipeline;
+
+    // Next-Gen Geometry Pipeline features
+    caps->support_mesh_shader = (bool)mesh_feats.meshShader;
+    caps->support_mesh_amplification_shader = (bool)mesh_feats.taskShader;
+
+    // Extended types atomics and hardware barycentrics
+    caps->support_shader_atomic_float32 = (bool)atomic_float_feats.shaderBufferFloat32Atomics;
+    caps->support_barycentrics = (bool)barycentric_feats.fragmentShaderBarycentric;
+
+    // Overestimation rasterization verification
+    if (conservative_props.fullyCoveredFragmentShaderInputVariable) {
+        caps->support_conservative_rasterization = true;
+    }
+
+    // =========================================================================
+    // 3. OPTIMIZATION HINTS & MEMORY TOPOLOGY (Unified Memory Architecture)
+    // =========================================================================
+    VkPhysicalDeviceMemoryProperties memory_properties;
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+
+    // Heuristic for Unified Memory Architecture (UMA):
+    // Integrated GPUs naturally share the system memory pool. For dedicated architectures,
+    // we inspect if local heaps overlap or present a small budget matching APU layouts.
+    caps->has_unified_memory = false;
+    if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+        caps->has_unified_memory = true;
+    }
+    else {
+        for (uint32_t i = 0; i < memory_properties.memoryHeapCount; ++i) {
+            if ((memory_properties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
+                (memory_properties.memoryHeaps[i].size <= 4ULL * 1024 * 1024 * 1024)) {
+                caps->has_unified_memory = true;
+            }
+        }
+    }
+
+    // Engine runtime notifications
+    ctx->dbg_log(gfx_msg_info, "Initialized GPU backend: %s (%s)", caps->gpu_name, caps->gpu_vendor);
+    ctx->dbg_log(gfx_msg_info, "Capabilities - Bindless: %s (Max Textures: %u), Mesh Shaders: %s, UMA: %s",
+        caps->support_bindless ? "ENABLED" : "DISABLED",
+        caps->max_bindless_sampleable_textures,
+        caps->support_mesh_shader ? "ENABLED" : "DISABLED",
+        caps->has_unified_memory ? "TRUE" : "FALSE");
 }
 
 
@@ -1040,6 +1207,8 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vkEnumerateDeviceExtensionProperties(physdevice, NULL, &vctx->extension_count, NULL);
     vkEnumerateDeviceExtensionProperties(physdevice, NULL, &vctx->extension_count, vctx->extensions);
 
+    vk_fill_device_caps(vctx, vctx->vk_physical_device, &vctx->gpu_caps);
+
     auto maxUniformBufferRange = vctx->device_properties.limits.maxUniformBufferRange;
     
     gfx_pool_create(sizeof(vk_surface_t),       16, &vctx->surface_pool, &vctx->allocator);
@@ -1054,15 +1223,6 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     gfx_pool_create(sizeof(vk_pipeline_t),  cfg->limits.pipeline_pool_capacity, &vctx->pipeline_pool, &vctx->allocator);
     gfx_pool_create(sizeof(vk_compute_pipeline_t),  cfg->limits.compute_pipeline_pool_capacity, &vctx->compute_pipeline_pool, &vctx->allocator);
 
-
-    uint32_t _colors [] = { 0xFFFFFFFF, 0xFF808080, 0xFFFFFFFF, 0xFF808080,
-                            0xFF808080, 0xFFFFFFFF, 0xFF808080, 0xFFFFFFFF,
-                            0xFFFFFFFF, 0xFF808080, 0xFFFFFFFF, 0xFF808080,
-                            0xFF808080, 0xFFFFFFFF, 0xFF808080, 0xFFFFFFFF,
-                            0xFFFF0000, 0xFF000000,
-                            0xFF000000, 0xFFFF0000,
-                            0xFF00FFFF
-    };
 
     gfx_buffer_t* uniform_buffer = nullptr;
     gfx_buffer_desc_t ubo_descriptor = {};
@@ -1167,8 +1327,10 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     *out_ctx = &vctx->handle;
 }
 
-void vk_get_caps(gfx_context_t* ctx, gfx_caps_t *caps)
+void vk_get_caps(gfx_context_t* _ctx, gfx_caps_t *caps)
 {
+    vk_context_t * ctx = from_ctx(_ctx);
+    *caps = ctx->gpu_caps;
 }
 
 void vk_destroy_renderer(gfx_context_t * ctx)

@@ -516,6 +516,7 @@ typedef struct gfx_caps_t {
     uint64_t                min_uniform_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic UBO bindings */
     uint64_t                min_storage_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic SSBO bindings */
     uint64_t                max_uniform_buffer_range;           /**< Maximum byte allocation size range that can be bound to a single UBO slot */
+    uint32_t                max_bindless_sampleable_textures;   /**< max_bindless_sampleable_textures */
 
     // Extended Shader Data Types & Atomics
     bool                    support_shader_float16;             /**< True if shader supports native 16-bit floating-point math (half) */
