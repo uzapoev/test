@@ -57,7 +57,7 @@ void render_frame(gfx_context_t* ctx, gfx_surface_t* surface) {
 ```
 
 Example of use: Ray tracing
-```
+```c
 // 1. Describe the geometry for BLAS
 gfx_rt_geometry_desc_t geometry = {
     .vertex_buffer = mesh->vbo,
