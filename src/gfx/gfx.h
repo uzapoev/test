@@ -15,12 +15,12 @@
 *       surface_desc.sample_count       = gfx_sample_1x;
 *   auto surface = gfx_surface_create(ctx, &surface_desc);
 * 
-*   gfx_render_pass_desc_t pass = {0}
+*   gfx_pass_info_t pass = {0}
 *       pass.clear_color = rgba(255,255,255,255);
 *       pass.clear_depth = 0;
 * 
 *   auto frame = gfx_begin_frame(ctx, &surface);
-*       gfx_cmd_begin_pass(frame->cmd, pass, frame->target);
+*       gfx_cmd_begin_pass(frame->cmd, &pass);
 * 
 *       // draw here
 * 
@@ -417,7 +417,6 @@ typedef struct { uint64_t idx; } gfx_shader_t;                  /**< Handle mapp
 typedef struct { uint64_t idx; } gfx_descriptor_set_t;          /**< Handle linking an updated set of bound resource variables */
 typedef struct { uint64_t idx; } gfx_pipeline_t;                /**< Handle representing an active fixed-function vertex+fragment state */
 typedef struct { uint64_t idx; } gfx_pipeline_compute_t;        /**< Handle representing an active compute state machine layout */
-typedef struct { uint64_t idx; } gfx_pipeline_mesh_t;           /**< Handle representing a modern task+mesh geometry state machine layout */
 typedef struct { uint64_t idx; } gfx_pipeline_raytrace_t;       /**< Handle representing a hardware-accelerated ray tracing state machine layout */
 typedef struct { uint64_t idx; } gfx_render_target_t;           /**< Handle configuring multiple bound color and depth attachments targets */
 typedef struct { uint64_t idx; } gfx_command_buffer_t;          /**< Handle capturing rendering execution tokens for execution queue submission */
@@ -777,16 +776,21 @@ typedef struct gfx_mesh_pipeline_desc_t{
  * @brief Configuration payload reserved for hardware-accelerated ray tracing pipeline state machine structures.
  * @todo Implement tracking properties driving shader binding tables generation.
  */
-typedef struct gfx_raytrace_pipeline_desc_t;
+struct gfx_raytrace_pipeline_desc_t;
 
-typedef struct gfx_render_pass_desc_t {
-    uint32_t                    clear_color;                /**< Packed hexadecimal RGBA8 color value used to scrub color targets on load */
-    uint32_t                    clear_depth;                /**< Packed depth precision scaling token used to wipe z-buffer values on load */
+typedef struct gfx_pass_info_t {
+    uint32_t                    clear_color_value;   /**< Packed hexadecimal RGBA8 color value used to scrub color targets on load */
+    float                       clear_depth_value;      /**< Packed depth precision scaling token used to wipe z-buffer values on load */
+    uint32_t                    clear_stencil_value;    /**< Packed depth precision scaling token used to wipe z-buffer values on load */
 
     gfx_render_target_t*        target;                     // todo: replace to color + depth attachment
-    gfx_texture_t*              color_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
+    gfx_texture_t*              color_attachment[8];        // todo: switch to this after getting rid of gfx_render_target_t
     gfx_texture_t*              depth_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
-} gfx_render_pass_desc_t;
+
+    // todo: load operator - clear, store, dont_care
+    //gfx_load_op               color_load_op[8];
+    //gfx_load_op               depth_load_op;
+} gfx_pass_info_t;
 
 
 // ============================================================================
@@ -1114,14 +1118,14 @@ gfx_api void gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compu
  * @param desc Geometry processing properties packing mesh shader configurations.
  * @return Pointer to the allocated monolithic mesh shading pipeline state object.
  */
-gfx_api gfx_pipeline_mesh_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc);
+gfx_api gfx_pipeline_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc);
 
 /**
  * @brief Destroys and cleans up an active mesh shading pipeline state object.
  * @param ctx Reference to the active graphics context.
  * @param pipeline Reference pointer to the mesh shading pipeline instance to be destroyed.
  */
-gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
+gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 
 /**
  * @brief Compiles a hardware-accelerated ray tracing raygen/hit/miss pipeline state object.
@@ -1138,24 +1142,7 @@ gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx
  */
 gfx_api void gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
-// ============================================================================
-// --- Render Target Attachments ---
-// ============================================================================
 
-/**
- * @brief Allocates an execution container wrapping multiple color views and depth textures buffers.
- * @param ctx Reference to the active graphics context.
- * @param desc Layout dimensions configurations matching target textures properties.
- * @return Pointer to the configured frame buffer render target wrapper.
- */
-gfx_api gfx_render_target_t* gfx_render_target_create(gfx_context_t* ctx, gfx_render_target_desc_t* desc);
-
-/**
- * @brief Reclaims hardware resource views associated with a multi-attachment render target.
- * @param ctx Reference to the active graphics context.
- * @param target Reference pointer to the render target container instance to be destroyed.
- */
-gfx_api void gfx_render_target_destroy(gfx_context_t* ctx, gfx_render_target_t* target);
 
 // ============================================================================
 // --- Command Buffer Recording & Recording Passes ---
@@ -1179,7 +1166,7 @@ gfx_api void gfx_cmd_pop_marker(gfx_command_buffer_t* cmd);
  * @param cmd Active command buffer token recording graphic draw state sequences tokens.
  * @param target Reference pointer to the frame buffer target wrapper container to execute inside.
  */
-gfx_api void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+gfx_api void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* desc);
 
 /**
  * @brief Closes the active rendering pass block, resolving multisample targets and executing layout transitions.
@@ -1572,52 +1559,49 @@ typedef struct gfx_api_pfn
     void     (*pfn_frame_end) (gfx_frame_t* frame);
 
     // BUFFER
-    void     (*pfn_create_buffer)      (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
-    void     (*pfn_update_buffer_data) (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-    void     (*pfn_destroy_buffer)     (gfx_context_t* ctx, gfx_buffer_t* buffer);
+    void     (*pfn_buffer_create)      (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+    void     (*pfn_buffer_update_data) (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+    void     (*pfn_buffer_destroy)     (gfx_context_t* ctx, gfx_buffer_t* buffer);
 
     // SHADER
-    void     (*pfn_create_shader)    (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+    void     (*pfn_shader_create)    (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
     uint32_t (*pfn_shader_get_descriptor_set_count)(gfx_shader_t* shader);
     uint64_t (*pfn_uniform_location) (gfx_shader_t* shader, const char* name);
-    void     (*pfn_destroy_shader)   (gfx_context_t* ctx, gfx_shader_t* shader);
+    void     (*pfn_shader_destroy)   (gfx_context_t* ctx, gfx_shader_t* shader);
 
     // SAMPLER
-    void     (*pfn_create_sampler)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
-    void     (*pfn_destroy_sampler) (gfx_context_t* ctx, gfx_sampler_t* sampler);
+    void     (*pfn_sampler_create)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+    void     (*pfn_sampler_destroy) (gfx_context_t* ctx, gfx_sampler_t* sampler);
 
     // TEXTURE
-    void     (*pfn_create_texture)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
-    void     (*pfn_update_texture_data)     (gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
-    void     (*pfn_update_bindless_texture) (gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
+    void     (*pfn_texture_create)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+    void     (*pfn_texture_update_data)     (gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+    void     (*pfn_texture_update_bindless) (gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
     void     (*pfn_texture_generate_mipmap) (gfx_context_t* ctx, gfx_texture_t* texture);
-    void     (*pfn_blit_image)              (gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+    void     (*pfn_texture_blit)            (gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
     void     (*pfn_texture_get_data)        (gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-    void     (*pfn_destroy_texture)         (gfx_context_t* ctx, gfx_texture_t* texture);
+    void     (*pfn_texture_destroy)         (gfx_context_t* ctx, gfx_texture_t* texture);
 
     // PIPELINE
-    void     (*pfn_create_pipeline)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-    void     (*pfn_create_compute_pipeline)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
-    void     (*pfn_create_mesh_pipeline)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
-    void     (*pfn_create_raytrace_pipeline) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
-    void     (*pfn_destroy_pipeline)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
-    void     (*pfn_destroy_compute_pipeline) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
-    void     (*pfn_destroy_mesh_pipeline)    (gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
-    void     (*pfn_destroy_raytrace_pipeline)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
+    void     (*pfn_pipeline_create)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+    void     (*pfn_mesh_pipeline_create)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc, gfx_pipeline_t * *pipeline);
+    void     (*pfn_pipeline_destroy)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 
-    // RENDER TARGET
-    void     (*pfn_create_render_target)  (gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-    void     (*pfn_destroy_render_target) (gfx_context_t* ctx, gfx_render_target_t* target);
+    void     (*pfn_pipeline_compute_create)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
+    void     (*pfn_pipeline_compute_destroy) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
+  
+    void     (*pfn_pipeline_raytrace_create) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+    void     (*pfn_pipeline_raytrace_destroy)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
     // DESCRIPTOR SET
-    void     (*pfn_create_descriptor_set)   (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
-    void     (*pfn_uniform_set_buffer)      (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
-    void     (*pfn_uniform_set_buffer_data) (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
-    void     (*pfn_uniform_set_texture)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
-    void     (*pfn_uniform_set_sampler)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
-    void     (*pfn_destroy_descriptor_set)  (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+    void     (*pfn_descriptor_set_create)   (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
+    void     (*pfn_descriptor_set_write_buffer_data) (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
+    void     (*pfn_descriptor_set_write_buffer)      (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
+    void     (*pfn_descriptor_set_write_texture)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
+    void     (*pfn_descriptor_set_write_sampler)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
+    void     (*pfn_descriptor_set_destroy)  (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
 
-    void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+    void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
     void     (*pfn_cmd_end_pass)   (gfx_command_buffer_t* cmd);
 
     void     (*pfn_cmd_scissor)             (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
@@ -1636,6 +1620,14 @@ typedef struct gfx_api_pfn
 
     void     (*pfn_cmd_buffer_barrier)  (gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
     void     (*pfn_cmd_texture_barrier) (gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
+    // wip
+    void    (*pfn_acceleration_structure_create)(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t **acceleration_struct);
+    void    (*pfn_acceleration_structure_destroy)(gfx_context_t* ctx, gfx_acceleration_structure_t * acceleration_structure);
+    void    (*pfn_sbt_create)(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t **);
+    void    (*pfn_sbt_destroy)(gfx_context_t* ctx, gfx_sbt_t *sbt);
+    void    (*pfn_cmd_build_acceleration_structure)(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t* dst, gfx_acceleration_structure_t* src);
+    void    (*pfn_cmd_trace_rays)(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
 } gfx_api_pfn;
 
 

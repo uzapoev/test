@@ -194,7 +194,7 @@ gfx_api void     wgpu_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* des
 gfx_api void     wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
 gfx_api void     wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
 gfx_api void     wgpu_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
-gfx_api void     wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
+gfx_api void     wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
 gfx_api void     wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
 gfx_api void     wgpu_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
 gfx_api void     wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t se_idx, gfx_descriptor_set_t** descriptor);
@@ -206,7 +206,7 @@ gfx_api void     wgpu_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler
 gfx_api void     wgpu_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture);
 gfx_api void     wgpu_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 gfx_api void     wgpu_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
-gfx_api void     wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline);
+gfx_api void     wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 gfx_api void     wgpu_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 gfx_api void     wgpu_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
 gfx_api void     wgpu_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
@@ -230,7 +230,7 @@ gfx_api [[deprecatred]] void     wgpu_cmd_begin(gfx_command_buffer_t* cmd);
 gfx_api [[deprecatred]] void     wgpu_cmd_end(gfx_command_buffer_t* cmd);
 gfx_api [[deprecatred]] void     wgpu_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
-gfx_api void     wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+gfx_api void     wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
 gfx_api void     wgpu_cmd_end_pass(gfx_command_buffer_t* cmd);
                  
 gfx_api void     wgpu_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);

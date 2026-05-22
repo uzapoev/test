@@ -1,16 +1,8 @@
 #include "gfx.h"
 
-#ifdef GFX_PLATFORM_WIN
-    #include <windows.h>
-    #include <dbghelp.h>
-    #pragma comment(lib, "dbghelp.lib")
-#endif
-
 #include <stdio.h>
-#include <math.h>
 #include <memory.h> // memset
 #include <atomic>
-//#include <thread>
 
 
 #ifndef __cplusplus
@@ -321,25 +313,25 @@ gfx_result gfx_end_frame(gfx_frame_t* frame)
 
 // --- BUFFER ---
 void gfx_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer) {
-    g_tbl->pfn_create_buffer(ctx, desc, buffer);
+    g_tbl->pfn_buffer_create(ctx, desc, buffer);
 }
 gfx_api gfx_buffer_t* gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc) {
     gfx_buffer_t* result = nullptr;
-    g_tbl->pfn_create_buffer(ctx, desc, &result);
+    g_tbl->pfn_buffer_create(ctx, desc, &result);
     return result;
 }
 gfx_api void gfx_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset) {
-    g_tbl->pfn_update_buffer_data(ctx, buffer, data, size, offset);
+    g_tbl->pfn_buffer_update_data(ctx, buffer, data, size, offset);
 }
 
 void gfx_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer) {
-    g_tbl->pfn_destroy_buffer(ctx, buffer);
+    g_tbl->pfn_buffer_destroy(ctx, buffer);
 }
 
 // --- SHADER ---
 gfx_api gfx_shader_t* gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc) {
     gfx_shader_t* result = nullptr;
-    g_tbl->pfn_create_shader(ctx, desc, &result);
+    g_tbl->pfn_shader_create(ctx, desc, &result);
     return result;
 }
 
@@ -356,35 +348,35 @@ uint64_t gfx_uniform_location(gfx_shader_t* shader, const char* name) {
     return g_tbl->pfn_uniform_location(shader, name);
 }
 void gfx_shader_destroy(gfx_context_t* ctx, gfx_shader_t* buffer) {
-    g_tbl->pfn_destroy_shader(ctx, buffer);
+    g_tbl->pfn_shader_destroy(ctx, buffer);
 }
 
 // --- SAMPLER ---
 gfx_api gfx_sampler_t* gfx_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc) {
     gfx_sampler_t* result = nullptr;
-    g_tbl->pfn_create_sampler(ctx, desc, &result);
+    g_tbl->pfn_sampler_create(ctx, desc, &result);
     return result;
 }
 
 void gfx_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler) {
-    g_tbl->pfn_destroy_sampler(ctx, sampler);
+    g_tbl->pfn_sampler_destroy(ctx, sampler);
 }
 
 // --- TEXTURE ---
 gfx_api gfx_texture_t* gfx_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc) {
     gfx_texture_t* result = nullptr;
-    g_tbl->pfn_create_texture(ctx, desc, &result);
+    g_tbl->pfn_texture_create(ctx, desc, &result);
     return result;
 }
 
 gfx_api void gfx_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset) {
-    if (!g_tbl || !g_tbl->pfn_update_texture_data) { gfx_stub_not_implemented(nullptr, "gfx_update_image_data"); return; }
-    g_tbl->pfn_update_texture_data(ctx, texture, data, size, offset);
+    if (!g_tbl || !g_tbl->pfn_texture_update_data) { gfx_stub_not_implemented(nullptr, "gfx_update_image_data"); return; }
+    g_tbl->pfn_texture_update_data(ctx, texture, data, size, offset);
 }
 
 gfx_api void gfx_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx) {
-    if (!g_tbl || !g_tbl->pfn_update_bindless_texture) { gfx_stub_not_implemented(nullptr, "gfx_update_bindless_texture"); return; }
-    g_tbl->pfn_update_bindless_texture(ctx, texture, idx);
+    if (!g_tbl || !g_tbl->pfn_texture_update_bindless) { gfx_stub_not_implemented(nullptr, "gfx_update_bindless_texture"); return; }
+    g_tbl->pfn_texture_update_bindless(ctx, texture, idx);
 }
 
 gfx_api void gfx_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture) {
@@ -393,8 +385,8 @@ gfx_api void gfx_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* text
 }
 
 gfx_api void gfx_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst) {
-    if (!g_tbl || !g_tbl->pfn_blit_image) { gfx_stub_not_implemented(nullptr, "gfx_blit_image"); return; }
-    g_tbl->pfn_blit_image(ctx, src, dst);
+    if (!g_tbl || !g_tbl->pfn_texture_blit) { gfx_stub_not_implemented(nullptr, "gfx_blit_image"); return; }
+    g_tbl->pfn_texture_blit(ctx, src, dst);
 }
 
 gfx_api void gfx_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd) {
@@ -403,80 +395,68 @@ gfx_api void gfx_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
 }
 
 void gfx_texture_destroy(gfx_context_t* ctx, gfx_texture_t* texture) {
-    g_tbl->pfn_destroy_texture(ctx, texture);
+    g_tbl->pfn_texture_destroy(ctx, texture);
 }
 
 // --- PIPELINE ---
 gfx_api gfx_pipeline_t* gfx_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc) {
     gfx_pipeline_t* result = nullptr;
-    g_tbl->pfn_create_pipeline(ctx, desc, &result);
+    g_tbl->pfn_pipeline_create(ctx, desc, &result);
     return result;
 }
 
 
 gfx_api gfx_pipeline_compute_t* gfx_compute_pipeline_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc) {
     gfx_pipeline_compute_t* pipeline = nullptr;
-    g_tbl->pfn_create_compute_pipeline(ctx, desc, &pipeline);
+    g_tbl->pfn_pipeline_compute_create(ctx, desc, &pipeline);
     return pipeline;
 }
 void gfx_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline) {
-    g_tbl->pfn_destroy_pipeline(ctx, pipeline);
+    g_tbl->pfn_pipeline_destroy(ctx, pipeline);
 }
 void gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline) {
-    if (!g_tbl || !g_tbl->pfn_destroy_compute_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_compute_pipeline_destroy"); return; }
-    g_tbl->pfn_destroy_compute_pipeline(ctx, pipeline);
+    if (!g_tbl || !g_tbl->pfn_pipeline_compute_destroy) { gfx_stub_not_implemented(nullptr, "gfx_compute_pipeline_destroy"); return; }
+    g_tbl->pfn_pipeline_compute_destroy(ctx, pipeline);
 }
-gfx_api gfx_pipeline_mesh_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc) {
-    gfx_pipeline_mesh_t* result = nullptr;
-    if (!g_tbl || !g_tbl->pfn_create_mesh_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_mesh_create"); return result; }
-    g_tbl->pfn_create_mesh_pipeline(ctx, desc, &result);
+gfx_api gfx_pipeline_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc) {
+    gfx_pipeline_t* result = nullptr;
+    if (!g_tbl || !g_tbl->pfn_mesh_pipeline_create) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_mesh_create"); return result; }
+    g_tbl->pfn_mesh_pipeline_create(ctx, desc, &result);
     return result;
 }
-gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline) {
-    if (!g_tbl || !g_tbl->pfn_destroy_mesh_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_mesh_destroy"); return; }
-    g_tbl->pfn_destroy_mesh_pipeline(ctx, pipeline);
-}
+
 gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc) {
     gfx_pipeline_raytrace_t* result = nullptr;
-    if (!g_tbl || !g_tbl->pfn_create_raytrace_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_create"); return result; }
-    g_tbl->pfn_create_raytrace_pipeline(ctx, desc, &result);
+    if (!g_tbl || !g_tbl->pfn_pipeline_raytrace_create) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_create"); return result; }
+    g_tbl->pfn_pipeline_raytrace_create(ctx, desc, &result);
     return result;
 }
 gfx_api void gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline) {
-    if (!g_tbl || !g_tbl->pfn_destroy_raytrace_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_destroy"); return; }
-    g_tbl->pfn_destroy_raytrace_pipeline(ctx, pipeline);
+    if (!g_tbl || !g_tbl->pfn_pipeline_raytrace_destroy) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_destroy"); return; }
+    g_tbl->pfn_pipeline_raytrace_destroy(ctx, pipeline);
 }
 
-// --- RENDER TARGET ---
-gfx_api gfx_render_target_t* gfx_render_target_create(gfx_context_t* ctx, gfx_render_target_desc_t* desc) {
-    gfx_render_target_t* result = nullptr;
-    g_tbl->pfn_create_render_target(ctx, desc, &result);
-    return result;
-}
-void gfx_render_target_destroy(gfx_context_t* ctx, gfx_render_target_t* target) {
-    g_tbl->pfn_destroy_render_target(ctx, target);
-}
 
 // --- DESCRIPTOR SET ---
 gfx_api gfx_descriptor_set_t* gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx) {
     gfx_descriptor_set_t* result = nullptr;
-    g_tbl->pfn_create_descriptor_set(ctx, shader, set_idx, &result);
+    g_tbl->pfn_descriptor_set_create(ctx, shader, set_idx, &result);
     return result;
 }
 void gfx_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) {
-    g_tbl->pfn_uniform_set_buffer_data(set, handle, data, size);
+    g_tbl->pfn_descriptor_set_write_buffer_data(set, handle, data, size);
 }
 void gfx_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t size) {
-    g_tbl->pfn_uniform_set_buffer(set, handle, buffer, size);
+    g_tbl->pfn_descriptor_set_write_buffer(set, handle, buffer, size);
 }
 void gfx_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture) {
-    g_tbl->pfn_uniform_set_texture(set, handle, texture);
+    g_tbl->pfn_descriptor_set_write_texture(set, handle, texture);
 }
 void gfx_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler) {
-    g_tbl->pfn_uniform_set_sampler(set, handle, sampler);
+    g_tbl->pfn_descriptor_set_write_sampler(set, handle, sampler);
 }
 void gfx_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor) {
-    g_tbl->pfn_destroy_descriptor_set(ctx, descriptor);
+    g_tbl->pfn_descriptor_set_destroy(ctx, descriptor);
 }
 
 // --- COMMAND BUFFER ---
@@ -487,8 +467,8 @@ void gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker) {
 void gfx_cmd_pop_marker(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_pop_marker(cmd);
 }
-void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target) {
-    g_tbl->pfn_cmd_begin_pass(cmd, target);
+void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* info) {
+    g_tbl->pfn_cmd_begin_pass(cmd, info);
 }
 void gfx_cmd_end_pass(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_end_pass(cmd);
@@ -787,50 +767,46 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_frame_end               = vk_frame_end;
 
     // BUFFER
-    func_table->pfn_create_buffer           = vk_buffer_create;
-    func_table->pfn_update_buffer_data      = vk_buffer_update_data;
-    func_table->pfn_destroy_buffer          = vk_buffer_destroy;
+    func_table->pfn_buffer_create           = vk_buffer_create;
+    func_table->pfn_buffer_update_data      = vk_buffer_update_data;
+    func_table->pfn_buffer_destroy          = vk_buffer_destroy;
 
     // SHADER
-    func_table->pfn_create_shader           = vk_shader_create;
+    func_table->pfn_shader_create           = vk_shader_create;
     func_table->pfn_shader_get_descriptor_set_count = vk_shader_get_descriptor_set_count;
     func_table->pfn_uniform_location        = vk_uniform_location;
-    func_table->pfn_destroy_shader          = vk_shader_destroy;
+    func_table->pfn_shader_destroy          = vk_shader_destroy;
 
     // SAMPLER
-    func_table->pfn_create_sampler          = vk_sampler_create;
-    func_table->pfn_destroy_sampler         = vk_sampler_destroy;
+    func_table->pfn_sampler_create          = vk_sampler_create;
+    func_table->pfn_sampler_destroy         = vk_sampler_destroy;
 
     // TEXTURE
-    func_table->pfn_create_texture          = vk_texture_create;
-    func_table->pfn_update_texture_data     = vk_texture_update_data;
-    func_table->pfn_update_bindless_texture = vk_texture_update_bindless;
+    func_table->pfn_texture_create          = vk_texture_create;
+    func_table->pfn_texture_update_data     = vk_texture_update_data;
+    func_table->pfn_texture_update_bindless = vk_texture_update_bindless;
     func_table->pfn_texture_generate_mipmap = vk_texture_generate_mipmap;
-    func_table->pfn_blit_image              = vk_texture_blit;
+    func_table->pfn_texture_blit            = vk_texture_blit;
     func_table->pfn_texture_get_data        = vk_texture_get_data;
-    func_table->pfn_destroy_texture         = vk_texture_destroy;
+    func_table->pfn_texture_destroy         = vk_texture_destroy;
 
     // PIPELINE
-    func_table->pfn_create_pipeline         = vk_create_pipeline;
-    func_table->pfn_create_compute_pipeline  = vk_create_compute_pipeline;
-    func_table->pfn_create_mesh_pipeline     = vk_create_mesh_pipeline;
-    func_table->pfn_create_raytrace_pipeline = vk_create_raytrace_pipeline;
-    func_table->pfn_destroy_pipeline         = vk_destroy_pipeline;
-    func_table->pfn_destroy_compute_pipeline = vk_destroy_compute_pipeline;
-    func_table->pfn_destroy_mesh_pipeline    = vk_destroy_mesh_pipeline;
-    func_table->pfn_destroy_raytrace_pipeline= vk_destroy_raytrace_pipeline;
-
-    // RENDER TARGET
-    func_table->pfn_create_render_target    = vk_create_render_target;
-    func_table->pfn_destroy_render_target   = vk_destroy_render_target;
+    func_table->pfn_pipeline_create          = vk_create_pipeline;
+    func_table->pfn_pipeline_compute_create  = vk_create_compute_pipeline;
+    func_table->pfn_mesh_pipeline_create     = vk_create_mesh_pipeline;
+    func_table->pfn_pipeline_raytrace_create = vk_create_raytrace_pipeline;
+    func_table->pfn_pipeline_destroy         = vk_destroy_pipeline;
+    func_table->pfn_pipeline_compute_destroy = vk_destroy_compute_pipeline;
+    func_table->pfn_pipeline_raytrace_destroy= vk_destroy_raytrace_pipeline;
 
     // DESCRIPTOR SET
-    func_table->pfn_create_descriptor_set   = vk_descriptor_set_create;
-    func_table->pfn_uniform_set_buffer      = vk_descriptor_set_write_buffer;
-    func_table->pfn_uniform_set_buffer_data = vk_descriptor_set_write_buffer_data;
-    func_table->pfn_uniform_set_texture     = vk_descriptor_set_write_texture;
-    func_table->pfn_uniform_set_sampler     = vk_descriptor_set_write_sampler;
-    func_table->pfn_destroy_descriptor_set  = vk_descriptor_set_destroy;
+    func_table->pfn_descriptor_set_create       = vk_descriptor_set_create;
+    func_table->pfn_descriptor_set_write_buffer = vk_descriptor_set_write_buffer;
+    func_table->pfn_descriptor_set_write_buffer_data = vk_descriptor_set_write_buffer_data;
+    func_table->pfn_descriptor_set_write_texture     = vk_descriptor_set_write_texture;
+    func_table->pfn_descriptor_set_write_sampler     = vk_descriptor_set_write_sampler;
+    func_table->pfn_descriptor_set_destroy = vk_descriptor_set_destroy;
+
 
     // COMMAND BUFFER
     func_table->pfn_cmd_begin_pass          = vk_cmd_begin_pass;
@@ -869,49 +845,45 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_init                    = wgpu_init;
 
     // BUFFER
-    func_table->pfn_create_buffer           = wgpu_create_buffer;
-    func_table->pfn_update_buffer_data      = wgpu_update_buffer_data;
-    func_table->pfn_destroy_buffer          = wgpu_destroy_buffer;
+    func_table->pfn_buffer_create           = wgpu_create_buffer;
+    func_table->pfn_buffer_update_data      = wgpu_update_buffer_data;
+    func_table->pfn_buffer_destroy          = wgpu_destroy_buffer;
 
     // SHADER
-    func_table->pfn_create_shader           = wgpu_create_shader;
+    func_table->pfn_shader_create           = wgpu_create_shader;
     func_table->pfn_uniform_location        = wgpu_uniform_location;
-    func_table->pfn_destroy_shader          = wgpu_destroy_shader;
+    func_table->pfn_shader_destroy          = wgpu_destroy_shader;
 
     // SAMPLER
-    func_table->pfn_create_sampler          = wgpu_create_sampler;
-    func_table->pfn_destroy_sampler         = wgpu_destroy_sampler;
+    func_table->pfn_sampler_create          = wgpu_create_sampler;
+    func_table->pfn_sampler_destroy         = wgpu_destroy_sampler;
 
     // TEXTURE
-    func_table->pfn_create_texture          = wgpu_create_texture;
-    func_table->pfn_update_texture_data     = wgpu_update_texture_data;
-    func_table->pfn_update_bindless_texture = wgpu_update_bindless_texture;
+    func_table->pfn_texture_create          = wgpu_create_texture;
+    func_table->pfn_texture_update_data     = wgpu_update_texture_data;
+    func_table->pfn_texture_update_bindless = wgpu_update_bindless_texture;
     func_table->pfn_texture_generate_mipmap = wgpu_texture_generate_mipmap;
-    func_table->pfn_blit_image              = wgpu_blit_image;
+    func_table->pfn_texture_blit              = wgpu_blit_image;
     func_table->pfn_texture_get_data        = wgpu_texture_get_data;
-    func_table->pfn_destroy_texture         = wgpu_destroy_texture;
+    func_table->pfn_texture_destroy         = wgpu_destroy_texture;
 
     // PIPELINE
-    func_table->pfn_create_pipeline         = wgpu_create_pipeline;
-    func_table->pfn_create_compute_pipeline  = wgpu_create_compute_pipeline;
-    func_table->pfn_create_mesh_pipeline     = wgpu_create_mesh_pipeline;
-    func_table->pfn_create_raytrace_pipeline = wgpu_create_raytrace_pipeline;
-    func_table->pfn_destroy_pipeline         = wgpu_destroy_pipeline;
-    func_table->pfn_destroy_compute_pipeline = wgpu_destroy_compute_pipeline;
-    func_table->pfn_destroy_mesh_pipeline    = wgpu_destroy_mesh_pipeline;
-    func_table->pfn_destroy_raytrace_pipeline= wgpu_destroy_raytrace_pipeline;
+    func_table->pfn_pipeline_create         = wgpu_create_pipeline;
+    func_table->pfn_pipeline_compute_create  = wgpu_create_compute_pipeline;
+    func_table->pfn_mesh_pipeline_create     = wgpu_create_mesh_pipeline;
+    func_table->pfn_pipeline_raytrace_create = wgpu_create_raytrace_pipeline;
+    func_table->pfn_pipeline_destroy         = wgpu_destroy_pipeline;
+    func_table->pfn_pipeline_compute_destroy = wgpu_destroy_compute_pipeline;
+    func_table->pfn_pipeline_raytrace_destroy= wgpu_destroy_raytrace_pipeline;
 
-    // RENDER TARGET
-    func_table->pfn_create_render_target    = wgpu_create_render_target;
-    func_table->pfn_destroy_render_target   = wgpu_destroy_render_target;
 
     // DESCRIPTOR SET
-    func_table->pfn_create_descriptor_set   = wgpu_create_descriptor_set;
-    func_table->pfn_uniform_set_buffer      = wgpu_uniform_set_buffer;
-    func_table->pfn_uniform_set_buffer_data = wgpu_uniform_update_buffer_data;
-    func_table->pfn_uniform_set_texture     = wgpu_uniform_set_texture;
-    func_table->pfn_uniform_set_sampler     = wgpu_uniform_set_sampler;
-    func_table->pfn_destroy_descriptor_set  = wgpu_destroy_descriptor_set;
+    func_table->pfn_descriptor_set_create   = wgpu_create_descriptor_set;
+    func_table->pfn_descriptor_set_write_buffer      = wgpu_uniform_set_buffer;
+    func_table->pfn_descriptor_set_write_buffer_data = wgpu_uniform_update_buffer_data;
+    func_table->pfn_descriptor_set_write_texture     = wgpu_uniform_set_texture;
+    func_table->pfn_descriptor_set_write_sampler     = wgpu_uniform_set_sampler;
+    func_table->pfn_descriptor_set_destroy  = wgpu_destroy_descriptor_set;
 
     // COMMAND BUFFER
     func_table->pfn_cmd_begin_pass          = wgpu_cmd_begin_pass;

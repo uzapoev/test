@@ -1,4 +1,4 @@
-# gfx
+# gfx(WIP)
 
 A modern, light-weight, single-header C graphics abstraction layer designed for high-performance GPU-driven rendering, low memory footprint, and mobile-first efficiency. 
 

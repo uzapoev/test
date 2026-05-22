@@ -102,10 +102,10 @@ extern "C" void dx12_create_compute_pipeline(gfx_context_t* /*ctx*/, gfx_compute
 }
 
 
-extern "C" void dx12_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc, gfx_pipeline_mesh_t **out_pipeline)
+extern "C" void dx12_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc, gfx_pipeline_t **out_pipeline)
 {
 }
-extern "C" void dx12_destroy_mesh_pipeline(gfx_context_t * ctx, gfx_pipeline_mesh_t * pipeline)
+extern "C" void dx12_destroy_mesh_pipeline(gfx_context_t * ctx, gfx_pipeline_t * pipeline)
 {
 }
 
@@ -189,7 +189,7 @@ extern "C" void dx12_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* 
 }
 
 extern "C" void dx12_cmd_begin(gfx_command_buffer_t* /*cmd*/) {}
-extern "C" void dx12_cmd_begin_pass(gfx_command_buffer_t* /*cmd*/, gfx_render_target_t* /*target*/) {}
+extern "C" void dx12_cmd_begin_pass(gfx_command_buffer_t* /*cmd*/, gfx_pass_info_t* /*pass*/) {}
 extern "C" void dx12_cmd_end_pass(gfx_command_buffer_t* /*cmd*/) {}
 extern "C" void dx12_cmd_scissor(gfx_command_buffer_t* /*cmd*/, uint32_t /*x*/, uint32_t /*y*/, uint32_t /*w*/, uint32_t /*h*/) {}
 extern "C" void dx12_cmd_viewport(gfx_command_buffer_t* /*cmd*/, uint32_t /*x*/, uint32_t /*y*/, uint32_t /*w*/, uint32_t /*h*/) {}
@@ -218,49 +218,47 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
     func_table->pfn_get_caps = dx12_get_caps;
 
     // BUFFER
-    func_table->pfn_create_buffer      = dx12_create_buffer;
-    func_table->pfn_update_buffer_data = dx12_update_buffer_data;
-    func_table->pfn_destroy_buffer     = dx12_destroy_buffer;
+    func_table->pfn_buffer_create      = dx12_create_buffer;
+    func_table->pfn_buffer_update_data = dx12_update_buffer_data;
+    func_table->pfn_buffer_destroy     = dx12_destroy_buffer;
 
     // SHADER
-    func_table->pfn_create_shader    = dx12_create_shader;
+    func_table->pfn_shader_create    = dx12_create_shader;
     func_table->pfn_uniform_location = dx12_uniform_location;
-    func_table->pfn_destroy_shader   = dx12_destroy_shader;
+    func_table->pfn_shader_destroy   = dx12_destroy_shader;
 
     // SAMPLER
-    func_table->pfn_create_sampler  = dx12_create_sampler;
-    func_table->pfn_destroy_sampler = dx12_destroy_sampler;
+    func_table->pfn_sampler_create  = dx12_create_sampler;
+    func_table->pfn_sampler_destroy = dx12_destroy_sampler;
 
     // TEXTURE
-    func_table->pfn_create_texture          = dx12_create_texture;
-    func_table->pfn_update_texture_data     = dx12_update_texture_data;
-    func_table->pfn_update_bindless_texture = dx12_update_bindless_texture;
+    func_table->pfn_texture_create          = dx12_create_texture;
+    func_table->pfn_texture_update_data     = dx12_update_texture_data;
+    func_table->pfn_texture_update_bindless = dx12_update_bindless_texture;
     func_table->pfn_texture_generate_mipmap = dx12_texture_generate_mipmap;
-    func_table->pfn_blit_image              = dx12_blit_image;
+    func_table->pfn_texture_blit              = dx12_blit_image;
     func_table->pfn_texture_get_data        = dx12_texture_get_data;
-    func_table->pfn_destroy_texture         = dx12_destroy_texture;
+    func_table->pfn_texture_destroy         = dx12_destroy_texture;
 
     // PIPELINE
-    func_table->pfn_create_pipeline          = dx12_create_pipeline;
-    func_table->pfn_create_compute_pipeline  = dx12_create_compute_pipeline;
-    func_table->pfn_create_mesh_pipeline     = dx12_create_mesh_pipeline;
-    func_table->pfn_create_raytrace_pipeline = dx12_create_raytrace_pipeline;
-    func_table->pfn_destroy_pipeline         = dx12_destroy_pipeline;
-    func_table->pfn_destroy_compute_pipeline = dx12_destroy_compute_pipeline;
-    func_table->pfn_destroy_mesh_pipeline    = dx12_destroy_mesh_pipeline;
-    func_table->pfn_destroy_raytrace_pipeline= dx12_destroy_raytrace_pipeline;
+    func_table->pfn_pipeline_create          = dx12_create_pipeline;
+    func_table->pfn_pipeline_compute_create  = dx12_create_compute_pipeline;
+    func_table->pfn_mesh_pipeline_create     = dx12_create_mesh_pipeline;
+    func_table->pfn_pipeline_raytrace_create = dx12_create_raytrace_pipeline;
+    func_table->pfn_pipeline_destroy         = dx12_destroy_pipeline;
+    func_table->pfn_pipeline_compute_destroy = dx12_destroy_compute_pipeline;
+    func_table->pfn_pipeline_raytrace_destroy= dx12_destroy_raytrace_pipeline;
 
     // RENDER TARGET
-    func_table->pfn_create_render_target  = dx12_create_render_target;
-    func_table->pfn_destroy_render_target = dx12_destroy_render_target;
+
 
     // DESCRIPTOR SET
-    func_table->pfn_create_descriptor_set   = dx12_create_descriptor_set;
-    func_table->pfn_uniform_set_buffer      = dx12_uniform_set_buffer;
-    func_table->pfn_uniform_set_buffer_data = dx12_uniform_set_buffer_data;
-    func_table->pfn_uniform_set_texture     = dx12_uniform_set_texture;
-    func_table->pfn_uniform_set_sampler     = dx12_uniform_set_sampler;
-    func_table->pfn_destroy_descriptor_set  = dx12_destroy_descriptor_set;
+    func_table->pfn_descriptor_set_create   = dx12_create_descriptor_set;
+    func_table->pfn_descriptor_set_write_buffer      = dx12_uniform_set_buffer;
+    func_table->pfn_descriptor_set_write_buffer_data = dx12_uniform_set_buffer_data;
+    func_table->pfn_descriptor_set_write_texture     = dx12_uniform_set_texture;
+    func_table->pfn_descriptor_set_write_sampler     = dx12_uniform_set_sampler;
+    func_table->pfn_descriptor_set_destroy  = dx12_destroy_descriptor_set;
 
     // COMMAND BUFFER
     func_table->pfn_cmd_begin_pass = dx12_cmd_begin_pass;

@@ -248,12 +248,16 @@ void platform_tick(void* userdata)
     g_camera.setup(g_camera.m_fov, width / height, g_camera.m_near, g_camera.m_far);
     g_camera.update();
 
-    
-    auto frame = gfx_begin_frame(ctx, &surface);
-        gfx_render_pass_desc_t pass = { 0 };
-            pass.target = frame->target;
+    gfx_pass_info_t pass = { 0 };
 
-        gfx_cmd_begin_pass(frame->cmd, frame->target);
+    auto frame = gfx_begin_frame(ctx, &surface);
+            
+        pass.target = frame->target;
+        pass.clear_color_value = 0xFF7F7F7FFF;
+        pass.clear_depth_value = 1.0f;
+        pass.clear_stencil_value = 0;
+
+        gfx_cmd_begin_pass(frame->cmd, &pass);
         g_scene.draw(frame->cmd, g_camera);
         gfx_cmd_end_pass(frame->cmd);
 

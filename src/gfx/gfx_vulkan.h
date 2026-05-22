@@ -28,11 +28,19 @@
 extern "C" {
 #endif
 
-#define     MAX_FRAME_IN_FLIGHT                 (2)
+#define     GFX_MAX_FRAME_IN_FLIGHT             (2)
+
 #define     GFX_MAX_DESCRIPTOR_SETS             (8)
+
+#define     GFX_MAX_DESCRIPTOR_BINDINGS         (16)    // Max binding slots allocated per set. Handles non-contiguous binding indices 
+                                                        // caused by cross-compiler global flattening (e.g. Slang ParameterBlock)
+
 #define     MAX_TIMESTAMP_QUERIES               (128)
+
 #define     MAX_TIMESTAMP_NESTING_LEVEL         (16)
-#define     MAX_BATCH_BARRIERS                  (16)
+
+#define     GFX_MAX_BATCH_BARRIERS              (16)
+
 #define     MAX_DESCRIPTOR_POOL_SET_SIZE        (1024)
 
 /**/
@@ -52,6 +60,7 @@ typedef struct vk_context_t
     VkPhysicalDevice                    vk_physical_device     = VK_NULL_HANDLE;
     VkSurfaceKHR                        vk_surface             = VK_NULL_HANDLE;
 
+    gfx_caps_t                          gpu_caps;
     gfx_allocator_t                     allocator;
 
     // --- Device Queues ---
@@ -133,16 +142,16 @@ typedef struct vk_surface_t {
     VkRenderPass                        render_pass;
     VkSampleCountFlags                  vk_msaa_samples;
 
-    VkFence                             fences[MAX_FRAME_IN_FLIGHT];                        // CPU-GPU frame execution fences
-    VkSemaphore                         semaphore_image_available[MAX_FRAME_IN_FLIGHT];     // Wait Semaphores
-    VkSemaphore                         semaphore_rendering_finished[MAX_FRAME_IN_FLIGHT];  // Signal Semaphores
+    VkFence                             fences[GFX_MAX_FRAME_IN_FLIGHT];                        // CPU-GPU frame execution fences
+    VkSemaphore                         semaphore_image_available[GFX_MAX_FRAME_IN_FLIGHT];     // Wait Semaphores
+    VkSemaphore                         semaphore_rendering_finished[GFX_MAX_FRAME_IN_FLIGHT];  // Signal Semaphores
 
     uint32_t                            current_frame;          // Index of the current CPU frame (0 to MAX_FRAME_IN_FLIGHT - 1)
     uint32_t                            swapchain_image_index;  // Index of the acquired swapchain image
     
-    gfx_frame_t                         frames[MAX_FRAME_IN_FLIGHT];
+    gfx_frame_t                         frames[GFX_MAX_FRAME_IN_FLIGHT];
 
-    struct vk_render_target_t*          targets[MAX_FRAME_IN_FLIGHT];
+    struct vk_render_target_t*          targets[GFX_MAX_FRAME_IN_FLIGHT];
 } vk_surface_t;
 
 
@@ -216,6 +225,8 @@ typedef struct vk_shader_t {
 
     VkPipelineLayout                    pipeline_layout;
 
+    vk_descriptor_set_t *               default_sets[GFX_MAX_DESCRIPTOR_SETS] = { 0 };
+
     vk_descriptor_pool_t *              pool;                   //todo: outdated, current pool
     gfx_handle_pool_t *                 descriptor_set_pool;    //todo: outdated, pool of pools
 } vk_shader_t;
@@ -268,7 +279,6 @@ typedef struct vk_descriptor_set_t {
     uint32_t                            ubo_offset;             // Byte offset inside the pool's global UBO buffer
 
     VkBool32                            is_free;                // Flag indicating if this set slot is unallocated
-    VkBool32                            is_dirty;               // Flag indicating if descriptors need to be updated/rebound
     uint32_t                            index_in_pool;
     VkDescriptorSet                     descriptor_set;
 
@@ -363,25 +373,22 @@ gfx_api void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline
 gfx_api void vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
 // mesh pipeline
-gfx_api void vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
-gfx_api void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* desc);
+gfx_api void vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* desc);
 
 // raytrace pipeline
 gfx_api void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
 gfx_api void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
 
-gfx_api [[deprecated("")]] void vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-gfx_api [[deprecated("")]] void vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
-
-gfx_api [[deprecated("non public")]] void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
-gfx_api [[deprecated("non public")]] void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-gfx_api [[deprecated("non public")]] void vk_cmd_begin(gfx_command_buffer_t* cmd);
-gfx_api [[deprecated("non public")]] void vk_cmd_end(gfx_command_buffer_t* cmd);
-gfx_api [[deprecated("non public")]] void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_begin(gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_end(gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
 
-gfx_api void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+gfx_api void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass);
              
 gfx_api void vk_cmd_end_pass(gfx_command_buffer_t* cmd);
              

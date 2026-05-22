@@ -1358,7 +1358,7 @@ void wgpu_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* p
     // wgpu_create_compute_pipeline is not yet implemented — nothing to release
 }
 
-void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline)
+void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
     wctx->dbglog(gfx_msg_error, "wgpu_create_mesh_pipeline not implemented");
@@ -1370,7 +1370,7 @@ void wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_des
     wctx->dbglog(gfx_msg_error, "wgpu_create_raytrace_pipeline not implemented");
 }
 
-void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline)
+void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
 {
 }
 
@@ -1665,10 +1665,10 @@ void wgpu_cmd_begin(gfx_command_buffer_t* cmd)
 }
 
 
-void wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target)
+void wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_render_target_t* wgpu_target = (wgpu_render_target_t*)target;
+    wgpu_render_target_t* wgpu_target = (wgpu_render_target_t*)pass->target;
 
     WGPUColor clearcolor = { 0.2f, 0.3f, 0.4f, 1.0f };
 
