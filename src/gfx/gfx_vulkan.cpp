@@ -229,7 +229,6 @@ VkImageAspectFlags determine_aspect_mask(VkFormat format)
 
 struct vk_write_info_t 
 {
-    VkWriteDescriptorSet        write;
     union 
     {
         VkDescriptorImageInfo   image_info;
@@ -1093,15 +1092,17 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vk_sampler_create(&vctx->handle, &sampler_descriptor, &vctx->default_sampler);
     
     // default texture
+    extern uint32_t gfx_failover_texture_data[];
     gfx_texture_t* default_texture = nullptr;
     gfx_texture_desc_t  default_texture_desc = { 0 };
         default_texture_desc.label        = "_default_texture";
-        default_texture_desc.width        = 4;
-        default_texture_desc.height       = 4;
+        default_texture_desc.width        = 16;
+        default_texture_desc.height       = 16;
         default_texture_desc.depth        = 1;
         default_texture_desc.format       = gfx_pixel_format_rgba8;
-        default_texture_desc.mip_levels   = 3;
-        default_texture_desc.data         = &_colors[0];
+        default_texture_desc.mip_levels   = 5;
+        default_texture_desc.array_layers = 1;
+        default_texture_desc.data         = &gfx_failover_texture_data[0];
     vk_texture_create(&vctx->handle, &default_texture_desc, &default_texture);
     vctx->default_texture = (vk_texture_t*)gfx_pool_map(vctx->texture_pool, default_texture->idx);
 
@@ -1741,24 +1742,16 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
         pool->ubo_buffer = (vk_buffer_t*)gfx_pool_map(ctx->buffers_pool, buffer->idx);
     }
 
-
-    uint32_t max_write_count = GFX_MAX_DESCRIPTOR_BINDINGS;
     pool->capacity = capacity;
     pool->free_set_count = capacity;
     pool->descriptor_sets = sets;
-    pool->descriptor_writes = (VkWriteDescriptorSet*)_gfx_alloc(ctx, (capacity * max_write_count) * sizeof(VkWriteDescriptorSet));
-    pool->write_infos = (vk_write_info_t*)_gfx_alloc(ctx, (capacity * max_write_count) * sizeof(vk_write_info_t));
-
-
-
-    VkWriteDescriptorSet  descriptor_writes[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
-
-    pool->write_infos = (vk_write_info_t*)_gfx_alloc(ctx, (capacity * max_write_count) * sizeof(vk_write_info_t));
-
-    int g = sizeof(VkWriteDescriptorSet);
 
     for (uint32_t i = 0; i < capacity; i++)
     {
+        VkWriteDescriptorSet    descriptor_writes[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
+        VkDescriptorImageInfo   descriptor_image_info[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
+        VkDescriptorBufferInfo  descriptor_buffer_info[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
+
         vk_descriptor_set_t* current_set = &sets[i];
 
         VkDescriptorSetAllocateInfo allocate_info   = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
@@ -1775,9 +1768,6 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
         current_set->is_free     = true;
         current_set->shader      = shader;
         current_set->pool        = pool;
-        current_set->write_count = max_write_count;
-        current_set->writes      = pool->descriptor_writes + i * max_write_count;
-        current_set->write_infos = pool->write_infos + i * max_write_count;
 
         if(ubo_buffer_size > 0 && pool->ubo_buffer != nullptr)
             current_set->ubo_mapped_data = (uint8_t*)pool->ubo_buffer->data_ptr + aligned_size * i;
@@ -1788,34 +1778,41 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
 
             uint32_t writes_idx = binding.binding;
 
-            current_set->writes[writes_idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            current_set->writes[writes_idx].dstSet = sets[i].descriptor_set;
-            current_set->writes[writes_idx].dstBinding = binding.binding;
-            current_set->writes[writes_idx].descriptorType = binding.descriptorType;
-            current_set->writes[writes_idx].descriptorCount = binding.descriptorCount;
+            if (writes_idx >= GFX_MAX_DESCRIPTOR_BINDINGS) {
+                ctx->dbg_log(gfx_msg_error, "binding index %d exceeds GFX_MAX_DESCRIPTOR_BINDINGS", writes_idx);
+                assert(false);
+                continue;
+            }
+
+            descriptor_writes[writes_idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptor_writes[writes_idx].dstSet = sets[i].descriptor_set;
+            descriptor_writes[writes_idx].dstBinding = binding.binding;
+            descriptor_writes[writes_idx].descriptorType = binding.descriptorType;
+            descriptor_writes[writes_idx].descriptorCount = binding.descriptorCount;
 
             switch (binding.descriptorType)
             {
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-                    current_set->write_infos[writes_idx].buffer_info.buffer = ubo_buffer->buffer;
-                    current_set->write_infos[writes_idx].buffer_info.range = aligned_size;
-                    current_set->write_infos[writes_idx].buffer_info.offset = aligned_size * i;
+                    descriptor_buffer_info[writes_idx].buffer = ubo_buffer ? ubo_buffer->buffer : nullptr;
+                    descriptor_buffer_info[writes_idx].range  = aligned_size;
+                    descriptor_buffer_info[writes_idx].offset = aligned_size * i;
 
-                    current_set->writes[writes_idx].pBufferInfo = &current_set->write_infos[writes_idx].buffer_info;
+                    descriptor_writes[writes_idx].pBufferInfo = &descriptor_buffer_info[writes_idx];
                     break;
 
                 case VK_DESCRIPTOR_TYPE_SAMPLER:
                 case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
                 case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-                    current_set->write_infos[writes_idx].image_info.sampler = ((vk_sampler_t*)ctx->default_sampler)->sampler;
-                    current_set->write_infos[writes_idx].image_info.imageView = ((vk_texture_t*)ctx->default_texture)->view;
-                    current_set->write_infos[writes_idx].image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    descriptor_image_info[writes_idx].sampler = ((vk_sampler_t*)ctx->default_sampler)->sampler;
+                    descriptor_image_info[writes_idx].imageView = ((vk_texture_t*)ctx->default_texture)->view;
+                    descriptor_image_info[writes_idx].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-                    current_set->writes[writes_idx].pImageInfo = &current_set->write_infos[writes_idx].image_info;
+                    descriptor_writes[writes_idx].pImageInfo = &descriptor_image_info[writes_idx];
                     break;
 
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+                    // todo: 
                     //sets[i].write_infos[j].buffer_info.buffer = ;
                     assert(false);
                     break;
@@ -1829,9 +1826,9 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
 
         for (uint32_t b = 0; b < 16; ++b)
         {
-            if (current_set->writes[b].sType == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+            if (descriptor_writes[b].sType == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
             {
-                valid_writes[valid_write_count] = current_set->writes[b];
+                valid_writes[valid_write_count] = descriptor_writes[b];
                 valid_write_count++;
             }
         }

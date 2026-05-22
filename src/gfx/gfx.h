@@ -562,6 +562,7 @@ typedef struct gfx_texture_desc_t {
     void*                   data;               /**< Optional raw memory pointer payload mapped to populate initial mipmaps levels */
     uint32_t                mip_levels;         /**< Total requested mipmap chains level allocations */  
     uint32_t                usage_flags;        /**< Bitmask matching combinations of gfx_texture_usage_flags */
+    uint32_t                array_layers;
     
     gfx_texture_type        type;               /**< Structural dimensional class layout type */
     gfx_pixel_format        format;             /**< Compressed or uncompressed element bit layout design */

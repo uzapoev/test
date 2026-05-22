@@ -263,9 +263,6 @@ typedef struct vk_descriptor_pool_t {
 
     vk_buffer_t*                        ubo_buffer;             // Cached reference to the backing uniform buffer object
     vk_descriptor_set_t*                descriptor_sets;        // Array of managed descriptor set wrappers (size equals capacity)
-
-    VkWriteDescriptorSet*               descriptor_writes;      // Pre-allocated array of write structures for batch updates
-    struct vk_write_info_t*             write_infos;            // Additional update metadata paired with descriptor_writes
 } vk_descriptor_pool_t;
 
 
@@ -281,10 +278,6 @@ typedef struct vk_descriptor_set_t {
     VkBool32                            is_free;                // Flag indicating if this set slot is unallocated
     uint32_t                            index_in_pool;
     VkDescriptorSet                     descriptor_set;
-
-    uint32_t                            write_count;
-    VkWriteDescriptorSet *              writes;                 // Points to a sub-array inside the parent pool
-    struct vk_write_info_t *            write_infos;            // Points to a sub-array inside the parent pool
 } vk_descriptor_set_t;
 
 
