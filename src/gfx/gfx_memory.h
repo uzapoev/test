@@ -6,35 +6,27 @@
 #include <stdio.h>  // printf
 #include <string.h> // memset
 
+// offset allocator
 struct gfx_offset_allocator_t;
 
-static void         gfx_offset_allocator_create(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t min_size);
+static void     gfx_offset_allocator_create(uint32_t size, uint32_t block_size, gfx_offset_allocator_t** allocator);
 
-static void         gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator);
+static void     gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator);
 
-static ptrdiff_t    gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t aligment);
+static intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size);
 
-static void         gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, ptrdiff_t offset);
+static void     gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, intptr_t offset);
 
 
 
-typedef struct gfx_offset_block_t {
-    uint32_t                offset;
-    uint32_t                size;
-} gfx_offset_block_t;
 
 typedef struct gfx_offset_allocator_t {
-    uint32_t                size;              // total size
-    uint32_t                min_size;          // pow of two
-
-    uint32_t                blocks_count;
-
-    uint32_t                allocated_blocks_count;
-    gfx_offset_block_t*     allocated_blocks;
-
-    uint32_t                free_blocks_count;
-    gfx_offset_block_t*     free_blocks;
-
+    uint32_t  size;             // Total managed size (e.g., in bytes)
+    uint32_t  block_size;       // Quantum/granularity size of a single block
+    uint32_t  blocks_count;     // Total number of blocks (size / block_size)
+    uint32_t  bitmask_words;    // Number of uint64_t elements needed for the bitmask
+    uint64_t* bitmask;          // Pointer to the bit arrays (0 = free, 1 = allocated)
+    uint32_t* block_sizes;      // Track allocation lengths (in blocks) for large mesh buffers
 } gfx_offset_allocator_t;
 
 
@@ -42,152 +34,109 @@ static uint32_t align_up(uint32_t val, uint32_t align) {
     return (val + align - 1) & ~(align - 1);
 }
 
-static int block_sort(const void* a, const void* b) {
-    return ((gfx_offset_block_t*)a)->offset > ((gfx_offset_block_t*)b)->offset;
-}
-
-static void block_erase(gfx_offset_block_t* blocks, uint32_t size, uint32_t idx) {
-    blocks[idx] = blocks[size];
-    blocks[size] = { 0,0 };
-}
-
-static void gfx_offset_allocator_create(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t min_size)
+static void gfx_offset_allocator_create(uint32_t size, uint32_t block_size, gfx_offset_allocator_t** allocator) 
 {
-    allocator->size = size;
-    allocator->min_size = align_up(min_size, sizeof(void*));
+    if (!allocator) return;
 
-    allocator->blocks_count = size / align_up(min_size, sizeof(void*));
-    allocator->allocated_blocks = (gfx_offset_block_t*)calloc(allocator->blocks_count, sizeof(gfx_offset_block_t));
-    allocator->free_blocks = (gfx_offset_block_t*)calloc(allocator->blocks_count, sizeof(gfx_offset_block_t));
+    uint32_t blocks_count = size / block_size;
+    uint32_t mask_words = (blocks_count + 63) / 64;
 
-    if(allocator->free_blocks)
-        allocator->free_blocks[0] = {0, size};
-    allocator->free_blocks_count++;
+    // Calculate total memory for: Header + Bitmask (uint64) + Size Tracker (uint32)
+    size_t bitmask_bytes = mask_words * sizeof(uint64_t);
+    size_t sizes_bytes = blocks_count * sizeof(uint32_t);
+    size_t total_mem = sizeof(gfx_offset_allocator_t) + bitmask_bytes + sizes_bytes;
+
+    void* buffer = calloc(1, total_mem);
+    if (!buffer) {
+        *allocator = NULL;
+        return;
+    }
+
+    // Initialize the header at the very beginning of the allocated buffer
+    gfx_offset_allocator_t* header = (gfx_offset_allocator_t*)buffer;
+    header->size = size;
+    header->block_size = block_size;
+    header->blocks_count = blocks_count;
+    header->bitmask_words = mask_words;
+
+    // Layout arrays sequentially right after the header structure
+    uint8_t* mem_ptr = (uint8_t*)buffer + sizeof(gfx_offset_allocator_t);
+    header->bitmask = (uint64_t*)mem_ptr;
+    header->block_sizes = (uint32_t*)(mem_ptr + bitmask_bytes);
+
+    *allocator = header;
 }
 
-static void gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator)
+
+static void gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator) 
 {
-    free(allocator->free_blocks);
-    free(allocator->allocated_blocks);
+    if (allocator) {
+        free(allocator);
+    }
 }
 
-static ptrdiff_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size, uint32_t alignment)
+
+static intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size) 
 {
-    size = align_up(size, allocator->min_size);
-    for (uint32_t i = 0; i < allocator->free_blocks_count; ++i) 
-    {
-        uint32_t block_offset = allocator->free_blocks[i].offset;
-        uint32_t block_size = allocator->free_blocks[i].size;
-        uint32_t aligned_offset = align_up(block_offset, alignment);
-        uint32_t padding = aligned_offset - block_offset;
+    if (!allocator) return -1;
 
-        if (block_size >= size + padding) {
+    // Calculate how many blocks are needed for the requested size
+    uint32_t needed_blocks = (size + allocator->block_size - 1) / allocator->block_size;
 
-            uint32_t idx = allocator->allocated_blocks_count++;
-            allocator->allocated_blocks[idx].size = size;
-            allocator->allocated_blocks[idx].offset = aligned_offset;
+    uint32_t run_length = 0;
+    uint32_t start_block = 0;
+    uint32_t total_bits = allocator->bitmask_words * 64;
 
-            if (block_size == size + padding) {
-                block_erase(allocator->free_blocks, allocator->free_blocks_count, i);
-                allocator->free_blocks_count--;
-            } else {
-                if (padding > 0) {
-                    allocator->free_blocks[i].size = padding;
-                    if (size < block_size - padding) {
-                        uint32_t idx = allocator->free_blocks_count;
-                        allocator->free_blocks[idx].offset = aligned_offset + size;
-                        allocator->free_blocks[idx].size = block_size - size - padding;
-                        allocator->free_blocks_count++;
-                    }
-                } else {
-                    allocator->free_blocks[i].offset = aligned_offset + size;
-                    allocator->free_blocks[i].size = block_size - size;
+    // Linear scan through the bitmask to find a contiguous sequence of 0s
+    for (uint32_t i = 0; i < total_bits; ++i) {
+        if (i >= allocator->blocks_count) break;
+
+        uint32_t word_idx = i / 64;
+        uint32_t bit_idx = i % 64;
+
+        if (allocator->bitmask[word_idx] & (1ULL << bit_idx)) {
+            run_length = 0; // Block is occupied
+        }
+        else {
+            if (run_length == 0) start_block = i;
+            run_length++;
+
+            if (run_length == needed_blocks) {
+                // Mark bits as allocated (1)
+                for (uint32_t b = start_block; b < start_block + needed_blocks; ++b) {
+                    allocator->bitmask[b / 64] |= (1ULL << (b % 64));
                 }
+
+                // Store the allocation length at the starting block index
+                allocator->block_sizes[start_block] = needed_blocks;
+
+                return (intptr_t)(start_block * allocator->block_size);
             }
-
-            qsort(allocator->free_blocks, allocator->free_blocks_count, sizeof(gfx_offset_block_t), block_sort);
-
-            return static_cast<ptrdiff_t>(aligned_offset);
         }
     }
-    return -1;
+    return -1; // OOM
 }
 
-static void dump(gfx_offset_allocator_t* allocator)
+// Releases the allocated region back to the pool in true O(1) time
+static void gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, intptr_t offset) 
 {
-    printf("\n\n gfx_offset_allocator info:");
-    printf("\n allocated blocks:");
-
-    for (size_t i = 0; i < allocator->allocated_blocks_count; ++i) {
-        printf("\n   offset: %8d  size: %4u", allocator->allocated_blocks[i].offset, allocator->allocated_blocks[i].size);
-    }
-    printf("\n free blocks:");
-    for (size_t i = 0; i < allocator->free_blocks_count; ++i) {
-        printf("\n   offset: %8d  size: %4u", allocator->free_blocks[i].offset, allocator->free_blocks[i].size);
-    }
-}
-
-static void merge_free_blocks(gfx_offset_allocator_t* allocator)
-{
-    if (allocator->free_blocks_count == 0)
+    if (!allocator || offset < 0) 
         return;
 
-    qsort(allocator->free_blocks, allocator->free_blocks_count, sizeof(gfx_offset_block_t), block_sort);
+    uint32_t start_block = (uint32_t)offset / allocator->block_size;
 
-    uint32_t write_idx = 0;
-    for (uint32_t read_idx = 1; read_idx < allocator->free_blocks_count; ++read_idx) {
-        auto& last = allocator->free_blocks[write_idx];
-        auto& current = allocator->free_blocks[read_idx];
+    // Lookup how many blocks this allocation actually owns
+    uint32_t needed_blocks = allocator->block_sizes[start_block];
+    if (needed_blocks == 0) 
+        return; 
 
-        if (last.offset + last.size == current.offset)
-            last.size += current.size;
-        else
-            allocator->free_blocks[++write_idx] = current;
-    }
-    allocator->free_blocks_count = write_idx + 1;
-}
+    // Clear the tracking slot
+    allocator->block_sizes[start_block] = 0;
 
-static void gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, ptrdiff_t offset)
-{
-    for (uint32_t i = 0; i < allocator->allocated_blocks_count; ++i) {
-        if (allocator->allocated_blocks[i].offset == offset) {
-            int idx = allocator->free_blocks_count;
-            allocator->free_blocks[idx].offset = allocator->allocated_blocks[i].offset;
-            allocator->free_blocks[idx].size = allocator->allocated_blocks[i].size;
-            allocator->free_blocks_count++;
-
-            block_erase(allocator->allocated_blocks, allocator->allocated_blocks_count, i);
-            allocator->allocated_blocks_count--;
-
-            merge_free_blocks(allocator);
-            return;
-        }
+    // Clear bits back to 0. Merging happens automatically for the next allocation scan.
+    for (uint32_t b = start_block; b < start_block + needed_blocks; ++b) {
+        allocator->bitmask[b / 64] &= ~(1ULL << (b % 64));
     }
 }
 
-
-static void gfx_offset_allocator_test()
-{
-    gfx_offset_allocator_t oa = {};
-    gfx_offset_allocator_create(&oa, 16*1024*1024, 64);
-
-    auto a0 = gfx_offset_allocator_allocate(&oa, 128, 64);
-    auto a1 = gfx_offset_allocator_allocate(&oa, 64, 64);
-    auto a2 = gfx_offset_allocator_allocate(&oa, 13, 64);
-    auto a3 = gfx_offset_allocator_allocate(&oa, 256, 64);
-
-    dump(&oa);
-
-    gfx_offset_allocator_free(&oa, a1);
-    gfx_offset_allocator_free(&oa, a0);
-    gfx_offset_allocator_free(&oa, a2);
-
-    dump(&oa);
-
-    auto a4 = gfx_offset_allocator_allocate(&oa, 256, 64);
-
-    dump(&oa);
-
-    gfx_offset_allocator_destroy(&oa);
-}
 #endif 
