@@ -145,26 +145,33 @@ void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_poo
     if(allocator == nullptr)
         allocator = gfx_default_allocator();
 
-    gfx_handle_pool_t * pool = (gfx_handle_pool_t*)allocator->gfx_alloc(sizeof(gfx_handle_pool_t), allocator->user_data);
+    size_t alignment = alignof(void*);
 
-    if(pool == nullptr || allocator == nullptr)
+    size_t pool_size        = gfx_utils_align_up(sizeof(gfx_handle_pool_t), alignment);
+    size_t data_size        = gfx_utils_align_up(capacity * stride, alignment);
+    size_t handles_size     = gfx_utils_align_up(capacity * sizeof(gfx_handle_t), alignment);
+    size_t free_list_size   = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
+    size_t counters_size    = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
+    size_t total_size       = data_size + handles_size + free_list_size + counters_size + pool_size;
+
+    void* buffer = allocator->gfx_alloc(total_size, allocator->user_data);
+    if (buffer == nullptr)
         return;
 
-    pool->allocator             = allocator;
-    pool->size                  = stride * capacity;
-    pool->stride                = stride;
-    pool->capacity              = capacity;
-    pool->used_chunks           = 0;
-    pool->hash                  = hash16((char*)pool, sizeof(intptr_t));
-    pool->data                  =                allocator->gfx_alloc(capacity * stride, allocator->user_data);
-    pool->handles               = (gfx_handle_t*)allocator->gfx_alloc(capacity * sizeof(gfx_handle_t), allocator->user_data);
-    pool->free_list             = (uint32_t*)    allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
-    pool->generation_counters   = (uint32_t*)    allocator->gfx_alloc(capacity * sizeof(uint32_t), allocator->user_data);
+    uint8_t* byte_ptr = (uint8_t*)buffer;
 
-    if (!pool->data || !pool->handles || !pool->free_list || !pool->generation_counters) {
-        gfx_pool_destroy(pool);
-        return;
-    }
+    gfx_handle_pool_t* pool = (gfx_handle_pool_t*)byte_ptr;     byte_ptr += pool_size;
+    pool->data = byte_ptr;                                      byte_ptr += data_size;
+    pool->handles = (gfx_handle_t*)byte_ptr;                    byte_ptr += handles_size;
+    pool->free_list = (uint32_t*)byte_ptr;                      byte_ptr += free_list_size;
+    pool->generation_counters = (uint32_t*)byte_ptr;            byte_ptr += counters_size;
+
+    pool->allocator     = allocator;
+    pool->size          = stride * capacity;
+    pool->stride        = stride;
+    pool->capacity      = capacity;
+    pool->used_chunks   = 0;
+    pool->hash          = hash16((char*)pool, sizeof(intptr_t));
 
     for (uint32_t i = 0; i < capacity; ++i) {
         pool->free_list[i] = i;
@@ -183,11 +190,6 @@ void gfx_pool_destroy(gfx_handle_pool_t* pool)
         return;
 
     gfx_allocator_t* allocator = pool->allocator;
-    pool->allocator = nullptr;
-    allocator->gfx_free(pool->data, allocator->user_data);
-    allocator->gfx_free(pool->handles, allocator->user_data);
-    allocator->gfx_free(pool->free_list, allocator->user_data);
-    allocator->gfx_free(pool->generation_counters, allocator->user_data);
     allocator->gfx_free(pool, allocator->user_data);
 }
 

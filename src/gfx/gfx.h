@@ -1519,7 +1519,7 @@ gfx_api size_t      gfx_pool_get_capacity(gfx_handle_pool_t* pool);
 
 
 static uint32_t gfx_fourcc(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    return ((uint32_t)(r) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) | ((uint32_t)(a) << 24));
+    return ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(g) << 16) | ((uint32_t)(r) << 24));
 }
 
 static uint32_t gfx_make_swizzle_mask(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {

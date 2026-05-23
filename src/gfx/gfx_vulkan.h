@@ -72,15 +72,10 @@ typedef struct vk_context_t
                                         compute_queue;
 
     // --- Device Properties & Features ---
-    uint32_t                            extension_count;
-    VkExtensionProperties *             extensions;
-
-
     VkPhysicalDeviceFeatures            device_features     = {};
     VkPhysicalDeviceMemoryProperties    memory_properties   = {};
     VkPhysicalDeviceProperties          device_properties   = {};
 
-    VkSemaphore                         frame_timeline_semaphore;
 
     // --- Bindless Resources ---
     VkDescriptorSet                     bindless_descriptor_set         = VK_NULL_HANDLE;
@@ -95,7 +90,7 @@ typedef struct vk_context_t
     gfx_texture_t*                      default_storage_texture = nullptr;
     gfx_buffer_t*                       default_storage_buffer  = nullptr;
 
-    VkRenderPass                        vk_default_renderpass      = nullptr;
+    VkRenderPass                        vk_default_renderpass      = nullptr; //fuuuuu!
 
     // --- Command Buffers ---
     vk_command_buffer_t*                cmd_buffer_pool[32];

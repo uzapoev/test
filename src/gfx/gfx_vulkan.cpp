@@ -1227,7 +1227,6 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vkGetDeviceQueue(vctx->vk_device, vctx->present_queue.family, 0, &vctx->present_queue.queue);
 
     vctx->dbg_log                   = cfg->dbglog ? cfg->dbglog : gfx_default_log;
-    vctx->extensions                = (VkExtensionProperties*)_gfx_alloc(vctx, sizeof(VkExtensionProperties) * 1024);
 
     vctx->vk_dbg_set_object_name    = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(vctx->vk_device, "vkSetDebugUtilsObjectNameEXT");
     vctx->vk_dbg_cmd_push_label     = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(vctx->vk_device, "vkCmdBeginDebugUtilsLabelEXT");
@@ -1236,8 +1235,6 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vkGetPhysicalDeviceFeatures(vctx->vk_physical_device, &vctx->device_features);
     vkGetPhysicalDeviceProperties(vctx->vk_physical_device, &vctx->device_properties);
     vkGetPhysicalDeviceMemoryProperties(vctx->vk_physical_device, &vctx->memory_properties);
-    vkEnumerateDeviceExtensionProperties(vctx->vk_physical_device, NULL, &vctx->extension_count, NULL);
-    vkEnumerateDeviceExtensionProperties(vctx->vk_physical_device, NULL, &vctx->extension_count, vctx->extensions);
     
     gfx_pool_create(sizeof(vk_surface_t),       16, &vctx->surface_pool, &vctx->allocator);
     gfx_pool_create(sizeof(vk_render_target_t), 256, &vctx->render_target_pool, &vctx->allocator);
@@ -1366,7 +1363,6 @@ void vk_destroy_renderer(gfx_context_t * ctx)
     
     vk_sampler_destroy(ctx, vctx->default_sampler);
     vk_texture_destroy(ctx, &vctx->default_texture->handle);
-    _gfx_free(vctx, vctx->extensions);
 
     vkDestroyDevice(vctx->vk_device, nullptr);
     vkDestroySurfaceKHR(vctx->vk_instance, vctx->vk_surface, nullptr);

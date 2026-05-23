@@ -17,11 +17,13 @@
 
 #include "resource_manager.h"
 
-#include "assets/asset_unity.h"
 
-
-
-static scene                g_scene;
+uintptr_t g_handle;
+camera g_camera;
+static gfx_context_t* ctx = nullptr;
+static gfx_surface_t surface = {};
+static gfx_pipeline_t* pipeline = nullptr;
+static scene g_scene;
 
 void scene_test(gfx_context_t* ctx, const char * data_path, const char* scene_name)
 {
@@ -65,16 +67,6 @@ gfx_allocator_t gfx_allocator = {
         return free(ptr);
     }
  };
-#include "threads.h"
-
-
-camera g_camera;
-static gfx_context_t* ctx = nullptr;
-static gfx_surface_t surface = {};
-static gfx_pipeline_t* pipeline = nullptr;
-
-uintptr_t g_handle;
-
 
 
 void platform_main(uintptr_t handle, int argc, char** argv)
@@ -101,7 +93,6 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         caps.support_mesh_shader ? "ENABLED" : "DISABLED",
         caps.has_unified_memory ? "TRUE" : "FALSE");
 
-
     gfx_surface_desc_t surface_desc = {};
         surface_desc.label              = "main_view";
         surface_desc.window_handle      = handle;
@@ -126,12 +117,6 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     
     gfx_shader_t* shader = nullptr;
     load_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
-
-    uint32_t set_count = gfx_shader_get_descriptor_set_count(shader);
-    for(uint32_t i = 0; i < set_count; ++i){
-        auto set = gfx_descriptor_set_create(ctx, shader, i);
-        gfx_cmd_bind_descriptor_set(nullptr, i, set);
-    }
 
 
     gfx_vertex_attribute attributes[] = {
@@ -181,7 +166,6 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     g_camera.set_near_far(0.01f, 1500.0f);
     g_camera.set_apect(aspect);
     g_camera.set_pos(math::make_vec3(4.366324f, 9.78074f, 185.8569f));
-  //  g_camera.set_pos(math::make_vec3(0, 0, -5));
     g_camera.set_target(g_camera._pos + math::make_vec3(0, 0, 1));
 
   //  scene_test(ctx, "../data/unity", "Southside.big.json");
@@ -203,7 +187,6 @@ void update_camera(camera & cam)
     dir *= input_kb_state(Input::Keyboard::Shift) ?  10.0f : 1.0f;
     auto p = input_point_pos();
 
-
     if(input_mouse_button_state(mouse_btn_right) == input_state_down){
 
         vec2 mp = { (float)-p.dx, (float)p.dy };
@@ -214,15 +197,6 @@ void update_camera(camera & cam)
 }
 
 
-// main    | input, network_in, scripts, network_out                |
-// render  | animation, upload_resorces | gpu_culling | render      |
-// job0    | evaluate_mip,                                          |
-// job1    | cpu_culling + instancing   |                           |
-// job2    | streaming                                              |
-// job3    | streaming                                              |
-// sound   | mix, render                                            |
-
-
 void platform_tick(void* userdata)
 {
    // measure ms("\nplatform_tick");
@@ -230,11 +204,6 @@ void platform_tick(void* userdata)
 
     update_camera(g_camera);
 
-  //  if(input_kb_state(Input::Keyboard::NumPad_Add) )
-  //      g_camera.set_fov(g_camera.m_fov + 0.1f);
-
-  //  if (input_kb_state(Input::Keyboard::NumPad_Subtract))
-  //      g_camera.set_fov(g_camera.m_fov - 0.1f);
 
     if ( input_kb_state(Input::Keyboard::NumPad_Subtract)){
         g_camera.m_near -= 0.001f;
@@ -259,18 +228,18 @@ void platform_tick(void* userdata)
     g_camera.update();
 
     gfx_pass_info_t pass = { 0 };
-
-    auto frame = gfx_begin_frame(ctx, &surface);
-            
-        pass.target = frame->target;
-        pass.color_clear_value = 0xFF7F7F7FFF;
+        pass.color_clear_value = gfx_fourcc(64,128,255,255);
         pass.depth_clear_value = 1.0f;
         pass.stencil_clear_value = 0;
 
-        gfx_cmd_begin_pass(frame->cmd, &pass);
-        g_scene.draw(frame->cmd, g_camera);
-        gfx_cmd_end_pass(frame->cmd);
+    auto frame = gfx_begin_frame(ctx, &surface);
+    {
+        pass.target = frame->target;
 
+        gfx_cmd_begin_pass(frame->cmd, &pass);
+            g_scene.draw(frame->cmd, g_camera);
+        gfx_cmd_end_pass(frame->cmd);
+    }
     gfx_end_frame(frame);
 }
  
