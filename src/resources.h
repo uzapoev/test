@@ -58,8 +58,8 @@ typedef struct shader_program_t {
 
 
 typedef struct mesh_pool_t {
-    gfx_offset_allocator_t  vertex_buffer_allocator;
-    gfx_offset_allocator_t  index_buffer_allocator;
+    gfx_offset_allocator_t*  vertex_buffer_allocator;
+    gfx_offset_allocator_t*  index_buffer_allocator;
 
     int32_t                 vertex_buffer_size;
     int32_t                 index_buffer_size;

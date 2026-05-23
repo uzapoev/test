@@ -102,8 +102,8 @@ struct mesh_header_t
 
 void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, mesh_pool_t* pool)
 {
-    gfx_offset_allocator_create(&pool->vertex_buffer_allocator, vertex_buffer_size, 1024);
-    gfx_offset_allocator_create(&pool->index_buffer_allocator, index_buffer_size, 128);
+    gfx_offset_allocator_create( vertex_buffer_size, 1024, &pool->vertex_buffer_allocator);
+    gfx_offset_allocator_create(index_buffer_size, 128, &pool->index_buffer_allocator);
 
    /* gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
     gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
@@ -161,13 +161,13 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
 
     int* submeshes = (int*)curent_ptr;
 
-    int32_t vertex_buffer_size = gfx_utils_align_up(header->vertex_stride * header->vertex_count, 16);
-    int32_t index_buffer_size = gfx_utils_align_up(header->index_stride * header->index_count, 16);
+    int32_t vertex_buffer_size = gfx_utils_align_up(header->vertex_stride * header->vertex_count, 32);
+    int32_t index_buffer_size = gfx_utils_align_up(header->index_stride * header->index_count, 32);
 
     if(pool != nullptr)
     {
-        auto offset_vb = gfx_offset_allocator_allocate(&pool->vertex_buffer_allocator, vertex_buffer_size, 16);
-        auto offset_ib = gfx_offset_allocator_allocate(&pool->index_buffer_allocator, index_buffer_size, 16);
+        auto offset_vb = gfx_offset_allocator_allocate(pool->vertex_buffer_allocator, vertex_buffer_size);
+        auto offset_ib = gfx_offset_allocator_allocate(pool->index_buffer_allocator, index_buffer_size);
 
         if(offset_vb != -1)
         {
