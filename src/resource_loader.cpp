@@ -2,11 +2,12 @@
 #include "common.h"
 
 #include "gfx/gfx_reflection.h"
-//#include "render_system.h"
+#include "gfx/gfx_shader_compiler.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
 
+static gfx_shader_compiler_context_t* g_compiler_context = nullptr;
 
 size_t filesize(FILE* file)
 {
@@ -498,21 +499,6 @@ typedef struct shader_blob2_t {
 } shader_blob2_t;
 
 
-
-extern int asset_shader_compile(const char* name, const char* data, uint32_t size, const char* target, char** blobs, int* sizes, const char** stages);
-
-static gfx_shader_stage str_2_stage(const char * str)
-{
-    if(str && !strcmp(str, "vertex"))
-        return gfx_shader_vertex;
-
-    if (str && !strcmp(str, "fragment"))
-        return gfx_shader_fragment;
-
-    if (str && !strcmp(str, "compute"))
-        return gfx_shader_compute;
-}
-
 const uint64_t shader_magic = 0x20726564616873;
 
 #pragma pack(push, 1)
@@ -522,18 +508,17 @@ typedef struct shader_header_t {
 } shader_header_t;
 #pragma pack (pop)
 
-
-void save_shader(const char * path, int count, char** blobs, int* sizes, const char** stages)
+void save_shader_program(const char* path, compiled_shader_program_t * program)
 {
     FILE* file = fopen(path, "wb");
     fwrite(&shader_magic, sizeof(uint64_t), 1, file);
-    fwrite(&count, sizeof(uint32_t), 1, file);
-    for (int i = 0; i < count; ++i)
+    fwrite(&program->blob_count, sizeof(uint32_t), 1, file);
+    for (int i = 0; i < program->blob_count; ++i)
     {
-        uint32_t stage = str_2_stage(stages[i]);
-        fwrite(&stage, sizeof(uint32_t), 1, file);
-        fwrite(&sizes[i], sizeof(uint32_t), 1, file);
-        fwrite(blobs[i], sizes[i], 1, file);
+        compiled_stage_blob_t * blob = &program->blobs[i];
+        fwrite(&blob->stage, sizeof(uint32_t), 1, file);
+        fwrite(&blob->stage_data_size, sizeof(uint32_t), 1, file);
+        fwrite(blob->stage_data, blob->stage_data_size, 1, file);
         fflush(file);
     }
     fclose(file);
@@ -549,8 +534,28 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
     char compiled_name_buff[256] = "";
     sprintf(compiled_name_buff, "%s.spirv", path);
 
+    size_t size = read_file_data_text(path, &data);
+    if (size == 0)
+        return;
+
+    if(g_compiler_context == nullptr)
+        gfx_shader_compiler_context_create(0, &g_compiler_context);
+
+    gfx_shader_compiler_request_desc_t desc = {};
+        desc.name = name;
+        desc.size = size;
+        desc.data = data;
+        desc.target = shader_target_spirv;
+        desc.options = shader_compile_option_invert_y;
+
+    compiled_shader_program_t compiled_program = {};
+    if(gfx_compile_shader(g_compiler_context, &desc, &compiled_program))
+    {
+        save_shader_program(compiled_name_buff, &compiled_program);
+    }
+
     // check for exported
-    size_t size = read_file_data(compiled_name_buff, &data);
+    size = read_file_data(compiled_name_buff, &data);
     if (size != 0)
     {
         load_shader_from_file_data(ctx, name, data, size, out_shader);
@@ -558,18 +563,6 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
         return;
     }/**/
 
-    size = read_file_data_text(path, &data);
-    if (size == 0)
-        return;
-
-    char* blobs[16] = {};
-    const char* stages[16] = {};
-    int sizes[16] = {};
-    
-    int count = asset_shader_compile(name, data, size, "spirv", blobs, sizes, stages);
-    save_shader(compiled_name_buff, count, blobs, sizes, stages);
-    
-    load_shader_from_file_path(ctx, path, out_shader);
     free(data);
 }
 
@@ -578,11 +571,7 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
 void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* data, size_t size, gfx_shader_t** out_shader)
 {
     uint32_t uniform_count = 0;
-    gfx_uniform_t uniforms[32] = {};
-
-    char* blobs[16] = {};
-    const char* stages[16] = {};
-    int sizes[16] = {};
+    gfx_uniform_t uniforms[16] = {};
 
     int count = 0;
     gfx_shader_stage_data stage_data[16] = {};
@@ -607,17 +596,25 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
     }
     else
     {
-        count = asset_shader_compile(name, data, size, "spirv", blobs, sizes, stages);
-        for (int i = 0; i < count; ++i)
-        {
-            gfx_shader_reflection(blobs[i], sizes[i], &uniforms[uniform_count], &uniform_count);
+        if (g_compiler_context == nullptr)
+            gfx_shader_compiler_context_create(0, &g_compiler_context);
 
-            if (stages[i] && !strcmp(stages[i], "vertex"))
-                stage_data[i] = { gfx_shader_vertex,   (uint32_t*)blobs[i], (uint32_t)sizes[i] };
-            if (stages[i] && !strcmp(stages[i], "fragment"))
-                stage_data[i] = { gfx_shader_fragment,   (uint32_t*)blobs[i], (uint32_t)sizes[i] };
-            if (stages[i] && !strcmp(stages[i], "compute"))
-                stage_data[i] = { gfx_shader_compute,   (uint32_t*)blobs[i], (uint32_t)sizes[i] };
+        gfx_shader_compiler_request_desc_t desc = {};
+            desc.name = name;
+            desc.size = size;
+            desc.data = data;
+            desc.target = shader_target_spirv;
+            desc.options = shader_compile_option_invert_y;
+
+        compiled_shader_program_t compiled_program = {};
+        gfx_compile_shader(g_compiler_context, &desc, &compiled_program);
+        count = compiled_program.blob_count;
+
+        for (int i = 0; i < compiled_program.blob_count; ++i)
+        {
+            compiled_stage_blob_t* blob = &compiled_program.blobs[i];
+            gfx_shader_reflection(blob->stage_data, blob->stage_data_size, &uniforms[uniform_count], &uniform_count);
+            stage_data[i] = { blob->stage,   (uint32_t*)blob->stage_data[i], (uint32_t)blob->stage_data_size };
         }
     }
 
