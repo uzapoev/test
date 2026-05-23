@@ -863,6 +863,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
 
     *out_shader = &wgpu_shader->handle;
     wgpu_shader->context = wgpu_ctx;
+    wgpu_shader->hash = 0;
 
     uint32_t ubo_size = 0;
     uint32_t uniform_count = 0;
@@ -874,9 +875,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
         if (desc->stages[stageIdx].data == nullptr || desc->stages[stageIdx].size == 0)
             continue;
 
-        uint32_t stage_hash = gfx_utils_hash_32((char*)desc->stages[stageIdx].data, desc->stages[stageIdx].size);
-        wgpu_shader->hash = gfx_utils_hash_combine(wgpu_shader->hash, stage_hash);
-
+        uint32_t stage_hash = gfx_utils_hash((char*)desc->stages[stageIdx].data, desc->stages[stageIdx].size, wgpu_shader->hash);
 
         gfx_shader_stage stage = desc->stages[stageIdx].stage;
         bool is_spirv = *(uint32_t*)desc->stages[stageIdx].data == 0x07230203;

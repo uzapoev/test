@@ -79,11 +79,7 @@ uintptr_t g_handle;
 
 void platform_main(uintptr_t handle, int argc, char** argv)
 {
-    auto p0 = sizeof(vertex);
-    auto p1 = sizeof(vertex_packed);
     memory::enable_tracking();
-
-    thread_test();
 
     g_handle = handle;
     gfx_settings_t settings = {0};
@@ -94,6 +90,16 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         settings.dbglog     = log_func;
         settings.allocator  = &gfx_allocator;
     gfx_init(&settings, &ctx);
+
+    gfx_caps_t caps = {};
+    gfx_get_caps(ctx, &caps);
+    // Engine runtime notifications
+    log_func(gfx_msg_info, "Initialized GPU backend: %s (%s)", caps.gpu_name, caps.gpu_vendor);
+    log_func(gfx_msg_info, "Capabilities - Bindless: %s (Max Textures: %u), Mesh Shaders: %s, UMA: %s",
+        caps.support_bindless ? "ENABLED" : "DISABLED",
+        caps.max_bindless_sampleable_textures,
+        caps.support_mesh_shader ? "ENABLED" : "DISABLED",
+        caps.has_unified_memory ? "TRUE" : "FALSE");
 
 
     gfx_surface_desc_t surface_desc = {};
@@ -197,8 +203,12 @@ void update_camera(camera & cam)
     dir *= input_kb_state(Input::Keyboard::Shift) ?  10.0f : 1.0f;
     auto p = input_point_pos();
 
-    vec2 mp = { (float)-p.dx, (float)p.dy };
-    cam.set_mouse_dt(mp * 0.5f);
+
+    if(input_mouse_button_state(mouse_btn_right) == input_state_down){
+
+        vec2 mp = { (float)-p.dx, (float)p.dy };
+        cam.set_mouse_dt(mp * 0.5f);
+    }
     cam.move(dir * Time::dt() * 1.0f);
     cam.update();
 }
@@ -253,9 +263,9 @@ void platform_tick(void* userdata)
     auto frame = gfx_begin_frame(ctx, &surface);
             
         pass.target = frame->target;
-        pass.clear_color_value = 0xFF7F7F7FFF;
-        pass.clear_depth_value = 1.0f;
-        pass.clear_stencil_value = 0;
+        pass.color_clear_value = 0xFF7F7F7FFF;
+        pass.depth_clear_value = 1.0f;
+        pass.stencil_clear_value = 0;
 
         gfx_cmd_begin_pass(frame->cmd, &pass);
         g_scene.draw(frame->cmd, g_camera);

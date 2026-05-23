@@ -404,7 +404,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vkDebugCallback(VkDebugReportFlagsEXT flag
 
 static VkBool32  vkDebugCallback2( VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
 {
-    printf( "Vulkan-Validation", "[ID: %d, Name: %s] -> %s",
+    printf( "Vulkan-Validation [ID: %d, Name: %s] -> %s\n",
         pCallbackData->messageIdNumber,
         pCallbackData->pMessageIdName ? pCallbackData->pMessageIdName : "UNKNOWN",
         pCallbackData->pMessage);
@@ -632,14 +632,6 @@ void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gf
             }
         }
     }
-
-    // Engine runtime notifications
-    ctx->dbg_log(gfx_msg_info, "Initialized GPU backend: %s (%s)", caps->gpu_name, caps->gpu_vendor);
-    ctx->dbg_log(gfx_msg_info, "Capabilities - Bindless: %s (Max Textures: %u), Mesh Shaders: %s, UMA: %s",
-        caps->support_bindless ? "ENABLED" : "DISABLED",
-        caps->max_bindless_sampleable_textures,
-        caps->support_mesh_shader ? "ENABLED" : "DISABLED",
-        caps->has_unified_memory ? "TRUE" : "FALSE");
 }
 
 
@@ -681,7 +673,11 @@ static VkInstance _vk_create_instance(bool isdebug)
 
     VkDebugUtilsMessengerCreateInfoEXT debug_info = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT, nullptr };
     if (isdebug) {
-        debug_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_FLAG_BITS_MAX_ENUM_EXT;
+        debug_info.messageSeverity =   // VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                                       // VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+
         debug_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
                                  VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                  VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
@@ -804,45 +800,87 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
         { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, nullptr, 0, present_queue_index,  1, queue_priorities }
     };
 
-    const char* device_extension [] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME/*, VK_EXT_DEBUG_MARKER_EXTENSION_NAME */};
-    const char* device_validation_layers[] = { "VK_LAYER_LUNARG_mem_tracker", "VK_LAYER_GOOGLE_unique_objects" };
 
-    VkPhysicalDeviceFeatures features = {};
-    vkGetPhysicalDeviceFeatures(physdevice, &features);
+    VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, nullptr };
+    VkPhysicalDeviceDescriptorIndexingFeatures  bindless_features       = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,  &dynamic_rendering_features  };
+    VkPhysicalDeviceFeatures2                   supported_features      = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &bindless_features };
+    vkGetPhysicalDeviceFeatures2(physdevice, &supported_features);
 
-    VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_features =   { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, NULL};
-    VkPhysicalDeviceDescriptorIndexingFeatures bindless_features =          { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, &dynamic_rendering_features };
 
-    VkPhysicalDeviceFeatures2 deviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &bindless_features };
-    vkGetPhysicalDeviceFeatures2(physdevice, &deviceFeatures2);
+    VkPhysicalDeviceDynamicRenderingFeatures active_dynamic_rendering   = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES    };
+    VkPhysicalDeviceDescriptorIndexingFeatures active_bindless          = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES    };
+    VkPhysicalDeviceFeatures2 enabled_device_features                   = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 
-    bool support_bindless = bindless_features.shaderSampledImageArrayNonUniformIndexing &&
-                            bindless_features.descriptorBindingSampledImageUpdateAfterBind &&
-                            bindless_features.descriptorBindingPartiallyBound &&
-                            bindless_features.runtimeDescriptorArray;
+    enabled_device_features.features.samplerAnisotropy = supported_features.features.samplerAnisotropy;
 
-    if(support_bindless)
+    void** pnext_chain_tail = &enabled_device_features.pNext;
+
+    uint32_t validation_layer_count = 0;
+    const char* validation_layer_names[1] = { NULL };
+#if defined(_DEBUG)
+    validation_layer_names[validation_layer_count++] = "VK_LAYER_KHRONOS_validation";
+#endif
+
+    uint32_t extension_count = 0;
+    const char* device_extensions[32] = {};
+    device_extensions[extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+
+    // Enable bindless 
+    if (bindless_features.shaderSampledImageArrayNonUniformIndexing &&
+        bindless_features.descriptorBindingSampledImageUpdateAfterBind &&
+        bindless_features.descriptorBindingPartiallyBound)
     {
-        VkPhysicalDeviceDescriptorIndexingProperties indexing_properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES };
-        VkPhysicalDeviceProperties2 device_properties2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &indexing_properties };
-        vkGetPhysicalDeviceProperties2(physdevice, &device_properties2);
-        uint32_t maxSupportedSampledImages = indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages;
+     //   active_bindless = bindless_features;
+        active_bindless.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        active_bindless.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+        active_bindless.descriptorBindingPartiallyBound = VK_TRUE;
+
+        // Warning: runtimeDescriptorArray on Android may be FALSE on older chips!
+        // Enable it only if the hardware allows it.
+        if (bindless_features.runtimeDescriptorArray) {
+            active_bindless.runtimeDescriptorArray = VK_TRUE;
+        }
+
+        if (bindless_features.descriptorBindingVariableDescriptorCount) {
+            active_bindless.descriptorBindingVariableDescriptorCount = VK_TRUE;
+        }
+
+        device_extensions[extension_count++] = VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
+
+        *pnext_chain_tail = &active_bindless;
+        pnext_chain_tail = &active_bindless.pNext;
     }
+
+    // Enable Dynamic Rendering (available almost everywhere on Android 13+)
+    if (dynamic_rendering_features.dynamicRendering) {
+        active_dynamic_rendering.dynamicRendering = VK_TRUE;
+
+        device_extensions[extension_count++] = VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME;
+        device_extensions[extension_count++] = VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME;
+        device_extensions[extension_count++] = VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME;
+
+        *pnext_chain_tail = &active_dynamic_rendering;
+        pnext_chain_tail = &active_dynamic_rendering.pNext;
+    }
+
+    *pnext_chain_tail = NULL;
 
     VkDevice device = nullptr;
     VkDeviceCreateInfo create_info      = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
-    create_info.pNext = support_bindless ? &bindless_features :nullptr;
+    create_info.pNext                   = &enabled_device_features;
     create_info.queueCreateInfoCount    = separate_present_queue ? 2 : 1;
     create_info.pQueueCreateInfos       = queues;
-    create_info.enabledLayerCount       = _countof(device_validation_layers);
-    create_info.ppEnabledLayerNames     = device_validation_layers;
-    create_info.enabledExtensionCount   = _countof(device_extension);
-    create_info.ppEnabledExtensionNames = device_extension;
-    create_info.pEnabledFeatures        = &features;
-    VkResult result = vkCreateDevice(physdevice, &create_info, NULL, &device);
-    if (result != VK_SUCCESS)
+
+    create_info.enabledLayerCount       = validation_layer_count;
+    create_info.ppEnabledLayerNames     = validation_layer_names;
+
+    create_info.enabledExtensionCount   = extension_count;
+    create_info.ppEnabledExtensionNames = device_extensions;
+
+//    create_info.pEnabledFeatures        = &features;
+    if (VkResult result = vkCreateDevice(physdevice, &create_info, NULL, &device))
     {
-        gfx_default_log(gfx_msg_error, "Vk: Error in vkCreateDevice(%d)", result);
+        gfx_default_log(gfx_msg_error, "Vk: Error in vkCreateDevice(%d)", string_VkResult(result));
     }
 
     return device;
@@ -1173,43 +1211,33 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     if( cfg->allocator != nullptr )
         vctx->allocator = *cfg->allocator;
 
-    uint32_t gfamily = 0; // graphic family
-    uint32_t pfamily = 0; // present family
-    VkQueue  gqueue = nullptr;
     VkQueue  pqueue = nullptr;
 
     auto isdebug = (cfg->options & gfx_options_debug) == gfx_options_debug;
 
-    auto instance   = _vk_create_instance(isdebug);
-    auto physdevice = _vk_create_physical_device(instance);
-    auto surface    = _vk_create_surface(instance, cfg->handle);
-    auto device     = _vk_create_device(physdevice, surface, &gfamily, &pfamily);
 
-    vkGetDeviceQueue(device, gfamily, 0, &gqueue);
-    vkGetDeviceQueue(device, pfamily, 0, &pqueue);
+    vctx->vk_instance           = _vk_create_instance(isdebug);
+    vctx->vk_physical_device    = _vk_create_physical_device(vctx->vk_instance);
+    vctx->vk_surface            = _vk_create_surface(vctx->vk_instance, cfg->handle);
+    vctx->vk_device             = _vk_create_device(vctx->vk_physical_device, vctx->vk_surface, &vctx->graphics_queue.family, &vctx->present_queue.family);
 
-    vctx->vk_instance         = instance;
-    vctx->vk_physical_device   = physdevice;
-    vctx->vk_surface          = surface;
-    vctx->vk_device           = device;
-    vctx->graphics_queue   = { gfamily, gqueue };
-    vctx->present_queue    = { pfamily, pqueue };
-    vctx->dbg_log          = cfg->dbglog ? cfg->dbglog : gfx_default_log;
-    vctx->extensions       = (VkExtensionProperties*)_gfx_alloc(vctx, sizeof(VkExtensionProperties) * 1024);
+    vk_fill_device_caps(vctx, vctx->vk_physical_device, &vctx->gpu_caps);
+
+    vkGetDeviceQueue(vctx->vk_device, vctx->graphics_queue.family, 0, &vctx->graphics_queue.queue);
+    vkGetDeviceQueue(vctx->vk_device, vctx->present_queue.family, 0, &vctx->present_queue.queue);
+
+    vctx->dbg_log                   = cfg->dbglog ? cfg->dbglog : gfx_default_log;
+    vctx->extensions                = (VkExtensionProperties*)_gfx_alloc(vctx, sizeof(VkExtensionProperties) * 1024);
 
     vctx->vk_dbg_set_object_name    = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(vctx->vk_device, "vkSetDebugUtilsObjectNameEXT");
     vctx->vk_dbg_cmd_push_label     = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(vctx->vk_device, "vkCmdBeginDebugUtilsLabelEXT");
     vctx->vk_dbg_cmd_pop_label      = (PFN_vkCmdEndDebugUtilsLabelEXT)  vkGetDeviceProcAddr(vctx->vk_device, "vkCmdEndDebugUtilsLabelEXT");
 
-    vkGetPhysicalDeviceFeatures(physdevice, &vctx->device_features);
-    vkGetPhysicalDeviceProperties(physdevice, &vctx->device_properties);
-    vkGetPhysicalDeviceMemoryProperties(physdevice, &vctx->memory_properties);
-    vkEnumerateDeviceExtensionProperties(physdevice, NULL, &vctx->extension_count, NULL);
-    vkEnumerateDeviceExtensionProperties(physdevice, NULL, &vctx->extension_count, vctx->extensions);
-
-    vk_fill_device_caps(vctx, vctx->vk_physical_device, &vctx->gpu_caps);
-
-    auto maxUniformBufferRange = vctx->device_properties.limits.maxUniformBufferRange;
+    vkGetPhysicalDeviceFeatures(vctx->vk_physical_device, &vctx->device_features);
+    vkGetPhysicalDeviceProperties(vctx->vk_physical_device, &vctx->device_properties);
+    vkGetPhysicalDeviceMemoryProperties(vctx->vk_physical_device, &vctx->memory_properties);
+    vkEnumerateDeviceExtensionProperties(vctx->vk_physical_device, NULL, &vctx->extension_count, NULL);
+    vkEnumerateDeviceExtensionProperties(vctx->vk_physical_device, NULL, &vctx->extension_count, vctx->extensions);
     
     gfx_pool_create(sizeof(vk_surface_t),       16, &vctx->surface_pool, &vctx->allocator);
     gfx_pool_create(sizeof(vk_render_target_t), 256, &vctx->render_target_pool, &vctx->allocator);
@@ -1277,13 +1305,14 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vk_texture_create(&vctx->handle, &default_texture_storage_desc, &vctx->default_storage_texture);
 
     // bindless texture pool and set
-    if(vctx->bindless_max_texture_count > 0)
+    uint32_t bindless_max_texture_count = vctx->gpu_caps.max_bindless_sampleable_textures;
+    if(bindless_max_texture_count > 0)
     {
         // 1. Define the binding for the massive texture array
         VkDescriptorSetLayoutBinding binding = {0};
         binding.binding             = 0;
         binding.descriptorType      = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        binding.descriptorCount     = vctx->bindless_max_texture_count; // Must match the maximum array size
+        binding.descriptorCount     = bindless_max_texture_count; // Must match the maximum array size
         binding.stageFlags          = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
         // 2. Set specific bindless flags for this binding
@@ -1300,28 +1329,25 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
         layout_info.flags           = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;// CRITICAL: Layout must be compatible with the update-after-bind pool
         layout_info.bindingCount    = 1;
         layout_info.pBindings       = &binding;
-        vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &vctx->bindless_descriptor_set_layout);
+        vkCreateDescriptorSetLayout(vctx->vk_device, &layout_info, nullptr, &vctx->bindless_descriptor_set_layout);
 
-        VkDescriptorPoolSize bindless_pool_size = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, vctx->bindless_max_texture_count };
+        VkDescriptorPoolSize bindless_pool_size = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, bindless_max_texture_count };
         VkDescriptorPoolCreateInfo pool_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-        pool_info.flags            = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;  // CRITICAL: Allows updating descriptors while command buffers are recording/pending execution
-        pool_info.maxSets          = 1; // We only need a single global descriptor set
-        pool_info.poolSizeCount    = 1;
-        pool_info.pPoolSizes       = &bindless_pool_size;
-        vkCreateDescriptorPool(device, &pool_info, nullptr, &vctx->bindless_descriptor_pool);
+            pool_info.flags            = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;  // CRITICAL: Allows updating descriptors while command buffers are recording/pending execution
+            pool_info.maxSets          = 1; // We only need a single global descriptor set
+            pool_info.poolSizeCount    = 1;
+            pool_info.pPoolSizes       = &bindless_pool_size;
+        vkCreateDescriptorPool(vctx->vk_device, &pool_info, nullptr, &vctx->bindless_descriptor_pool);
 
         VkDescriptorSetVariableDescriptorCountAllocateInfo variable_count_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO };
         variable_count_info.descriptorSetCount    = 1;
-        variable_count_info.pDescriptorCounts     = &vctx->bindless_max_texture_count; // Set dynamic array bounds
+        variable_count_info.pDescriptorCounts     = &bindless_max_texture_count; // Set dynamic array bounds
 
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType             = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.pNext             = &variable_count_info; // Pass variable count info via pNext
-        allocInfo.descriptorPool    = vctx->bindless_descriptor_pool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts       = &vctx->bindless_descriptor_set_layout;
-
-        vkAllocateDescriptorSets(device, &allocInfo, &vctx->bindless_descriptor_set);
+        VkDescriptorSetAllocateInfo allocInfo   =  { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, &variable_count_info };
+            allocInfo.descriptorPool            = vctx->bindless_descriptor_pool;
+            allocInfo.descriptorSetCount        = 1;
+            allocInfo.pSetLayouts               = &vctx->bindless_descriptor_set_layout;
+        vkAllocateDescriptorSets(vctx->vk_device, &allocInfo, &vctx->bindless_descriptor_set);
     }
     
     *out_ctx = &vctx->handle;
@@ -1509,14 +1535,19 @@ void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* _surface)
     vk_surface_t* surface = (vk_surface_t*)gfx_pool_map(vctx->surface_pool, _surface->idx);
 
     for (size_t i = 0; i < _countof(surface->targets); i++) {
-        if (surface->targets[i]->framebuffer != VK_NULL_HANDLE)
+        vk_render_target_t* target = surface->targets[i];
+        if(target == nullptr)
+            continue;
+
+        if (target->framebuffer != VK_NULL_HANDLE)
             vkDestroyFramebuffer(vctx->vk_device, surface->targets[i]->framebuffer, nullptr);
         surface->targets[i] = VK_NULL_HANDLE;
 
-        for (size_t j = 0; j < _countof(surface->targets[j]->color_attachments); j++) {
-            _destroy_vk_texture(vctx, &surface->targets[i]->color_attachments[i]);
+        for (size_t j = 0; j < _countof(target->color_attachments); j++) {
+            if(surface->targets[i] != nullptr)
+                _destroy_vk_texture(vctx, &surface->targets[i]->color_attachments[i]);
         }
-        _destroy_vk_texture(vctx, &surface->targets[i]->depth_attachments);
+        _destroy_vk_texture(vctx, &target->depth_attachments);
     }
 
     if (surface->swapchain != VK_NULL_HANDLE)
@@ -2039,8 +2070,7 @@ static bool _vk_init_shader_stages(vk_context_t* vctx, gfx_shader_desc_t* desc, 
             return false;
         }
 
-        uint32_t stage_hash = gfx_utils_hash_32((const char*)desc->stages[i].data, desc->stages[i].size);
-        shader->hash32 = gfx_utils_hash_combine(shader->hash32, stage_hash);
+        shader->hash32 = gfx_utils_hash((const char*)desc->stages[i].data, desc->stages[i].size, shader->hash32);
     }
     return true;
 }
@@ -2877,7 +2907,7 @@ void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
     // 
     char * data_ptr = (char*)vk_shader->set_bindings[set_idx];
     size_t data_size = sizeof(VkDescriptorSetLayoutBinding) * vk_shader->set_binding_count[set_idx];
-    uint32_t bindings_hash = gfx_utils_hash_32(data_ptr, data_size);
+    uint32_t bindings_hash = gfx_utils_hash(data_ptr, data_size);
     vk_descriptor_pool_t * pool = _get_or_create_descriptor_set_pool(vctx, bindings_hash);
 
     if(vk_shader->pool == nullptr)
@@ -3066,16 +3096,17 @@ void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
     vk_render_target_t* vk_target = (vk_render_target_t*)pass->target;
 
-    VkClearColorValue color = { 0 };
-        color.float32[0] = ((pass->clear_color_value >> 24) & 0xFF) / 255.0f; // R
-        color.float32[1] = ((pass->clear_color_value >> 16) & 0xFF) / 255.0f; // G
-        color.float32[2] = ((pass->clear_color_value >> 8) & 0xFF) / 255.0f; // B
-        color.float32[3] = (pass->clear_color_value & 0xFF) / 255.0f; // A
+    VkClearValue color_clear = { 0 };
+    color_clear.color.float32[0] = ((pass->color_clear_value >> 24) & 0xFF) / 255.0f; // R
+    color_clear.color.float32[1] = ((pass->color_clear_value >> 16) & 0xFF) / 255.0f; // G
+    color_clear.color.float32[2] = ((pass->color_clear_value >> 8) & 0xFF) / 255.0f; // B
+    color_clear.color.float32[3] = ( pass->color_clear_value & 0xFF) / 255.0f; // A
 
-    VkClearValue clear_value[] = {
-            color,
-            { pass->clear_depth_value, pass->clear_stencil_value },
-    };
+    VkClearValue depth_stencil = { 0 };
+    depth_stencil.depthStencil.depth = pass->depth_clear_value;
+    depth_stencil.depthStencil.stencil = pass->stencil_clear_value;
+
+    VkClearValue clear_values [] = { color_clear , depth_stencil };
 
     VkRect2D render_area = {
         {0,0},                          // offset
@@ -3087,7 +3118,7 @@ void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
         info.framebuffer        = vk_target->framebuffer;
         info.renderArea         = render_area;
         info.clearValueCount    = 2;
-        info.pClearValues       = clear_value; 
+        info.pClearValues       = clear_values;
     vkCmdBeginRenderPass(vk_cmd->cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
 
     vk_cmd_viewport(cmd, 0, 0, vk_target->extent.width, vk_target->extent.height);

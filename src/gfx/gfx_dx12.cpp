@@ -56,6 +56,9 @@ extern "C" void dx12_get_caps(gfx_context_t* ctx, gfx_caps_t* caps)
     (void)ctx;
 }
 
+extern "C" void dx12_destroy(gfx_context_t *out_ctx)
+{
+}
 
 
 extern "C" void dx12_create_buffer(gfx_context_t* /*ctx*/, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
@@ -64,6 +67,9 @@ extern "C" void dx12_create_buffer(gfx_context_t* /*ctx*/, gfx_buffer_desc_t* de
     if (b && desc) b->size = desc->size;
     *out_buffer = b ? &b->handle : nullptr;
 }
+
+extern "C" void dx12_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t * buffer) { free(buffer); }
+
 
 extern "C" void dx12_create_shader(gfx_context_t* /*ctx*/, gfx_shader_desc_t* /*desc*/, gfx_shader_t** out_shader)
 {
@@ -136,7 +142,7 @@ extern "C" void dx12_create_cmd(gfx_context_t* /*ctx*/, gfx_command_buffer_t** o
     *out_cmd = c ? &c->handle : nullptr;
 }
 
-extern "C" void dx12_destroy_buffer(gfx_context_t* /*ctx*/, gfx_buffer_t* buffer) { free(buffer); }
+
 extern "C" void dx12_destroy_shader(gfx_context_t* /*ctx*/, gfx_shader_t* shader) { free(shader); }
 extern "C" void dx12_destroy_sampler(gfx_context_t* /*ctx*/, gfx_sampler_t* sampler) { free(sampler); }
 extern "C" void dx12_destroy_texture(gfx_context_t* /*ctx*/, gfx_texture_t* texture) { free(texture); }
@@ -211,7 +217,7 @@ extern "C" void dx12_submit_cmd(gfx_context_t* /*ctx*/, gfx_command_buffer_t* /*
 // Filled from gfx.cpp via: extern void gfx_init_dx12(gfx_api_pfn*)
 extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
 {
-    memset(func_table, 0, sizeof(*func_table));
+ /*   memset(func_table, 0, sizeof(*func_table));
 
     // CONTEXT
     func_table->pfn_init     = dx12_init;
@@ -279,7 +285,7 @@ extern "C" void gfx_init_dx12(gfx_api_pfn* func_table)
     func_table->pfn_cmd_pop_marker  = dx12_cmd_pop_marker;
 
     func_table->pfn_cmd_buffer_barrier  = dx12_cmd_buffer_barrier;
-    func_table->pfn_cmd_texture_barrier = dx12_cmd_texture_barrier;
+    func_table->pfn_cmd_texture_barrier = dx12_cmd_texture_barrier;*/
 }
 
 #endif // DX12_AVAILABLE

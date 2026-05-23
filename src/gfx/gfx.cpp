@@ -4,17 +4,20 @@
 #include <memory.h> // memset
 #include <atomic>
 
-
-#ifndef __cplusplus
-    #define nullptr     NULL
-#endif
-
 #if __has_include(<vulkan/vulkan.h>)
-#define VULKAN_AVAILABLE
+    #define VULKAN_AVAILABLE
 #endif
 
 #if __has_include(<webgpu/webgpu.h>)
-#define WEBGPU_AVAILABLE
+    #define WEBGPU_AVAILABLE
+#endif
+
+#if __has_include(<d3d12.h>)
+    #define DX12_AVAILABLE
+#endif
+
+#if __has_include(<Metal/Metal.h>)
+    #define METAL_AVAILABLE
 #endif
 
 
@@ -263,13 +266,100 @@ size_t gfx_pool_has_free(gfx_handle_pool_t* pool) {
 #pragma region gfx
 
 
+
+typedef struct gfx_api_pfn
+{
+    // CONTEXT
+    void     (*pfn_init)     (gfx_settings_t* settings, gfx_context_t** ctx);
+    void     (*pfn_destroy)  (gfx_context_t* ctx);
+    void     (*pfn_get_caps) (gfx_context_t* ctx, gfx_caps_t* caps);
+
+    // SWAPCHAIN
+    void     (*pfn_surface_create)(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
+    void     (*pfn_surface_destroy)(gfx_context_t* ctx, gfx_surface_t* surface);
+
+    void     (*pfn_frame_begin) (gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
+    void     (*pfn_frame_end) (gfx_frame_t* frame);
+
+    // BUFFER
+    void     (*pfn_buffer_create)      (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+    void     (*pfn_buffer_update_data) (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+    void     (*pfn_buffer_destroy)     (gfx_context_t* ctx, gfx_buffer_t* buffer);
+
+    // SHADER
+    void     (*pfn_shader_create)    (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+    uint32_t(*pfn_shader_get_descriptor_set_count)(gfx_shader_t* shader);
+    uint64_t(*pfn_uniform_location) (gfx_shader_t* shader, const char* name);
+    void     (*pfn_shader_destroy)   (gfx_context_t* ctx, gfx_shader_t* shader);
+
+    // SAMPLER
+    void     (*pfn_sampler_create)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+    void     (*pfn_sampler_destroy) (gfx_context_t* ctx, gfx_sampler_t* sampler);
+
+    // TEXTURE
+    void     (*pfn_texture_create)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+    void     (*pfn_texture_update_data)     (gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+    void     (*pfn_texture_update_bindless) (gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
+    void     (*pfn_texture_generate_mipmap) (gfx_context_t* ctx, gfx_texture_t* texture);
+    void     (*pfn_texture_blit)            (gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+    void     (*pfn_texture_get_data)        (gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+    void     (*pfn_texture_destroy)         (gfx_context_t* ctx, gfx_texture_t* texture);
+
+    // PIPELINE
+    void     (*pfn_pipeline_create)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+    void     (*pfn_mesh_pipeline_create)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+    void     (*pfn_pipeline_destroy)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
+
+    void     (*pfn_pipeline_compute_create)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
+    void     (*pfn_pipeline_compute_destroy) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
+
+    void     (*pfn_pipeline_raytrace_create) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+    void     (*pfn_pipeline_raytrace_destroy)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
+
+    // DESCRIPTOR SET
+    void     (*pfn_descriptor_set_create)   (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
+    void     (*pfn_descriptor_set_write_buffer_data) (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
+    void     (*pfn_descriptor_set_write_buffer)      (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
+    void     (*pfn_descriptor_set_write_texture)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
+    void     (*pfn_descriptor_set_write_sampler)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
+    void     (*pfn_descriptor_set_destroy)  (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+
+    void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
+    void     (*pfn_cmd_end_pass)   (gfx_command_buffer_t* cmd);
+
+    void     (*pfn_cmd_scissor)             (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    void     (*pfn_cmd_viewport)            (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    void     (*pfn_cmd_bind_pipeline)       (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+    void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
+    void     (*pfn_cmd_bind_buffer_ib)      (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
+    void     (*pfn_cmd_bind_buffer_vb)      (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
+    void     (*pfn_cmd_draw)                (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+    void     (*pfn_cmd_draw_indexed)        (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+    void     (*pfn_cmd_draw_indexed_indirect)(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
+    void     (*pfn_cmd_dispatch_compute)    (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+
+    void     (*pfn_cmd_push_marker)         (gfx_command_buffer_t* cmd, const char* marker);
+    void     (*pfn_cmd_pop_marker)          (gfx_command_buffer_t* cmd);
+
+    void     (*pfn_cmd_buffer_barrier)  (gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+    void     (*pfn_cmd_texture_barrier) (gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
+    // wip
+    void    (*pfn_acceleration_structure_create)(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** acceleration_struct);
+    void    (*pfn_acceleration_structure_destroy)(gfx_context_t* ctx, gfx_acceleration_structure_t* acceleration_structure);
+    void    (*pfn_sbt_create)(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t**);
+    void    (*pfn_sbt_destroy)(gfx_context_t* ctx, gfx_sbt_t* sbt);
+    void    (*pfn_cmd_build_acceleration_structure)(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t* dst, gfx_acceleration_structure_t* src);
+    void    (*pfn_cmd_trace_rays)(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
+} gfx_api_pfn;
+
+
 static gfx_api_pfn * g_tbl = nullptr;
 
-extern void gfx_init_webgpu(gfx_api_pfn* func_table);
-extern void gfx_init_vulkan(gfx_api_pfn* func_table);
-extern void gfx_init_metal(gfx_api_pfn* func_table);
-extern void gfx_init_dx12(gfx_api_pfn* func_table);
-
+extern "C" void gfx_init_webgpu(gfx_api_pfn* func_table);
+extern "C" void gfx_init_vulkan(gfx_api_pfn* func_table);
+extern "C" void gfx_init_metal(gfx_api_pfn* func_table);
+extern "C" void gfx_init_dx12(gfx_api_pfn* func_table);
 
 gfx_api gfx_backend  gfx_detect_backend()
 {
@@ -667,23 +757,51 @@ uint32_t gfx_utils_thread_id()
      return s_unique_id;
 }
 
-uint16_t gfx_utils_hash_16(const char* data, uint32_t size)
-{
-    return hash16(data, size);
-}
 
-uint32_t gfx_utils_hash_32(const char* data, uint32_t size)
+uint32_t gfx_utils_hash(const void* data, uint32_t size, uint32_t seed)
 {
-    return hash32(data, size);
-}
+    const uint8_t* bytes = (const uint8_t*)data;
+    const int nblocks = size / 4;
+    uint32_t h1 = seed;
 
-uint32_t gfx_utils_hash_combine(uint32_t hash1, uint32_t hash2)
-{
-    hash1 ^= hash2;
-    hash1 *= 0xcc9e2d51;
-    hash1 = (hash1 << 15) | (hash1 >> 17); // ROTL32
-    hash1 = hash1 * 5 + 0xe6546b64;
-    return hash1;
+    const uint32_t c1 = 0xcc9e2d51;
+    const uint32_t c2 = 0x1b873593;
+
+    const uint32_t* blocks = (const uint32_t*)(bytes + nblocks * 4);
+
+    for (int i = -nblocks; i; i++) {
+        uint32_t k1 = blocks[i]; 
+
+        k1 *= c1;
+        k1 = (k1 << 15) | (k1 >> 17);
+        k1 *= c2;
+
+        h1 ^= k1;
+        h1 = (h1 << 13) | (h1 >> 19);
+        h1 = h1 * 5 + 0xe6546b64;
+    }
+
+    const uint8_t* tail = (const uint8_t*)(bytes + nblocks * 4);
+    uint32_t k1 = 0;
+
+    switch (size & 3) {
+    case 3: k1 ^= tail[2] << 16;
+    case 2: k1 ^= tail[1] << 8;
+    case 1: k1 ^= tail[0];
+        k1 *= c1;
+        k1 = (k1 << 15) | (k1 >> 17);
+        k1 *= c2;
+        h1 ^= k1;
+    };
+
+    h1 ^= size;
+    h1 ^= h1 >> 16;
+    h1 *= 0x85ebca6b;
+    h1 ^= h1 >> 13;
+    h1 *= 0xc2b2ae35;
+    h1 ^= h1 >> 16;
+
+    return h1;
 }
 
 
@@ -792,28 +910,24 @@ uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
 #include "gfx_vulkan.h"
 #endif
 
-#define assign_extern( pfn_dst, ret_type, func_name, func_args)  { extern ret_type func_name func_args; pfn_dst = func_name; }
+#define assign_extern(pfn_dst, ret_type, func_name, func_args)  { extern ret_type func_name func_args; pfn_dst = func_name; }
 
 void gfx_init_vulkan(gfx_api_pfn* func_table)
 {
     memset(func_table, 0, sizeof(gfx_api_pfn));
-    #ifdef VULKAN_AVAILABLE
+#ifdef VULKAN_AVAILABLE
     assign_extern( func_table->pfn_init,     void, vk_create_renderer,  (gfx_settings_t * settings, gfx_context_t ** ctx) );
     assign_extern( func_table->pfn_destroy,  void, vk_destroy_renderer, (gfx_context_t * ctx) );
     assign_extern( func_table->pfn_get_caps, void, vk_get_caps,         (gfx_context_t * ctx, gfx_caps_t * caps) );
 
+    // SURFACE
     assign_extern(func_table->pfn_surface_create,  void, vk_surface_create, (gfx_context_t * ctx, gfx_surface_desc_t * desc, gfx_surface_t ** out_surface) );
     assign_extern(func_table->pfn_surface_destroy, void, vk_surface_destroy, (gfx_context_t * ctx, gfx_surface_t * surface) );
 
-
     // CONTEXT
-    func_table->pfn_init                    = vk_create_renderer;
-    func_table->pfn_get_caps                = vk_get_caps;
+    assign_extern(func_table->pfn_frame_begin,  void, vk_frame_begin, (gfx_context_t * ctx, gfx_surface_t * in_surface, gfx_frame_t * *out_frame));
+    assign_extern(func_table->pfn_frame_end,    void, vk_frame_end, (gfx_frame_t * frame));
 
-    func_table->pfn_surface_create          = vk_surface_create;
-
-    func_table->pfn_frame_begin             = vk_frame_begin;
-    func_table->pfn_frame_end               = vk_frame_end;
 
     // BUFFER
     func_table->pfn_buffer_create           = vk_buffer_create;
@@ -877,19 +991,21 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 
     func_table->pfn_cmd_buffer_barrier      = vk_cmd_buffer_barrier;
     func_table->pfn_cmd_texture_barrier     = vk_cmd_texture_barrier;
-    #endif
+#endif
 }
 
 
-#ifdef WEBGPU_AVAILABLE
-#include "gfx_webgpu.h"
-#endif
+#if __has_include("gfx_webgpu.h")
+ #include "gfx_webgpu.h"
+#endif 
+
+
 
 void gfx_init_webgpu(gfx_api_pfn* func_table)
 {
     memset(func_table, 0, sizeof(gfx_api_pfn));
 
-    #ifdef WEBGPU_AVAILABLE 
+#if __has_include("gfx_webgpu.h")
     // CONTEXT
     func_table->pfn_init                    = wgpu_init;
 
@@ -954,6 +1070,6 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
 
     func_table->pfn_cmd_buffer_barrier      = wgpu_cmd_buffer_barrier;
     func_table->pfn_cmd_texture_barrier     = wgpu_cmd_texture_barrier;
-    #endif
+#endif
 }
 

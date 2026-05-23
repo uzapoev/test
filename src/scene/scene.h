@@ -8,10 +8,11 @@
 #include <unordered_map>
 
 #include "../mathlib.h"
-#include "render_system.h"
 #include "../resource_manager.h"
-#include "components.h"
 #include "../common.h"
+
+#include "render_system.h"
+#include "components.h"
 
 #ifndef MAKEFOURCC
 #define MAKEFOURCC(ch0, ch1, ch2, ch3) ((uint32_t)(ch0) | ((uint32_t)(ch1) << 8) | ((uint32_t)(ch2) << 16) | ((uint32_t)(ch3) << 24 ))

@@ -103,8 +103,6 @@ file(GLOB_RECURSE HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
 file(GLOB_RECURSE SOURCES_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 set(SOURCES
-    src/assets/asset_shader.cpp  
-    src/assets/asset_shader.h  
     src/main.cpp
     src/platform/platform_emscripten.cpp  
     src/platform/platform_windows.cpp  

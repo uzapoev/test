@@ -83,7 +83,6 @@ typedef struct vk_context_t
     VkSemaphore                         frame_timeline_semaphore;
 
     // --- Bindless Resources ---
-    uint32_t                            bindless_max_texture_count;
     VkDescriptorSet                     bindless_descriptor_set         = VK_NULL_HANDLE;
     VkDescriptorPool                    bindless_descriptor_pool        = VK_NULL_HANDLE;
     VkDescriptorSetLayout               bindless_descriptor_set_layout  = VK_NULL_HANDLE;

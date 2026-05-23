@@ -340,7 +340,7 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
     uint64_t  mvp_location = 0;
     gfx_shader_t * shader = nullptr;
     {
-        measure ms("uniform:update");
+      //  measure ms("uniform:update");
         for(int i = 0; i < visible_renderers.size(); ++i) 
         {
             auto & renderer = visible_renderers[i];
@@ -456,7 +456,7 @@ bool DistanceCullSphere(const vec3& camPos, const vec3& sphereCenter, float radi
 
 const std::vector<renderer_t*>& scene::cull(const camera& camera)
 {
-    measure ms("scene::cull");
+   // measure ms("scene::cull");
     m_visibles.clear();
     frustum fr = frustum::from_view_proj(camera.view_proj());
 
