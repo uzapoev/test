@@ -1495,8 +1495,6 @@ gfx_api void gfx_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace
 
 
 
-
-
 // utility
 uint32_t            gfx_utils_thread_id();
 uint32_t            gfx_utils_hash(const void * data, uint32_t size, uint32_t seed = 0);
@@ -1504,20 +1502,43 @@ gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, 
 gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width);
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
 
+// memory
 // pool 
 struct gfx_handle_pool_t;
-gfx_api void        gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t * allocator);
-gfx_api void        gfx_pool_destroy(gfx_handle_pool_t* pool);
+gfx_api void        gfx_handle_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t * allocator);
+gfx_api void        gfx_handle_pool_destroy(gfx_handle_pool_t* pool);
+gfx_api void*       gfx_handle_pool_allocate_data(gfx_handle_pool_t* pool, uint64_t * out_handle); // return pointer to allocated data, out parameter returns handle
 
-gfx_api uint64_t    gfx_pool_alloc(gfx_handle_pool_t* pool);
-gfx_api void*       gfx_pool_alloc_data(gfx_handle_pool_t* pool, uint64_t * out_handle); // return pointer to allocated data, out parameter returns handle
-
-gfx_api void        gfx_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
-gfx_api void*       gfx_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
-gfx_api size_t      gfx_pool_get_size(gfx_handle_pool_t* pool);
-gfx_api size_t      gfx_pool_get_capacity(gfx_handle_pool_t* pool);
+gfx_api void        gfx_handle_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
+gfx_api void*       gfx_handle_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
+gfx_api size_t      gfx_handle_pool_get_size(gfx_handle_pool_t* pool);
+gfx_api size_t      gfx_handle_pool_get_capacity(gfx_handle_pool_t* pool);
 
 
+/**
+ * @brief Offset Allocator (Block-based Bitmask Allocator)
+ *
+ * Simple and efficient offset-based allocator that manages a large contiguous
+ * memory region (typically GPU buffer memory) using a bitmask for tracking
+ * free/allocated blocks.
+ *
+ * Features:
+ * - Fixed block granularity
+ * - Contiguous allocations only
+ * - O(1) free operation (stores allocation size at start block)
+ * - Single allocation for internal structures
+ * - Suitable for mesh buffers, texture streaming, and other GPU resource allocation
+ */
+struct gfx_offset_allocator_t;
+
+gfx_api void        gfx_offset_allocator_create(uint32_t size, uint32_t block_size, gfx_offset_allocator_t** allocator);
+gfx_api void        gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator);
+gfx_api intptr_t    gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size);
+gfx_api void        gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, intptr_t offset);
+
+
+
+//
 static uint32_t gfx_fourcc(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(g) << 16) | ((uint32_t)(r) << 24));
 }

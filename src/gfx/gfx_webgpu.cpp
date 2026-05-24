@@ -623,11 +623,11 @@ void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
     }, wctx);
 #endif
 
-    gfx_pool_create(sizeof(wgpu_sampler_t),  16,    &wctx->sampler_pool,  nullptr);
-    gfx_pool_create(sizeof(wgpu_texture_t),  1024,  &wctx->texture_pool,  nullptr);
-    gfx_pool_create(sizeof(wgpu_buffer_t),   4096,  &wctx->buffer_pool,   nullptr);
-    gfx_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool,   nullptr);
-    gfx_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool, nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_sampler_t),  16,    &wctx->sampler_pool,  nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_texture_t),  1024,  &wctx->texture_pool,  nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_buffer_t),   4096,  &wctx->buffer_pool,   nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool,   nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool, nullptr);
 
 
     gfx_buffer_desc_t desc = {};
@@ -806,8 +806,8 @@ void wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_
         buffer_desc.mappedAtCreation = mapped;
     WGPUBuffer buffer = wgpuDeviceCreateBuffer(wgpu_ctx->device, &buffer_desc);
 
-    auto handle = gfx_pool_alloc(wgpu_ctx->buffer_pool);
-    auto wgpu_buffer = (wgpu_buffer_t*)gfx_pool_map(wgpu_ctx->buffer_pool, handle);
+    uint64_t handle = 0;
+    auto wgpu_buffer = (wgpu_buffer_t*)gfx_handle_pool_allocate_data(wgpu_ctx->buffer_pool, &handle);
     if (wgpu_buffer != nullptr) {
         wgpu_buffer->handle = { handle };
         wgpu_buffer->buffer = buffer;
@@ -826,8 +826,8 @@ void wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* dst_buffer, void*
 {
     wgpu_context_t* wctx = from_ctx(ctx);
 
-    auto dst_buff = (wgpu_buffer_t*)gfx_pool_map(wctx->buffer_pool, dst_buffer->idx);
-    auto src_buff = (wgpu_buffer_t*)gfx_pool_map(wctx->buffer_pool, wctx->staging_buffer->idx);
+    auto dst_buff = (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, dst_buffer->idx);
+    auto src_buff = (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, wctx->staging_buffer->idx);
 
     auto asize = gfx_utils_align_up(size, 4);
 

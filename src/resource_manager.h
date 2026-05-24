@@ -79,7 +79,17 @@ public:
     gfx_texture_t *         texture_handle() { return m_texture; }
     gfx_sampler_t *         sampler_handle() { return m_sampler; }
 
-    void                    set_mip(uint16_t mip, bool unload);
+    void                    set_mip(uint16_t mip, bool unload) {
+
+     /*   texture_load_desc_t option;
+            option.name = limit_mip_levels;
+            option.value = mip
+        m_manager->load(guid(), true, &option, [&](gfx_texture_t* new_handle){
+            auto old = m_texture;
+            update_handle(new_handle);
+            gfx_texture_destroy(m_manager->ctx(), old);
+        }*/
+    }
 
 protected:
     void                    update_handle(gfx_texture_t * handle) {
@@ -92,7 +102,7 @@ private:
     texture_manager_prototype*  m_manager = nullptr;
     gfx_texture_t *             m_texture = nullptr;
     gfx_sampler_t *             m_sampler = nullptr;
-    gfx_texture_desc_t          m_create_info;
+    gfx_texture_desc_t          m_create_info = {};
 //  gfx_list_t *                m_materials = nullptr; // 
 };
 

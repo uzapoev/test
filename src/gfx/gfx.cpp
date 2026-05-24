@@ -140,19 +140,19 @@ static uint32_t hash32(const char* str, size_t len)
 }
 
 
-void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t* allocator)
+void gfx_handle_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t* allocator)
 {
     if(allocator == nullptr)
         allocator = gfx_default_allocator();
 
     size_t alignment = alignof(void*);
 
-    size_t pool_size        = gfx_utils_align_up(sizeof(gfx_handle_pool_t), alignment);
-    size_t data_size        = gfx_utils_align_up(capacity * stride, alignment);
-    size_t handles_size     = gfx_utils_align_up(capacity * sizeof(gfx_handle_t), alignment);
-    size_t free_list_size   = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
-    size_t counters_size    = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
-    size_t total_size       = data_size + handles_size + free_list_size + counters_size + pool_size;
+    uint32_t pool_size        = gfx_utils_align_up(sizeof(gfx_handle_pool_t), alignment);
+    uint32_t data_size        = gfx_utils_align_up(capacity * stride, alignment);
+    uint32_t handles_size     = gfx_utils_align_up(capacity * sizeof(gfx_handle_t), alignment);
+    uint32_t free_list_size   = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
+    uint32_t counters_size    = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
+    uint32_t total_size       = data_size + handles_size + free_list_size + counters_size + pool_size;
 
     void* buffer = allocator->gfx_alloc(total_size, allocator->user_data);
     if (buffer == nullptr)
@@ -184,7 +184,7 @@ void gfx_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_poo
     *out_pool = pool;
 }
 
-void gfx_pool_destroy(gfx_handle_pool_t* pool)
+void gfx_handle_pool_destroy(gfx_handle_pool_t* pool)
 {
     if(pool == nullptr)
         return;
@@ -207,14 +207,14 @@ uint64_t gfx_pool_alloc(gfx_handle_pool_t* pool)
     return pool->handles[index].handle;
 }
 
-void * gfx_pool_alloc_data(gfx_handle_pool_t* pool, uint64_t* out_handle)
+void * gfx_handle_pool_allocate_data(gfx_handle_pool_t* pool, uint64_t* out_handle)
 {
     *out_handle = gfx_pool_alloc(pool);
-    return gfx_pool_map(pool, *out_handle);
+    return gfx_handle_pool_map(pool, *out_handle);
 }
 
 
-void gfx_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
+void gfx_handle_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 {
     gfx_handle_t handle = { _handle };
 
@@ -228,7 +228,7 @@ void gfx_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
     pool->generation_counters[handle.index]++;
 }
 
-void * gfx_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
+void * gfx_handle_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
 {
     gfx_handle_t handle = { _handle };
     if(handle.hash != pool->hash)
@@ -251,11 +251,11 @@ size_t gfx_pool_get_stride(gfx_handle_pool_t* pool) {
     return (pool != nullptr) ? pool->stride : 0;
 }
 
-size_t gfx_pool_get_size(gfx_handle_pool_t* pool) {
+size_t gfx_handle_pool_get_size(gfx_handle_pool_t* pool) {
     return (pool != nullptr) ? pool->used_chunks : 0;
 }
 
- size_t gfx_pool_get_capacity(gfx_handle_pool_t* pool) {
+ size_t gfx_handle_pool_get_capacity(gfx_handle_pool_t* pool) {
      return (pool != nullptr) ? pool->capacity : 0;
  }
 
@@ -263,6 +263,139 @@ size_t gfx_pool_has_free(gfx_handle_pool_t* pool) {
     return (pool != nullptr) ? (pool->used_chunks < pool->capacity) : 0;
 }
 
+
+
+/// <summary>
+/// offset allocator
+/// </summary>
+typedef struct gfx_offset_allocator_t {
+    uint32_t  size;             // Total managed size (e.g., in bytes)
+    uint32_t  block_size;       // Quantum/granularity size of a single block
+    uint32_t  blocks_count;     // Total number of blocks (size / block_size)
+    uint32_t  bitmask_words;    // Number of uint64_t elements needed for the bitmask
+    uint64_t* bitmask;          // Pointer to the bit arrays (0 = free, 1 = allocated)
+    uint32_t* block_sizes;      // Track allocation lengths (in blocks) for large mesh buffers
+} gfx_offset_allocator_t;
+
+
+void gfx_offset_allocator_create(uint32_t size, uint32_t block_size, gfx_offset_allocator_t** allocator)
+{
+    if (!allocator || size == 0 || block_size == 0) return;
+
+    if (size < block_size) {
+        size = block_size;  // silently adjust or return error - decide based on policy
+    }
+
+    uint32_t blocks_count = size / block_size;
+
+    uint32_t mask_words = (blocks_count + 63) / 64;
+
+    // Calculate total memory for: Header + Bitmask (uint64) + Size Tracker (uint32)
+    size_t bitmask_bytes = mask_words * sizeof(uint64_t);
+    size_t sizes_bytes = blocks_count * sizeof(uint32_t);
+    size_t total_mem = sizeof(gfx_offset_allocator_t) + bitmask_bytes + sizes_bytes;
+
+    void* buffer = calloc(1, total_mem);
+    if (!buffer) {
+        *allocator = NULL;
+        return;
+    }
+
+    // Initialize the header at the very beginning of the allocated buffer
+    gfx_offset_allocator_t* header = (gfx_offset_allocator_t*)buffer;
+    header->size = size;
+    header->block_size = block_size;
+    header->blocks_count = blocks_count;
+    header->bitmask_words = mask_words;
+
+    // Layout arrays sequentially right after the header structure
+    uint8_t* mem_ptr = (uint8_t*)buffer + sizeof(gfx_offset_allocator_t);
+    header->bitmask = (uint64_t*)mem_ptr;
+    header->block_sizes = (uint32_t*)(mem_ptr + bitmask_bytes);
+
+    *allocator = header;
+}
+
+
+void gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator)
+{
+    if (allocator) {
+        free(allocator);
+    }
+}
+
+
+intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size)
+{
+    if (!allocator || size == 0) return -1;
+
+    // Calculate how many blocks are needed for the requested size
+    uint32_t needed_blocks = (size + allocator->block_size - 1) / allocator->block_size;
+
+    uint32_t run_length = 0;
+    uint32_t start_block = 0;
+    uint32_t total_bits = allocator->bitmask_words * 64;
+
+    // Linear scan through the bitmask to find a contiguous sequence of 0s
+    for (uint32_t i = 0; i < total_bits; ++i) {
+        if (i >= allocator->blocks_count) break;
+
+        uint32_t word_idx = i / 64;
+        uint32_t bit_idx = i % 64;
+
+        if (allocator->bitmask[word_idx] == UINT64_MAX) {
+            run_length = 0;
+            i += 63;
+            continue;
+        }
+
+        if (allocator->bitmask[word_idx] & (1ULL << bit_idx)) {
+            run_length = 0; // Block is occupied
+        }
+        else {
+            if (run_length == 0) start_block = i;
+            run_length++;
+
+            if (run_length == needed_blocks) {
+                // Mark bits as allocated (1)
+                for (uint32_t b = start_block; b < start_block + needed_blocks; ++b) {
+                    allocator->bitmask[b / 64] |= (1ULL << (b % 64));
+                }
+
+                // Store the allocation length at the starting block index
+                allocator->block_sizes[start_block] = needed_blocks;
+
+                return (intptr_t)(start_block * allocator->block_size);
+            }
+        }
+    }
+    return -1; // OOM
+}
+
+// Releases the allocated region back to the pool in true O(1) time
+ void gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, intptr_t offset)
+{
+    if (!allocator || offset < 0 || offset >= allocator->size)
+        return;
+
+    if (offset % allocator->block_size != 0)
+        return;
+
+    uint32_t start_block = (uint32_t)offset / allocator->block_size;
+
+    // Lookup how many blocks this allocation actually owns
+    uint32_t needed_blocks = allocator->block_sizes[start_block];
+    if (needed_blocks == 0)
+        return;
+
+    // Clear the tracking slot
+    allocator->block_sizes[start_block] = 0;
+
+    // Clear bits back to 0. Merging happens automatically for the next allocation scan.
+    for (uint32_t b = start_block; b < start_block + needed_blocks; ++b) {
+        allocator->bitmask[b / 64] &= ~(1ULL << (b % 64));
+    }
+}
 #pragma endregion
 
 #pragma region gfx
@@ -787,7 +920,7 @@ uint32_t gfx_utils_hash(const void* data, uint32_t size, uint32_t seed)
     uint32_t k1 = 0;
 
     switch (size & 3) {
-    case 3: k1 ^= tail[2] << 16;
+    case 3: k1 ^= tail[2] << 16; 
     case 2: k1 ^= tail[1] << 8;
     case 1: k1 ^= tail[0];
         k1 *= c1;

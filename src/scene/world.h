@@ -93,10 +93,10 @@ public:
 
     template<> void serialize(class renderer * _component, filestream* stream)
     {
-        auto chunk_size =   _component->mesh_guid.length()      + sizeof(uint16_t) +
-                            _component->material_guid.length()  + sizeof(uint16_t) +
-                            _component->lightmap_guid.length()  + sizeof(uint16_t) +
-                            sizeof(_component->lightmap_scale_offset);
+        uint32_t chunk_size =   _component->mesh_guid.length()      + sizeof(uint16_t) +
+                                _component->material_guid.length()  + sizeof(uint16_t) +
+                                _component->lightmap_guid.length()  + sizeof(uint16_t) +
+                                sizeof(_component->lightmap_scale_offset);
 
         write_chunk_info(stream, scene::component_renderer, chunk_size);
         stream->write(_component->mesh_guid);

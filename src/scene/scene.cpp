@@ -325,7 +325,7 @@ void scene_draw_indirect(gfx_command_buffer_t* cmd, camera& camera)
         gfx_cmd_bind_descriptor_set(cmd, 1, descriptor_set_instance);
         gfx_cmd_bind_descriptor_set(cmd, 2, descriptor_set_bindless);
 
-        gfx_cmd_draw_indexed_indirect(cmd, indirect_buffer, 0, m_batches.size(), sizeof(indirect_data_t));
+        gfx_cmd_draw_indexed_indirect(cmd, indirect_buffer, 0, (uint32_t)m_batches.size(), sizeof(indirect_data_t));
     }
 
     gfx_cmd_pop_marker(cmd);

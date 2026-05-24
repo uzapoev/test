@@ -293,7 +293,7 @@ static int  gfx_compile_shader(gfx_shader_compiler_context_t * context, const ch
         ISlangBlob* shlang_blob = nullptr;
         if (SLANG_SUCCEEDED(spGetEntryPointCodeBlob(compile_request, slang_entry_point_indexes[i], target_id, &shlang_blob)))
         {
-            program->blobs[i].stage_data_size = shlang_blob->getBufferSize();
+            program->blobs[i].stage_data_size = (uint32_t)shlang_blob->getBufferSize();
             program->blobs[i].stage_data = (char*)calloc(1, shlang_blob->getBufferSize());
             strcpy(program->blobs[i].stage_entry_point_name, entry_point_names[i]);
 

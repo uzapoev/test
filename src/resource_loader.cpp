@@ -146,7 +146,7 @@ bool load_mesh_from_file_path(gfx_context_t* ctx, mesh_pool_t * pool, const char
     return true;
 }
 
-void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char *name, char * data, size_t size, render_mesh_t* out_mesh)
+void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char *name, char * data, uint32_t size, render_mesh_t* out_mesh)
 {
     char* curent_ptr = data;
 
@@ -336,7 +336,7 @@ void load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_textu
 }
 
 
-void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * data, size_t size, gfx_texture_t **out_texture)
+void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * data, uint32_t size, gfx_texture_t **out_texture)
 {
     uint32_t magik = *(uint32_t*)data;
 
@@ -568,7 +568,7 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
 
 
 
-void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* data, size_t size, gfx_shader_t** out_shader)
+void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* data, uint32_t size, gfx_shader_t** out_shader)
 {
     uint32_t uniform_count = 0;
     gfx_uniform_t uniforms[16] = {};
@@ -642,7 +642,7 @@ void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct g
     free(data);
 }
 
-void load_material_from_file_data(gfx_context_t* ctx, char* data, size_t size, struct gfx_material_instance_t** insance)
+void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct gfx_material_instance_t** insance)
 {
   //  std::string jstr(data, size);
   //  json::from_json<gfx_material_instance_t>(jstr);

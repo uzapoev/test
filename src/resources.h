@@ -2,7 +2,6 @@
 #define __resources_h__
 
 #include "gfx/gfx.h"
-#include "gfx/gfx_memory.h"
 #include "mathlib.h"
 
 
