@@ -108,10 +108,10 @@ set(SOURCES
     src/platform/platform_windows.cpp  
     src/platform/platform.h
     src/gfx/gfx.h
+    src/gfx/gfx_shader_compiler.h
     src/gfx/gfx.cpp
     src/gfx/gfx_dx12.h
     src/gfx/gfx_dx12.cpp
-    src/gfx/gfx_memory.h
     src/gfx/gfx_metal.h
     src/gfx/gfx_vulkan.cpp
     src/gfx/gfx_vulkan.h

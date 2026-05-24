@@ -1521,13 +1521,6 @@ gfx_api size_t      gfx_handle_pool_get_capacity(gfx_handle_pool_t* pool);
  * Simple and efficient offset-based allocator that manages a large contiguous
  * memory region (typically GPU buffer memory) using a bitmask for tracking
  * free/allocated blocks.
- *
- * Features:
- * - Fixed block granularity
- * - Contiguous allocations only
- * - O(1) free operation (stores allocation size at start block)
- * - Single allocation for internal structures
- * - Suitable for mesh buffers, texture streaming, and other GPU resource allocation
  */
 struct gfx_offset_allocator_t;
 

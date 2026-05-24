@@ -145,7 +145,7 @@ void gfx_handle_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** 
     if(allocator == nullptr)
         allocator = gfx_default_allocator();
 
-    size_t alignment = alignof(void*);
+    uint32_t alignment = alignof(void*);
 
     uint32_t pool_size        = gfx_utils_align_up(sizeof(gfx_handle_pool_t), alignment);
     uint32_t data_size        = gfx_utils_align_up(capacity * stride, alignment);
@@ -324,7 +324,108 @@ void gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator)
     }
 }
 
+inline uint32_t ctz64(uint64_t x) {
+    assert(x != 0);
+#if defined(_MSC_VER)
+    unsigned long index;
+    _BitScanForward64(&index, x);
+    return (uint32_t)index;
+#else
+    return (uint32_t)__builtin_ctzll(x);
+#endif
+}
 
+intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size)
+{
+    if (!allocator || size == 0)
+        return -1;
+
+    if (size > allocator->size)
+        return -1;
+
+    uint32_t needed_blocks =
+        (size + allocator->block_size - 1) / allocator->block_size;
+
+    if (needed_blocks > allocator->blocks_count)
+        return -1;
+
+    uint32_t run_length = 0;
+    uint32_t start_block = 0;
+
+    const uint32_t total_words = allocator->bitmask_words;
+
+    for (uint32_t word_idx = 0; word_idx < total_words; ++word_idx)
+    {
+        uint64_t word = allocator->bitmask[word_idx];
+
+        if (word == UINT64_MAX)
+        {
+            run_length = 0;
+            continue;
+        }
+
+        if (word == 0)
+        {
+            if (run_length == 0)
+                start_block = word_idx * 64;
+
+            run_length += 64;
+
+            if (run_length >= needed_blocks)
+            {
+                uint32_t start = start_block;
+
+                // allocate range
+                uint32_t end = start + needed_blocks;
+                for (uint32_t b = start; b < end; ++b)
+                    allocator->bitmask[b / 64] |= (1ULL << (b % 64));
+
+                allocator->block_sizes[start] = needed_blocks;
+
+                return (intptr_t)(start * allocator->block_size);
+            }
+
+            continue;
+        }
+
+        // PARTIAL WORD
+        for (uint32_t bit = 0; bit < 64; ++bit)
+        {
+            uint32_t global_bit = word_idx * 64 + bit;
+            if (global_bit >= allocator->blocks_count)
+                break;
+
+            if (!(word & (1ULL << bit)))
+            {
+                if (run_length == 0)
+                    start_block = global_bit;
+
+                run_length++;
+
+                if (run_length >= needed_blocks)
+                {
+                    uint32_t start = start_block;
+                    uint32_t end = start + needed_blocks;
+
+                    for (uint32_t b = start; b < end; ++b)
+                        allocator->bitmask[b / 64] |= (1ULL << (b % 64));
+
+                    allocator->block_sizes[start] = needed_blocks;
+
+                    return (intptr_t)(start * allocator->block_size);
+                }
+            }
+            else
+            {
+                run_length = 0;
+            }
+        }
+    }
+
+    return -1;
+}
+
+#if 0
 intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size)
 {
     if (!allocator || size == 0) return -1;
@@ -336,12 +437,36 @@ intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32
     uint32_t start_block = 0;
     uint32_t total_bits = allocator->bitmask_words * 64;
 
+  /*  for(uint32_t i = 0; i < allocator->bitmask_words; ++i)
+    {   
+        uint64_t inv = ~allocator->bitmask[i];
+
+        if (inv == 0)
+            continue;
+
+        int idx = 64 * i + ctz64(inv);
+        start_block = idx;
+
+        for(int j = idx; j < needed_blocks; ++j)
+        {
+            uint32_t bit_idx = i % 64;
+            if (allocator->bitmask[j] & (1ULL << bit_idx))
+            {
+            //    start_block =
+            }
+            run_length++;
+        }
+
+        printf("");
+        break;
+    }*/
+
     // Linear scan through the bitmask to find a contiguous sequence of 0s
     for (uint32_t i = 0; i < total_bits; ++i) {
         if (i >= allocator->blocks_count) break;
 
         uint32_t word_idx = i / 64;
-        uint32_t bit_idx = i % 64;
+        uint32_t bit_idx  = i % 64;
 
         if (allocator->bitmask[word_idx] == UINT64_MAX) {
             run_length = 0;
@@ -351,18 +476,16 @@ intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32
 
         if (allocator->bitmask[word_idx] & (1ULL << bit_idx)) {
             run_length = 0; // Block is occupied
-        }
-        else {
-            if (run_length == 0) start_block = i;
+        } else {
+            if (run_length == 0) 
+                start_block = i;
             run_length++;
 
             if (run_length == needed_blocks) {
-                // Mark bits as allocated (1)
                 for (uint32_t b = start_block; b < start_block + needed_blocks; ++b) {
                     allocator->bitmask[b / 64] |= (1ULL << (b % 64));
                 }
 
-                // Store the allocation length at the starting block index
                 allocator->block_sizes[start_block] = needed_blocks;
 
                 return (intptr_t)(start_block * allocator->block_size);
@@ -371,6 +494,7 @@ intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32
     }
     return -1; // OOM
 }
+#endif
 
 // Releases the allocated region back to the pool in true O(1) time
  void gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, intptr_t offset)

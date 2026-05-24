@@ -62,7 +62,7 @@ size_t read_file_data(const char* path, char** data_out)
 }
 
 
-size_t read_file_data_text(const char* path, char** data_out)
+uint32_t read_file_data_text(const char* path, char** data_out)
 {
     FILE* file = fopen(path, "r");
     if (file == nullptr)
@@ -534,7 +534,7 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
     char compiled_name_buff[256] = "";
     sprintf(compiled_name_buff, "%s.spirv", path);
 
-    size_t size = read_file_data_text(path, &data);
+    uint32_t size = read_file_data_text(path, &data);
     if (size == 0)
         return;
 
