@@ -183,16 +183,17 @@ void resource_manager::init()
         //     {1, sizeof(instance_data), gfx_vertex_rate_instance}
     };
 
-    gfx_pipeline_desc_t piplene_desc = {};
-        piplene_desc.shader = m_default_shader;
-        piplene_desc.assembly.topology = gfx_topology_triangles;
-        piplene_desc.assembly.attributes = attributes;
-        piplene_desc.assembly.attributes_count = _countof(attributes);
-        piplene_desc.assembly.slots = slots;
-        piplene_desc.assembly.slot_count = _countof(slots);
-        piplene_desc.render_states.blend.enable = false;
-        piplene_desc.render_states.blend.color_src = gfx_blend_mode_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
-        piplene_desc.render_states.blend.color_dst = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
+    gfx_pipeline_desc_t piplene_desc = { 0 };
+        piplene_desc.shader                     = m_default_shader;
+        piplene_desc.assembly.topology          = gfx_topology_triangles;
+        piplene_desc.assembly.attribute_count   = _countof(attributes);
+        piplene_desc.assembly.attributes        = attributes;
+
+        piplene_desc.assembly.slots                 = slots;
+        piplene_desc.assembly.slot_count            = _countof(slots);
+        piplene_desc.render_states.blend.enable     = false;
+        piplene_desc.render_states.blend.color_src  = gfx_blend_mode_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
+        piplene_desc.render_states.blend.color_dst  = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
     m_default_pipeline = gfx_pipeline_create(m_ctx, &piplene_desc);
 
     m_meshes.reserve(1024);
@@ -288,20 +289,20 @@ std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * nam
 
     auto material = std::make_shared<gfx_material_t>();
     material->instance = instance;
-    material->descriptor_set = gfx_descriptor_set_create(m_ctx, instance->shader);
+    material->descriptor_set = gfx_descriptor_set_create(m_ctx, instance->shader, 0);
     
     for(size_t i = 0; i < _countof(instance->textures); ++i)
     {
         uint64_t handle = gfx_uniform_location(instance->shader, instance->textures[i].key.c_str());
         if(handle && instance->textures[i].value)
-            gfx_uniform_set_texture(material->descriptor_set, handle, instance->textures[i].value);
+            gfx_descriptor_set_write_texture(material->descriptor_set, handle, instance->textures[i].value);
     }
 
     for (size_t i = 0; i < _countof(instance->vectorsf); ++i)
     {
         uint64_t handle = gfx_uniform_location(instance->shader, instance->vectorsf[i].key.c_str());
         if (handle)
-            gfx_uniform_set_buffer_data(material->descriptor_set, handle, &instance->vectorsf[i].value, sizeof(vec4));
+            gfx_descriptor_set_write_buffer_data(material->descriptor_set, handle, &instance->vectorsf[i].value, sizeof(vec4));
     }
 
     m_materials.push_back(material);

@@ -93,7 +93,6 @@ static uint32_t    spirvflect_merge_uniforms(spirvflect_uniform_t* src_a, uint32
                                       spirvflect_uniform_t* dst, uint32_t capacity);
 
 //  internal 
-#pragma pack(push, 1)
 
 typedef struct spirvflect_variable_t
 {
@@ -150,7 +149,6 @@ typedef struct spirvflect_type_t
     };
 } spirvflect_type_t;
 
-#pragma pack(pop)
 
 
 typedef struct sprivflect_info_t
@@ -228,7 +226,7 @@ static spirvflect_decor_t* _find_with_decor_in_child(sprivflect_info_t* ctx, uin
 static void parse_struct(sprivflect_info_t * ctx, spirvflect_type_t* type)
 {
     gfx_uniform_t uniform;
-    uniform.type = gfx_uniform_storage;
+    uniform.type = gfx_uniform_storage_buffer;
     uniform.buffer.field_count = type->count - 2; // skip instruction(id(16bit) + count(16bit)) + id(32bit);
 
     for (uint32_t i = 0; i < uniform.buffer.field_count; ++i)

@@ -103,17 +103,15 @@ file(GLOB_RECURSE HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
 file(GLOB_RECURSE SOURCES_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 set(SOURCES
-    src/assets/asset_shader.cpp  
-    src/assets/asset_shader.h  
     src/main.cpp
     src/platform/platform_emscripten.cpp  
     src/platform/platform_windows.cpp  
     src/platform/platform.h
     src/gfx/gfx.h
+    src/gfx/gfx_shader_compiler.h
     src/gfx/gfx.cpp
     src/gfx/gfx_dx12.h
     src/gfx/gfx_dx12.cpp
-    src/gfx/gfx_memory.h
     src/gfx/gfx_metal.h
     src/gfx/gfx_vulkan.cpp
     src/gfx/gfx_vulkan.h

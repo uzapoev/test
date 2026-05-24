@@ -17,11 +17,13 @@
 
 #include "resource_manager.h"
 
-#include "assets/asset_unity.h"
 
-
-
-static scene                g_scene;
+uintptr_t g_handle;
+camera g_camera;
+static gfx_context_t* ctx = nullptr;
+static gfx_surface_t surface = {};
+static gfx_pipeline_t* pipeline = nullptr;
+static scene g_scene;
 
 void scene_test(gfx_context_t* ctx, const char * data_path, const char* scene_name)
 {
@@ -65,63 +67,57 @@ gfx_allocator_t gfx_allocator = {
         return free(ptr);
     }
  };
-#include "threads.h"
-
-
-camera g_camera;
-static gfx_context_t* ctx = nullptr;
-static gfx_swapchain_t* swapchain = nullptr;
-static gfx_pipeline_t* pipeline = nullptr;
-static gfx_command_buffer_t* cmds[4] = {};
-
-uintptr_t g_handle;
-
 
 
 void platform_main(uintptr_t handle, int argc, char** argv)
 {
-    auto p0 = sizeof(vertex);
-    auto p1 = sizeof(vertex_packed);
     memory::enable_tracking();
-
-    thread_test();
 
     g_handle = handle;
     gfx_settings_t settings = {0};
         settings.handle     = handle;
         settings.backend    = gfx_backend_vulkan;
     //    settings.backend    = gfx_backend_webgpu;
-        settings.options    = 0;//gfx_options_debug;
+        settings.options    = gfx_options_debug;
         settings.dbglog     = log_func;
         settings.allocator  = &gfx_allocator;
     gfx_init(&settings, &ctx);
-    gfx_create_swapchain(ctx, handle, &swapchain);
 
-    gfx_shader_t* compute = nullptr;
+    gfx_caps_t caps = {};
+    gfx_get_caps(ctx, &caps);
+    // Engine runtime notifications
+    log_func(gfx_msg_info, "Initialized GPU backend: %s (%s)", caps.gpu_name, caps.gpu_vendor);
+    log_func(gfx_msg_info, "Capabilities - Bindless: %s (Max Textures: %u), Mesh Shaders: %s, UMA: %s",
+        caps.support_bindless ? "ENABLED" : "DISABLED",
+        caps.max_bindless_sampleable_textures,
+        caps.support_mesh_shader ? "ENABLED" : "DISABLED",
+        caps.has_unified_memory ? "TRUE" : "FALSE");
+
+    gfx_surface_desc_t surface_desc = {};
+        surface_desc.label              = "main_view";
+        surface_desc.window_handle      = handle;
+        surface_desc.vsync              = true;
+        surface_desc.preferred_format   = gfx_pixel_format_rgba8;
+        surface_desc.sample_count       = gfx_sample_1x;
+    surface = gfx_surface_create(ctx, &surface_desc);
+
+   /* gfx_shader_t* compute = nullptr;
     load_shader_from_file_path(ctx, "../data/shaders/compute.hlsl", &compute);
 
     gfx_compute_pipeline_desc_t compute_desc = {};
     compute_desc.shader = compute;
     gfx_pipeline_compute_t * compute_pipeline = gfx_compute_pipeline_create(ctx, &compute_desc);
-
-   // gfx_create_descriptor_set2(ctx, compute);
-    //gfx_create_descriptor_set2(ctx, compute);
-
+    */
 
     resource_manager::create_and_make_shader(ctx);
-    resource_manager::shared()->mount("../data/");
-
     render_system::create_and_make_shader(ctx);
 
-    cmds[0] = gfx_cmd_create(ctx);
-    cmds[1] = gfx_cmd_create(ctx);
-    cmds[2] = gfx_cmd_create(ctx);
-    cmds[3] = gfx_cmd_create(ctx);
+    resource_manager::shared()->mount("../data/");
+
     
     gfx_shader_t* shader = nullptr;
     load_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
 
-    //gfx_descriptor_set_t* sets = gfx_create_descriptor_set2(ctx, shader);
 
     gfx_vertex_attribute attributes[] = {
         { 0, 0, gfx_vertex_format_float4,   offsetof(vertex, position)  },
@@ -135,13 +131,17 @@ void platform_main(uintptr_t handle, int argc, char** argv)
    //     {1, sizeof(instance_data), gfx_vertex_rate_instance}
     };
 
-    gfx_pipeline_desc_t piplene_desc = {};
-        piplene_desc.shader = shader;
-        piplene_desc.assembly.topology = gfx_topology_triangles;
-        piplene_desc.assembly.attributes = attributes;
-        piplene_desc.assembly.attributes_count = _countof(attributes);
-        piplene_desc.assembly.slots = slots;
-        piplene_desc.assembly.slot_count = _countof(slots);
+    gfx_pipeline_desc_t piplene_desc = { 0 };
+
+        piplene_desc.shader                     = shader;
+        piplene_desc.assembly.topology          = gfx_topology_triangles;
+
+        piplene_desc.assembly.attribute_count   = _countof(attributes);
+        piplene_desc.assembly.attributes        = attributes;
+
+        piplene_desc.assembly.slot_count        = _countof(slots);
+        piplene_desc.assembly.slots             = slots;
+
     pipeline = gfx_pipeline_create(ctx, &piplene_desc);
     
    /* mvp_location            = gfx_uniform_location(shader, "mvp");
@@ -166,13 +166,12 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     g_camera.set_near_far(0.01f, 1500.0f);
     g_camera.set_apect(aspect);
     g_camera.set_pos(math::make_vec3(4.366324f, 9.78074f, 185.8569f));
-  //  g_camera.set_pos(math::make_vec3(0, 0, -5));
     g_camera.set_target(g_camera._pos + math::make_vec3(0, 0, 1));
 
   //  scene_test(ctx, "../data/unity", "Southside.big.json");
   //  scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
-    scene_test(ctx, "../data/unity", "../data/unity/City.json");
-  //  scene_test(ctx, "../data/gungsta", "../data/gungsta/Demo.json");
+  //  scene_test(ctx, "../data/unity", "../data/unity/City.json");
+    scene_test(ctx, "../data/gungsta", "../data/gungsta/Demo.json");
 }
 
 
@@ -188,20 +187,14 @@ void update_camera(camera & cam)
     dir *= input_kb_state(Input::Keyboard::Shift) ?  10.0f : 1.0f;
     auto p = input_point_pos();
 
-    vec2 mp = { (float)-p.dx, (float)p.dy };
-    cam.set_mouse_dt(mp * 0.5f);
+    if(input_mouse_button_state(mouse_btn_right) == input_state_down){
+
+        vec2 mp = { (float)-p.dx, (float)p.dy };
+        cam.set_mouse_dt(mp * 0.5f);
+    }
     cam.move(dir * Time::dt() * 1.0f);
     cam.update();
 }
-
-
-// main    | input, network_in, scripts, network_out                |
-// render  | animation, upload_resorces | gpu_culling | render      |
-// job0    | evaluate_mip,                                          |
-// job1    | cpu_culling + instancing   |                           |
-// job2    | streaming                                              |
-// job3    | streaming                                              |
-// sound   | mix, render                                            |
 
 
 void platform_tick(void* userdata)
@@ -211,11 +204,6 @@ void platform_tick(void* userdata)
 
     update_camera(g_camera);
 
-  //  if(input_kb_state(Input::Keyboard::NumPad_Add) )
-  //      g_camera.set_fov(g_camera.m_fov + 0.1f);
-
-  //  if (input_kb_state(Input::Keyboard::NumPad_Subtract))
-  //      g_camera.set_fov(g_camera.m_fov - 0.1f);
 
     if ( input_kb_state(Input::Keyboard::NumPad_Subtract)){
         g_camera.m_near -= 0.001f;
@@ -239,23 +227,20 @@ void platform_tick(void* userdata)
     g_camera.setup(g_camera.m_fov, width / height, g_camera.m_near, g_camera.m_far);
     g_camera.update();
 
-    gfx_render_target_t* target = nullptr;
-    int32_t idx = gfx_acquire_img(ctx, swapchain, &target);
-    if (idx < 0) 
-        return;
+    gfx_pass_info_t pass = { 0 };
+        pass.color_clear_value = gfx_fourcc(64,128,255,255);
+        pass.depth_clear_value = 1.0f;
+        pass.stencil_clear_value = 0;
 
-    auto cmd = cmds[idx];
+    auto frame = gfx_begin_frame(ctx, &surface);
+    {
+        pass.target = frame->target;
 
-    gfx_cmd_begin(cmd);
-    gfx_cmd_begin_pass(cmd, target);
-
-    g_scene.draw(cmd, g_camera);
- 
-    gfx_cmd_end_pass(cmd);
-    gfx_cmd_end(cmd);
-
-    gfx_cmd_submit(ctx, cmd, gfx_submit_wait_for_image_ready);
-    gfx_present_img(ctx, swapchain, idx);
+        gfx_cmd_begin_pass(frame->cmd, &pass);
+            g_scene.draw(frame->cmd, g_camera);
+        gfx_cmd_end_pass(frame->cmd);
+    }
+    gfx_end_frame(frame);
 }
  
 

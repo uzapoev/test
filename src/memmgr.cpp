@@ -29,17 +29,26 @@ static volatile bool    g_trace_allocations = 0;
 #define sys_malloc(x)           ::malloc(x)
 #define sys_free(x)             ::free(x)
 
+
+inline uint32_t ctz64(uint64_t x) {
+    assert(x != 0);
+
+#if defined(_MSC_VER)
+    unsigned long index;
+    _BitScanForward64(&index, x);
+    return (uint32_t)index;
+#else
+    return (uint32_t)__builtin_ctzll(x);
+#endif
+}
+
+
 #ifdef _WIN32
     #pragma warning(disable: 6387 28183 28196 28251 28252 28253 )
 
     #define sys_msize(x)            ::_msize(x)
     #define memlog(...)             ::printf(__VA_ARGS__)
 
-    inline uint32_t __builtin_ctz(uint64_t x) {
-        unsigned long retVal;
-        auto b = _BitScanForward64(&retVal, x);
-        return retVal;
-    }
 
 #elif defined (__APPLE__)
     #define sys_msize(x)            ::malloc_size(x)
@@ -102,7 +111,7 @@ static int log2(size_t x) {
 inline void bitmask_set(uint64_t * _bitmask, size_t index, bool value) {
     size_t w = index / 64;
     size_t b = index % 64;
-    if (value)  _bitmask[w] |= (1ull << b);
+    if (value)  _bitmask[w] |=  (1ull << b);
     else        _bitmask[w] &= ~(1ull << b);
 }
 
@@ -144,17 +153,17 @@ struct bitmask {
         return false;
     }
 
-    size_t first_free_index() {
+    int first_free_index() {
         for (uint16_t i = 0; i < _word_count; ++i) {
             uint64_t inv = ~_bitmask[i];
             if (inv != 0)
                 return 64 * i + ctz(inv);
         }
-        return 0;
+        return -1;
     }
 
     static uint32_t ctz(uint64_t x) {
-        return __builtin_ctz(x);
+        return ctz64(x);
     }
 private:
     size_t    _word_count = 0;
@@ -315,7 +324,7 @@ void* paged_pool_allocator::allocate(size_t size, size_t alignment)
         m_page_current = newpage;
     }
 
-    size_t index = m_page_current->_bitmask.first_free_index();
+    int index = m_page_current->_bitmask.first_free_index();
     m_page_current->_bitmask.set(index, true);
 
     return m_page_current->_data + m_allocation_size * index;

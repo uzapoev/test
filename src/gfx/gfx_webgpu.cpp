@@ -3,7 +3,6 @@
 
 #ifdef WEBGPU_AVAILABLE
 
-#include "gfx_stub.h"
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 #endif
@@ -20,6 +19,19 @@
 #endif
 
 #include "spirvflect.h"
+
+#if GFX_ENABLE_VERBOSE
+#define GFX_VERBOSE(exp)            { exp; }
+#define GFX_VERBOSE_IF(cond, exp)   { if(cond) exp; }
+#else
+#define GFX_VERBOSE(exp)            {}
+#define GFX_VERBOSE_IF(cond, exp)   {}
+#endif
+
+extern const char* gfx_to_string(gfx_buffer_usage usage);
+extern const char* gfx_to_string(gfx_shader_stage stage);
+extern const char* gfx_to_string(gfx_texture_type type);
+extern const char* gfx_to_string(gfx_pixel_format format);
 
 static wgpu_context_t* from_ctx(gfx_context_t* ctx) {
     return (wgpu_context_t*)ctx;
@@ -365,10 +377,10 @@ static uint32_t wglsl_reflect(const char *data, gfx_uniform_t* uniforms, WGPUBin
         if(var && match("var<uniform>", var, &last)) {
             printf("");
         } else if (var && match("var <storage, read>", buffer, &last)) {
-            uniforms[count].type = gfx_uniform_storage;
+            uniforms[count].type = gfx_uniform_storage_buffer;
             bgle[count].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
         } else if (var && match("var <storage", buffer, &last)) {
-            uniforms[count].type = gfx_uniform_storage;
+            uniforms[count].type = gfx_uniform_storage_buffer;
             bgle[count].buffer.type = WGPUBufferBindingType_Storage;
         } else if (var && strstr(var, "var ")) {
             const char * dblpoint = strstr(buffer, ":");
@@ -561,6 +573,7 @@ void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
     wctx->queue = wgpuDeviceGetQueue(wctx->device);
     wctx->dbglog = settings->dbglog ? settings->dbglog : default_log;
 
+
     GFX_VERBOSE(wctx->dbglog(gfx_msg_info, "wgpu_init()"))
 
     wgpuDeviceGetLimits(device, &wctx->limits);
@@ -610,11 +623,11 @@ void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
     }, wctx);
 #endif
 
-    gfx_pool_create(sizeof(wgpu_sampler_t),  16,    &wctx->sampler_pool,  nullptr);
-    gfx_pool_create(sizeof(wgpu_texture_t),  1024,  &wctx->texture_pool,  nullptr);
-    gfx_pool_create(sizeof(wgpu_buffer_t),   4096,  &wctx->buffer_pool,   nullptr);
-    gfx_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool,   nullptr);
-    gfx_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool, nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_sampler_t),  16,    &wctx->sampler_pool,  nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_texture_t),  1024,  &wctx->texture_pool,  nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_buffer_t),   4096,  &wctx->buffer_pool,   nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool,   nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool, nullptr);
 
 
     gfx_buffer_desc_t desc = {};
@@ -793,8 +806,8 @@ void wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_
         buffer_desc.mappedAtCreation = mapped;
     WGPUBuffer buffer = wgpuDeviceCreateBuffer(wgpu_ctx->device, &buffer_desc);
 
-    auto handle = gfx_pool_alloc(wgpu_ctx->buffer_pool);
-    auto wgpu_buffer = (wgpu_buffer_t*)gfx_pool_map(wgpu_ctx->buffer_pool, handle);
+    uint64_t handle = 0;
+    auto wgpu_buffer = (wgpu_buffer_t*)gfx_handle_pool_allocate_data(wgpu_ctx->buffer_pool, &handle);
     if (wgpu_buffer != nullptr) {
         wgpu_buffer->handle = { handle };
         wgpu_buffer->buffer = buffer;
@@ -813,8 +826,8 @@ void wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* dst_buffer, void*
 {
     wgpu_context_t* wctx = from_ctx(ctx);
 
-    auto dst_buff = (wgpu_buffer_t*)gfx_pool_map(wctx->buffer_pool, dst_buffer->idx);
-    auto src_buff = (wgpu_buffer_t*)gfx_pool_map(wctx->buffer_pool, wctx->staging_buffer->idx);
+    auto dst_buff = (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, dst_buffer->idx);
+    auto src_buff = (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, wctx->staging_buffer->idx);
 
     auto asize = gfx_utils_align_up(size, 4);
 
@@ -835,7 +848,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
 
     GFX_VERBOSE(wgpu_ctx->dbglog(gfx_msg_info, "wgpu_create_shader : %s", desc->label ? desc->label : ""));
 
-    for (uint32_t i = 0; i < desc->stages_count; ++i)
+    for (uint32_t i = 0; i < desc->stage_count; ++i)
     {
         if (desc->stages[i].data != nullptr && desc->stages[i].size > 0) {
             GFX_VERBOSE( wgpu_ctx->dbglog(gfx_msg_info, "    %s", gfx_to_string((gfx_shader_stage)i)) );
@@ -850,20 +863,19 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
 
     *out_shader = &wgpu_shader->handle;
     wgpu_shader->context = wgpu_ctx;
+    wgpu_shader->hash = 0;
 
     uint32_t ubo_size = 0;
     uint32_t uniform_count = 0;
     uint32_t wgsl_info_count = 0;
     WGPUBindGroupLayoutEntry* layout_entries = wgpu_shader->bindings;
 
-    uint16_t hash = 0;
-    for (size_t stageIdx = 0; stageIdx < desc->stages_count; ++stageIdx)
+    for (size_t stageIdx = 0; stageIdx < desc->stage_count; ++stageIdx)
     {
         if (desc->stages[stageIdx].data == nullptr || desc->stages[stageIdx].size == 0)
             continue;
 
-        hash |= gfx_utils_hash_16((char*)desc->stages[stageIdx].data, desc->stages[stageIdx].size);
-
+        uint32_t stage_hash = gfx_utils_hash((char*)desc->stages[stageIdx].data, desc->stages[stageIdx].size, wgpu_shader->hash);
 
         gfx_shader_stage stage = desc->stages[stageIdx].stage;
         bool is_spirv = *(uint32_t*)desc->stages[stageIdx].data == 0x07230203;
@@ -927,7 +939,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
 
             switch (uniforms[u].type)
             {
-                case gfx_uniform_storage:
+                case gfx_uniform_storage_buffer:
                     layout_entries[wgsl_info_count].buffer.type = WGPUBufferBindingType_Storage;
                     break;
 
@@ -964,7 +976,6 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
             wgsl_info_count++;
         }
     } // for (size_t stageIdx = 0; stageIdx < gfx_shader_count; ++stageIdx)
-    wgpu_shader->hash = hash;
     wgpu_shader->binding_count = wgsl_info_count;
     wgpu_shader->uniform_count = wgsl_info_count;
 
@@ -1277,9 +1288,9 @@ void wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pip
     for(uint32_t i = 0; i < desc->assembly.slot_count; ++i)
     {
         vertex_assembly[i].arrayStride     = desc->assembly.slots[i].stride;
-        vertex_assembly[i].attributeCount  = desc->assembly.attributes_count;
+        vertex_assembly[i].attributeCount  = desc->assembly.attribute_count;
         vertex_assembly[i].attributes      = attributes;
-        for (uint32_t j = 0; j < desc->assembly.attributes_count; ++j) {
+        for (uint32_t j = 0; j < desc->assembly.attribute_count; ++j) {
             attributes[j].offset          = desc->assembly.attributes[j].offset;
             attributes[j].shaderLocation  = desc->assembly.attributes[j].location;
             attributes[j].format          = gfx_vertex_format_2_webgpu(desc->assembly.attributes[j].format);
@@ -1346,7 +1357,7 @@ void wgpu_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* p
     // wgpu_create_compute_pipeline is not yet implemented — nothing to release
 }
 
-void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline)
+void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
     wctx->dbglog(gfx_msg_error, "wgpu_create_mesh_pipeline not implemented");
@@ -1358,7 +1369,7 @@ void wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_des
     wctx->dbglog(gfx_msg_error, "wgpu_create_raytrace_pipeline not implemented");
 }
 
-void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* pipeline)
+void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
 {
 }
 
@@ -1451,7 +1462,7 @@ void wgpu_create_descriptor_set_pool(gfx_context_t* ctx, wgpu_shader_t * shader,
 }
 
 
-void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** out_descriptor)
+void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
     wgpu_shader_t*  wgpu_shader = (wgpu_shader_t*)shader;
@@ -1653,10 +1664,10 @@ void wgpu_cmd_begin(gfx_command_buffer_t* cmd)
 }
 
 
-void wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target)
+void wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_render_target_t* wgpu_target = (wgpu_render_target_t*)target;
+    wgpu_render_target_t* wgpu_target = (wgpu_render_target_t*)pass->target;
 
     WGPUColor clearcolor = { 0.2f, 0.3f, 0.4f, 1.0f };
 

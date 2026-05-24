@@ -46,8 +46,8 @@ struct renderer : icomponent
     vec4                lightmap_scale_offset;
     uint32_t            flags;              // is_in_lodgroup, etc
 
-    class render_mesh * mesh;
-    class material *    material;
+    class render_mesh * mesh = nullptr;
+    class material *    material = nullptr;
     friend class        render_system;
     friend class        resource_system;
 };

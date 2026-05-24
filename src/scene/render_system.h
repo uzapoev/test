@@ -2,7 +2,6 @@
 #define __render_system_h__
 
 #include "../gfx/gfx.h"
-#include "../gfx/gfx_memory.h"
 #include "../resources.h"
 #include "../common.h"
 #include "../memmgr.h"

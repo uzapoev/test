@@ -133,7 +133,7 @@ struct filestream
     template<>  
     inline void write(interned_string str) { 
         write((uint16_t)str.length());
-        write(str.length(), str.data());
+        write((uint32_t)str.length(), str.data());
     }
 
     template<>

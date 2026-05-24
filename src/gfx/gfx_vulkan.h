@@ -3,22 +3,44 @@
 
 #include "gfx.h"
 
-#ifdef VULKAN_AVAILABLE
-
-#ifdef GFX_PLATFORM_WIN
-#define VK_USE_PLATFORM_WIN32_KHR
+#if defined(_WIN32) && __has_include(<vulkan/vulkan.h>)
+    #define VULKAN_AVAILABLE
+    #define VK_USE_PLATFORM_WIN32_KHR
 #endif
+
+#if defined(__ANDROID__) && __has_include(<vulkan/vulkan.h>)
+    #define VULKAN_AVAILABLE
+    #define VK_USE_PLATFORM_ANDROID_KHR
+#endif
+
+#if defined(__APPLE__) && __has_include(<vulkan/vulkan.h>)
+    #define VULKAN_AVAILABLE
+    #error todo: VK_USE_PLATFORM_ 
+#endif
+
+
+#ifdef VULKAN_AVAILABLE
 
 #include <vulkan/vulkan.h>
 
-/*
+
 #ifdef __cplusplus 
 extern "C" {
-#endif*/
+#endif
+
+#define     GFX_MAX_FRAME_IN_FLIGHT             (2)
+
+#define     GFX_MAX_DESCRIPTOR_SETS             (8)
+
+#define     GFX_MAX_DESCRIPTOR_BINDINGS         (16)    // Max binding slots allocated per set. Handles non-contiguous binding indices 
+                                                        // caused by cross-compiler global flattening (e.g. Slang ParameterBlock)
 
 #define     MAX_TIMESTAMP_QUERIES               (128)
+
 #define     MAX_TIMESTAMP_NESTING_LEVEL         (16)
-#define     MAX_BATCH_BARRIERS                  (64)
+
+#define     GFX_MAX_BATCH_BARRIERS              (16)
+
 #define     MAX_DESCRIPTOR_POOL_SET_SIZE        (1024)
 
 /**/
@@ -32,60 +54,51 @@ typedef struct vk_context_t
 {
     gfx_context_t                       handle;
 
-    VkInstance                          instance            = VK_NULL_HANDLE;
-    VkDevice                            device              = VK_NULL_HANDLE;
-    VkPhysicalDevice                    physicaldevice      = VK_NULL_HANDLE;
-    VkSurfaceKHR                        surface             = VK_NULL_HANDLE;
-    uint32_t                            frame_idx           = 0;
-    uint32_t                            frame_number        = 0;
+    // --- Core Vulkan Handles ---
+    VkInstance                          vk_instance            = VK_NULL_HANDLE;
+    VkDevice                            vk_device              = VK_NULL_HANDLE;
+    VkPhysicalDevice                    vk_physical_device     = VK_NULL_HANDLE;
+    VkSurfaceKHR                        vk_surface             = VK_NULL_HANDLE;
 
+    gfx_caps_t                          gpu_caps;
     gfx_allocator_t                     allocator;
 
+    // --- Device Queues ---
     struct { 
         uint32_t family;
         VkQueue  queue;
     }                                   graphics_queue,
                                         present_queue,
                                         compute_queue;
-    VkSampleCountFlagBits               msaa_samples;
 
-    VkExtensionProperties *             extensions;
-    uint32_t                            extensions_count;
-
+    // --- Device Properties & Features ---
     VkPhysicalDeviceFeatures            device_features     = {};
     VkPhysicalDeviceMemoryProperties    memory_properties   = {};
     VkPhysicalDeviceProperties          device_properties   = {};
 
-    struct {
-        VkSemaphore                     image_available;        // Wait Semaphores
-        VkSemaphore                     rendering_finished;     // Signal Semaphores
-        VkFence                         wait_fence;
-    } semaphores[2];
 
-    VkSemaphore                         frame_timeline_semaphore;
+    // --- Bindless Resources ---
+    VkDescriptorSet                     bindless_descriptor_set         = VK_NULL_HANDLE;
+    VkDescriptorPool                    bindless_descriptor_pool        = VK_NULL_HANDLE;
+    VkDescriptorSetLayout               bindless_descriptor_set_layout  = VK_NULL_HANDLE;
 
-    uint32_t                            bindless_max_texture_count;
-    VkDescriptorSet                     bindless_descriptor_set;
-    VkDescriptorPool                    bindless_descriptor_pool;
-    VkDescriptorSetLayout               bindless_descriptor_set_layout;
-
-    gfx_callback                        dbg_log                 = nullptr;
-
+    // --- Default / Fallback Resources ---
+    vk_buffer_t*                        uniform_buffer          = nullptr;
     vk_buffer_t*                        staging_buffer          = nullptr;
     gfx_sampler_t*                      default_sampler         = nullptr;
     vk_texture_t*                       default_texture         = nullptr;
     gfx_texture_t*                      default_storage_texture = nullptr;
     gfx_buffer_t*                       default_storage_buffer  = nullptr;
 
-    VkRenderPass                        default_renderpass      = nullptr;
+    VkRenderPass                        vk_default_renderpass      = nullptr; //fuuuuu!
 
-
- #ifdef AMD_VULKAN_MEMORY_ALLOCATOR_H
-    VmaAllocator                        vma_allocator;
- #endif
-
+    // --- Command Buffers ---
     vk_command_buffer_t*                cmd_buffer_pool[32];
     uint32_t                            cmd_pool_size;
+
+    // --- Global Object Resource Pools --
+    gfx_handle_pool_t*                  surface_pool;
+    gfx_handle_pool_t*                  render_target_pool;
 
     gfx_handle_pool_t*                  cmd_pool;
     gfx_handle_pool_t*                  sampler_pool;
@@ -95,17 +108,54 @@ typedef struct vk_context_t
     gfx_handle_pool_t *                 pipeline_pool;
     gfx_handle_pool_t *                 compute_pipeline_pool;
 
+    //gfx_linked_list_t*                  descriptor_set_pool_list; //
+
+        // --- Debug & Callbacks ---
+    gfx_callback                        dbg_log = nullptr;
     PFN_vkSetDebugUtilsObjectNameEXT    vk_dbg_set_object_name;
     PFN_vkCmdBeginDebugUtilsLabelEXT    vk_dbg_cmd_push_label;
     PFN_vkCmdEndDebugUtilsLabelEXT      vk_dbg_cmd_pop_label;
 } vk_context_t;
 
 
+typedef struct vk_surface_t {
+    gfx_surface_t                       handle;
+
+    intptr_t                            window_handle;  // OS-specific window handle (HWND, NSWindow, etc.)
+    uint32_t                            width;          // Framebuffer width in pixels
+    uint32_t                            height;         // Framebuffer height in pixels
+    VkBool32                            vsync;          // Vertical synchronization flag
+
+    gfx_pixel_format                    format;         // High-level surface pixel format
+    gfx_sample_count                    sample_count;   // MSAA sample count
+
+    VkFormat                            depth_format;    // Selected depth/stencil format for the surface
+
+    VkSurfaceKHR                        surface;
+    VkSwapchainKHR                      swapchain;
+    VkRenderPass                        render_pass;
+    VkSampleCountFlags                  vk_msaa_samples;
+
+    VkFence                             fences[GFX_MAX_FRAME_IN_FLIGHT];                        // CPU-GPU frame execution fences
+    VkSemaphore                         semaphore_image_available[GFX_MAX_FRAME_IN_FLIGHT];     // Wait Semaphores
+    VkSemaphore                         semaphore_rendering_finished[GFX_MAX_FRAME_IN_FLIGHT];  // Signal Semaphores
+
+    uint32_t                            current_frame;          // Index of the current CPU frame (0 to MAX_FRAME_IN_FLIGHT - 1)
+    uint32_t                            swapchain_image_index;  // Index of the acquired swapchain image
+    
+    gfx_frame_t                         frames[GFX_MAX_FRAME_IN_FLIGHT];
+
+    struct vk_render_target_t*          targets[GFX_MAX_FRAME_IN_FLIGHT];
+} vk_surface_t;
+
+
 typedef struct vk_pipeline_t {
     gfx_pipeline_t                      handle;
 
     struct vk_shader_t*                 shader;
-//  render_states_t                     states;
+
+    vk_descriptor_set_t*                default_sets[GFX_MAX_DESCRIPTOR_SETS];
+
     VkPipelineBindPoint                 bind_point;
     VkPipeline                          pipeline;
 } vk_pipeline_t;
@@ -130,10 +180,10 @@ typedef struct vk_texture_t {
     VkImage                             image;
     VkImageView                         view;
     VkDeviceMemory                      memory;
-    uint32_t                            memory_size;
+    VkDeviceSize                        memory_size;
     uint32_t                            width;
     uint32_t                            height;
-    uint32_t                            mip_levels;
+    uint32_t                            mip_count;
 } vk_texture_t;
 
 
@@ -141,10 +191,10 @@ typedef struct vk_buffer_t {
     gfx_buffer_t                        handle;
     VkBuffer                            buffer;
     VkDeviceMemory                      memory;
-    VkBufferUsageFlagBits               usage;
+    VkBufferUsageFlags                  usage;
 
-    bool                                mapped;
-    uint32_t                            buffer_size;
+    bool                                is_mapped;
+    VkDeviceSize                        buffer_size;
     void*                               data_ptr;
 } vk_buffer_t;
 
@@ -153,20 +203,26 @@ typedef struct vk_shader_t {
     gfx_shader_t                        handle;
 
     vk_context_t *                      ctx;
-    const char*                         lable = nullptr;
-    uint32_t                            stages_count;
-    VkPipelineShaderStageCreateInfo     stages[gfx_shader_count];
+    const char*                         label = nullptr;
 
-    uint16_t                            hash;
+    uint32_t                            stage_count;               // used in pipeline creation
+    VkPipelineShaderStageCreateInfo     stages[gfx_shader_count];   //
+
+    uint32_t                            hash32;
     uint32_t                            uniform_count;
     gfx_uniform_t *                     uniforms;
-    VkDescriptorSetLayoutBinding*       bindings;
 
-    VkDescriptorSetLayout               layout;
+    uint32_t                            set_count;          // max set + 1
+    VkDescriptorSetLayout               set_layouts[GFX_MAX_DESCRIPTOR_SETS];
+    uint32_t                            set_binding_count[GFX_MAX_DESCRIPTOR_SETS] = { 0 }; // per set
+    VkDescriptorSetLayoutBinding*       set_bindings[GFX_MAX_DESCRIPTOR_SETS] = { 0 };      // per set
+
     VkPipelineLayout                    pipeline_layout;
 
-    vk_descriptor_pool_t *              pool;
-    gfx_handle_pool_t *                 descriptor_set_pool;
+    vk_descriptor_set_t *               default_sets[GFX_MAX_DESCRIPTOR_SETS] = { 0 };
+
+    vk_descriptor_pool_t *              pool;                   //todo: outdated, current pool
+    gfx_handle_pool_t *                 descriptor_set_pool;    //todo: outdated, pool of pools
 } vk_shader_t;
 
 
@@ -176,58 +232,46 @@ typedef struct vk_render_target_t {
     VkFormat                            depth_format;
 
     uint32_t                            color_attachment_count;
-    vk_texture_t                        color_attachments[16];  // max attachment
+    vk_texture_t                        color_attachments[8];  // max attachment
     vk_texture_t                        depth_attachments;
     vk_texture_t                        resolve_attachments;    // surface swapchain if msaa
 
    // tr_render_target
-    VkExtent2D                          extend;
+    VkExtent2D                          extent;
     VkRenderPass                        renderpass;
     VkFramebuffer                       framebuffer;
 } vk_render_target_t;
 
 
-typedef struct vk_swapchain_t{
-    gfx_swapchain_t                     handle;
-
-    intptr_t                            window_handle;
-    VkSwapchainKHR                      swapchain;
-    VkRenderPass                        renderpass;
-    VkFramebuffer                       framebuffers[4];
-    VkExtent2D                          extend;
-    vk_render_target_t                  target;
-} vk_swapchain_t;
-
 
 typedef struct vk_descriptor_pool_t {
-    VkDescriptorPool                    pool;
-    uint32_t                            capacity;
-    uint32_t                            free_set_count;
-    uint32_t                            next_free;
+    uint32_t                            bindings_hash;          // Hash of descriptor layout bindings for validation
 
-    vk_buffer_t *                       ubo_buffer;
-    vk_descriptor_set_t *               sets;
+    VkDescriptorPool                    pool;                   // Native Vulkan descriptor pool handle
+    uint32_t                            capacity;               // Total number of descriptor sets available in this pool
+    uint32_t                            free_set_count;         // Remaining number of unallocated descriptor sets
+    uint32_t                            next_free_index;        // Optimization hint pointing to the next likely free slot
 
-    VkWriteDescriptorSet *              writes;
-    struct vk_write_info_t*             write_infos;
+    uint64_t*                           bitset_mask;            // Array of bitmasks tracking allocation status per set
+    uint32_t                            bitset_word_count;      // Number of 64-bit words in the bitset_mask array
+
+    vk_buffer_t*                        ubo_buffer;             // Cached reference to the backing uniform buffer object
+    vk_descriptor_set_t*                descriptor_sets;        // Array of managed descriptor set wrappers (size equals capacity)
 } vk_descriptor_pool_t;
+
 
 
 typedef struct vk_descriptor_set_t {
     gfx_descriptor_set_t                handle;
 
     vk_shader_t *                       shader;
-    vk_descriptor_pool_t *              pool;
-    uint8_t *                           uboptr;
-    uint32_t                            ubo_offset;
+    vk_descriptor_pool_t *              pool;                   // Owner pool from which this set was allocated
+    uint8_t *                           ubo_mapped_data;        // Pointer to the mapped uniform buffer data chunk
+    uint32_t                            ubo_offset;             // Byte offset inside the pool's global UBO buffer
 
-    VkBool32                            isfree;
-    VkBool32                            dirty;
+    VkBool32                            is_free;                // Flag indicating if this set slot is unallocated
     uint32_t                            index_in_pool;
     VkDescriptorSet                     descriptor_set;
-
-    VkWriteDescriptorSet *              writes;
-    struct vk_write_info_t *            write_infos;
 } vk_descriptor_set_t;
 
 
@@ -235,12 +279,16 @@ typedef struct vk_descriptor_set_t {
 typedef struct vk_command_buffer_t {
     gfx_command_buffer_t                handle;
 
-    vk_context_t *                      ctx;
-    uint32_t                            thread_id;
+    vk_context_t *                      ctx;                    // Pointer to the parent Vulkan context
+    uint32_t                            thread_id;              // ID of the CPU thread owning this command buffer
 
     VkDevice                            device              = VK_NULL_HANDLE;
     VkCommandPool                       pool                = VK_NULL_HANDLE;
     VkCommandBuffer                     cmd                 = VK_NULL_HANDLE;
+
+    // 
+    uint32_t                            user_bound_mask;
+    VkDescriptorSet                     bound_sets[GFX_MAX_DESCRIPTOR_SETS];
 
     // replace to struct begin+end+name
     VkQueryPool                         time_query_pool     = VK_NULL_HANDLE;
@@ -257,103 +305,119 @@ typedef struct vk_command_buffer_t {
 } vk_command_buffer_t;
 
 
-gfx_api void    vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** ctx);
-gfx_api void    vk_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
-gfx_api void    vk_destroy_renderer(gfx_context_t* ctx);
+gfx_api void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** ctx);
+gfx_api void vk_destroy_renderer(gfx_context_t* ctx);
 
-gfx_api void    vk_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t** swapchain); // todo: add prefered options for surface format
-gfx_api void    vk_destroy_swapchain(gfx_context_t* ctx, gfx_swapchain_t* swapchain); // todo: add prefered options for surface format
-gfx_api void    vk_create_renderpass(gfx_context_t* ctx, VkFormat format, VkFormat depthformat, VkRenderPass * renderpass);
+gfx_api void vk_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
-gfx_api int32_t vk_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, gfx_render_target_t** target);
-gfx_api void    vk_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx);
+// surface
+gfx_api void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** surface);
+gfx_api void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface);
 
-gfx_api void    vk_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
-gfx_api void    vk_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
-gfx_api void    vk_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
-gfx_api void    vk_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
-gfx_api void    vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-gfx_api void    vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
-gfx_api void    vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_mesh_t** pipeline);
-gfx_api void    vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
-gfx_api void    vk_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** target);
-gfx_api void    vk_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, gfx_descriptor_set_t** descriptor);
-gfx_api void    vk_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
+// frame
+gfx_api void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
+gfx_api void vk_frame_end(gfx_frame_t* surface);
 
-gfx_api void    vk_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);
-gfx_api void    vk_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);
-gfx_api void    vk_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler);
-gfx_api void    vk_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture);
-gfx_api void    vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
-gfx_api void    vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
-gfx_api void    vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_mesh_t* desc);
-gfx_api void    vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
-gfx_api void    vk_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* _target);
-gfx_api void    vk_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
-gfx_api void    vk_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+// buffer
+gfx_api void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+gfx_api void vk_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+gfx_api void vk_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer);
 
-gfx_api void    vk_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-
-// textures / mipmaps / blit (WIP)
-gfx_api void    vk_update_texture_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
-gfx_api void    vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-gfx_api void    vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
-gfx_api void    vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
-gfx_api void    vk_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
-
+// shaders
+gfx_api void     vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+gfx_api uint32_t vk_shader_get_descriptor_set_count(gfx_shader_t* shader);
 gfx_api uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name);
-gfx_api void    vk_uniform_set_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
-gfx_api void    vk_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset);
-gfx_api void    vk_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
-gfx_api void    vk_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
+gfx_api void     vk_shader_destroy(gfx_context_t* ctx, gfx_shader_t* buffer);
 
-gfx_api void    vk_cmd_begin(gfx_command_buffer_t* cmd);
+// descripor set
+gfx_api void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
+gfx_api void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+gfx_api void vk_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
+gfx_api void vk_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset);
+gfx_api void vk_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
+gfx_api void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
 
-gfx_api void    vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_render_target_t* target);
+// sampler
+gfx_api void vk_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+gfx_api void vk_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler);
 
-gfx_api void    vk_cmd_end_pass(gfx_command_buffer_t* cmd);
+// texture
+gfx_api void vk_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+gfx_api void vk_texture_destroy(gfx_context_t* ctx, gfx_texture_t* texture);
 
-gfx_api void    vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+gfx_api void vk_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+gfx_api void vk_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api void vk_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* texture);
+gfx_api void vk_texture_blit(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+gfx_api void vk_texture_update_bindless(gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
 
-gfx_api void    vk_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+// pipeline
+gfx_api void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api void vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 
-gfx_api void    vk_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+// compute pipeline
+gfx_api void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** texture);
+gfx_api void vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
-gfx_api void    vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
+// mesh pipeline
+gfx_api void vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* desc);
 
-gfx_api void    vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
-
-gfx_api void    vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
-
-gfx_api void    vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-
-gfx_api void    vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
-
-gfx_api void    vk_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
-
-gfx_api void    vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
-
-gfx_api void    vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
-
-gfx_api void    vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
-
-gfx_api void    vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char * marker);
-
-gfx_api void    vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
-
-gfx_api void    vk_cmd_end(gfx_command_buffer_t* cmd);
-
-gfx_api void    vk_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+// raytrace pipeline
+gfx_api void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+gfx_api void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
 
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_begin(gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_end(gfx_command_buffer_t* cmd);
+gfx_api [[deprecated("internal usge only")]] void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
+
+gfx_api void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass);
+             
+gfx_api void vk_cmd_end_pass(gfx_command_buffer_t* cmd);
+             
+gfx_api void vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+             
+gfx_api void vk_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+             
+gfx_api void vk_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+             
+gfx_api void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
+             
+gfx_api void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
+             
+gfx_api void vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
+             
+gfx_api void vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+             
+gfx_api void vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+             
+gfx_api void vk_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
+             
+gfx_api void vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+             
+gfx_api void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+             
+gfx_api void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+             
+gfx_api void vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char * marker);
+             
+gfx_api void vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
+
+
+
+extern void    _vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkFormat depthformat, VkSampleCountFlagBits samples, VkRenderPass* renderpass);
 extern void     vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name);
 extern void     vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name);
 extern void     vk_debug_set_buffer_name(vk_context_t* ctx, vk_buffer_t* buffer, const char* name);
 extern void     vk_debug_set_shader_name(vk_context_t* ctx, vk_shader_t* shader, const char* name);
-/*#ifdef __cplusplus 
+#ifdef __cplusplus 
 }
 #endif
-*/
-#endif
-#endif
+
+#endif //VULKAN_AVAILABLE
+
+#endif //__gfx_vulkan_h__
