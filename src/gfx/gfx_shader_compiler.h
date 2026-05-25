@@ -322,8 +322,9 @@ extern "C" void gfx_shader_compiler_context_destroy(gfx_shader_compiler_context_
     printf("\ngfx_shader_compiler_context_destroy: install slang shader compiler tool: ");
 }
 
-extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * compiler_context, const char* name, const char* data, uint32_t size, shader_target target, uint64_t options, compiled_shader_program_t * programs) {
+extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, gfx_shader_compiler_request_desc_t * desc, compiled_shader_program_t * programs) {
     printf("\ngfx_compile_shader: install slang shader compiler tool: ");
+    return 0;
 }
 #endif
 

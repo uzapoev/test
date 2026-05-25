@@ -256,13 +256,13 @@ static vk_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags
         out.access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
         out.image_layout = VK_IMAGE_LAYOUT_GENERAL; // or TRANSFER_DST_OPTIMAL, but GENERAL univeral for RW
         break;
-
+/*
     case gfx_barrier_compute:
         out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         out.access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
         out.image_layout = VK_IMAGE_LAYOUT_GENERAL;
-        break;
-/*
+        break;*/
+
     case gfx_barrier_compute_read:
         out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         out.access = VK_ACCESS_2_SHADER_READ_BIT;
@@ -273,7 +273,7 @@ static vk_state_mapping_t get_vulkan_state(gfx_barrier state, VkImageAspectFlags
         out.stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         out.access = VK_ACCESS_2_SHADER_WRITE_BIT;
         out.image_layout = VK_IMAGE_LAYOUT_GENERAL;
-        break;*/
+        break;
 
      // Reading in graphics shaders (VS, FS, and also Mesh/Task shaders!)
     case gfx_barrier_graphics: // read
@@ -742,6 +742,9 @@ static VkPhysicalDevice _vk_create_physical_device(VkInstance instance, VkPhysic
 
 static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface, uint32_t* out_graphics, uint32_t* out_present)
 {
+    if (physdevice == nullptr || surface == nullptr)
+        return;
+
     VkBool32 supports_present[16] = { 0 };
 
     uint32_t queue_properties_count = 0;
@@ -1215,11 +1218,14 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
 
     auto isdebug = (cfg->options & gfx_options_debug) == gfx_options_debug;
 
-
     vctx->vk_instance           = _vk_create_instance(isdebug);
     vctx->vk_physical_device    = _vk_create_physical_device(vctx->vk_instance);
     vctx->vk_surface            = _vk_create_surface(vctx->vk_instance, cfg->handle);
     vctx->vk_device             = _vk_create_device(vctx->vk_physical_device, vctx->vk_surface, &vctx->graphics_queue.family, &vctx->present_queue.family);
+
+    if(vctx->vk_instance && vctx->vk_physical_device && vctx->vk_surface && vctx->vk_device){
+        // cleanup here
+    }
 
     vk_fill_device_caps(vctx, vctx->vk_physical_device, &vctx->gpu_caps);
 
@@ -1361,12 +1367,54 @@ void vk_destroy_renderer(gfx_context_t * ctx)
     assert(ctx);
     vk_context_t* vctx = (vk_context_t*)ctx;
     
-    vk_sampler_destroy(ctx, vctx->default_sampler);
-    vk_texture_destroy(ctx, &vctx->default_texture->handle);
+    if(vctx->uniform_buffer != nullptr) {
+        vk_buffer_destroy(ctx, &vctx->uniform_buffer->handle);
+        vctx->uniform_buffer = nullptr;
+    }
+
+    if(vctx->staging_buffer != nullptr) {
+        vk_buffer_destroy(ctx, &vctx->staging_buffer->handle);
+        vctx->staging_buffer = nullptr;
+    }
+
+    if(vctx->default_sampler != nullptr) {
+        vk_sampler_destroy(ctx, vctx->default_sampler);
+        vctx->default_sampler = nullptr;
+    }
+
+    if(vctx->default_storage_texture) {
+        vk_texture_destroy(ctx, vctx->default_storage_texture);
+        vctx->default_storage_texture = nullptr;
+    }
+
+    if(vctx->default_storage_buffer) {
+        vk_buffer_destroy(ctx, vctx->default_storage_buffer);
+        vctx->default_storage_buffer = nullptr;
+    }
+    for(uint32_t i = 0; i < _countof(vctx->cmd_buffer_pool); ++i) {
+        vk_cmd_destroy(ctx, &vctx->cmd_buffer_pool[i]->handle);
+        vctx->cmd_buffer_pool[i] = nullptr;
+    }
+
+    gfx_handle_pool_destroy(vctx->surface_pool);
+    gfx_handle_pool_destroy(vctx->render_target_pool);
+
+    gfx_handle_pool_destroy(vctx->cmd_pool);
+    gfx_handle_pool_destroy(vctx->sampler_pool);
+    gfx_handle_pool_destroy(vctx->texture_pool);
+    gfx_handle_pool_destroy(vctx->buffers_pool);
+    gfx_handle_pool_destroy(vctx->shaders_pool);
+    gfx_handle_pool_destroy(vctx->pipeline_pool);
+    gfx_handle_pool_destroy(vctx->compute_pipeline_pool);
 
     vkDestroyDevice(vctx->vk_device, nullptr);
     vkDestroySurfaceKHR(vctx->vk_instance, vctx->vk_surface, nullptr);
     vkDestroyInstance(vctx->vk_instance, nullptr);
+
+
+    PFN_vkSetDebugUtilsObjectNameEXT    vk_dbg_set_object_name;
+    PFN_vkCmdBeginDebugUtilsLabelEXT    vk_dbg_cmd_push_label;
+    PFN_vkCmdEndDebugUtilsLabelEXT      vk_dbg_cmd_pop_label;
 
     free(vctx);
 }
@@ -1482,7 +1530,7 @@ void _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
         target->color_attachments[0].view = color_view;
         target->color_attachments[0].format = surface_format.format;
     }
-    //surface->target.depth_attachments = depth_target;
+    //target->depth_attachments = depth_target;
 }
 
 void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface)
@@ -1554,6 +1602,58 @@ void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* _surface)
     _surface->idx = 0;
 }
 
+void __vk_cmd_begin_frame(gfx_command_buffer_t* cmd)
+{
+    vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* vctx = vkcmd->ctx;
+
+    // Resolve timestamps ONLY for the main frame budget execution
+    if (vkcmd->stamp_count > 0)
+    {
+        uint32_t total_queries = vkcmd->time_query_current_index;
+
+        VkResult result = vkGetQueryPoolResults(
+            vctx->vk_device, vkcmd->time_query_pool,
+            0, total_queries,
+            total_queries * sizeof(uint64_t), vkcmd->time_query_results, sizeof(uint64_t),
+            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT
+        );
+
+        if (result == VK_SUCCESS)
+        {
+            float period = vctx->device_properties.limits.timestampPeriod;
+            vkcmd->resolved_stamp_count = 0;
+
+            for (uint32_t i = 0; i < vkcmd->stamp_count; ++i)
+            {
+                uint64_t start_ts = vkcmd->time_query_results[i * 2];
+                uint64_t end_ts = vkcmd->time_query_results[i * 2 + 1];
+
+                if (end_ts >= start_ts)
+                {
+                    float delta_ms = (float)(end_ts - start_ts) * period / 1000000.0f;
+
+                    uint32_t out_idx = vkcmd->resolved_stamp_count;
+                    vkcmd->resolved_stamps[out_idx].name = vkcmd->marker_names[i];
+                    vkcmd->resolved_stamps[out_idx].duration_ms = delta_ms;
+                    vkcmd->resolved_stamp_count++;
+                }
+            }
+        }
+        else
+        {
+            vctx->dbg_log(gfx_msg_error, "vkGetQueryPoolResults failed!(%s)", string_VkResult(result));
+            vkcmd->resolved_stamp_count = 0;
+        }
+    }
+    else
+    {
+        vkcmd->resolved_stamp_count = 0;
+    }
+
+    // Now call the standard underlying begin sequence
+    vk_cmd_begin(cmd);
+}
 
 void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t** out_frame)
 {
@@ -1594,6 +1694,8 @@ void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t**
 
     if(frame->cmd == nullptr)
         vk_cmd_create(ctx, &frame->cmd);
+
+
     vk_cmd_begin(frame->cmd);
 }
 
@@ -3089,8 +3191,15 @@ void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle,
 
 void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    if(cmd == nullptr) return;
+
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* vctx = vcmd->ctx;
     vk_render_target_t* vk_target = (vk_render_target_t*)pass->target;
+    if(vk_target == nullptr) {
+        vctx->dbg_log(gfx_msg_error,"gfx_pass_info_t::target is nullptr");
+        return;
+    }
 
     VkClearValue color_clear = { 0 };
     color_clear.color.float32[0] = ((pass->color_clear_value >> 24) & 0xFF) / 255.0f; // R
@@ -3102,20 +3211,29 @@ void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
     depth_stencil.depthStencil.depth = pass->depth_clear_value;
     depth_stencil.depthStencil.stencil = pass->stencil_clear_value;
 
-    VkClearValue clear_values [] = { color_clear , depth_stencil };
+    uint32_t clear_value_count = 0;
+    VkClearValue clear_values [8] = {};
+
+    if(vk_target != nullptr) {
+        for(uint32_t i = 0; i < vk_target->color_attachment_count; ++i)
+            clear_values[clear_value_count++] = color_clear;
+        clear_values[clear_value_count++] = depth_stencil;
+    };
+
+    VkExtent2D extent = vk_target->extent;
 
     VkRect2D render_area = {
-        {0,0},                          // offset
-        vk_target->extent               // extent
+        {0,0},      // offset
+        extent      // extent
     };
 
     VkRenderPassBeginInfo info  = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
         info.renderPass         = vk_target->renderpass;
         info.framebuffer        = vk_target->framebuffer;
         info.renderArea         = render_area;
-        info.clearValueCount    = 2;
+        info.clearValueCount    = clear_value_count;
         info.pClearValues       = clear_values;
-    vkCmdBeginRenderPass(vk_cmd->cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(vcmd->cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
 
     vk_cmd_viewport(cmd, 0, 0, vk_target->extent.width, vk_target->extent.height);
     vk_cmd_scissor(cmd, 0, 0, vk_target->extent.width, vk_target->extent.height);
@@ -3123,16 +3241,17 @@ void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
 
 void vk_cmd_end_pass(gfx_command_buffer_t* cmd)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-   // vk_cmd->ctx->
+    if (cmd == nullptr) return;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
 
-    vkCmdEndRenderPass(vk_cmd->cmd);
-
-//    vkCmdEndRendering(vk_cmd->cmd);
+    vkCmdEndRenderPass(vcmd->cmd);
+//  vkCmdEndRendering(vk_cmd->cmd);
 }
 
 void vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
+    if (cmd == nullptr) return;
+
     VkRect2D scissor        = {};
     scissor.offset.x        = x;
     scissor.offset.y        = y;
@@ -3145,25 +3264,27 @@ void vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t 
 
 void vk_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
+    if (cmd == nullptr) return;
+
     VkRect2D vp = { {(int32_t)x,(int32_t)y}, {w,h}};
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
     VkViewport viewport = {};
-    viewport.x = (float)vp.offset.x;
-    viewport.y = (float)vp.offset.y;
-    viewport.width = (float)vp.extent.width;
-    viewport.height = (float)vp.extent.height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(vk_cmd->cmd, 0, 1, &viewport);
+        viewport.x = (float)vp.offset.x;
+        viewport.y = (float)vp.offset.y;
+        viewport.width = (float)vp.extent.width;
+        viewport.height = (float)vp.extent.height;
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(vcmd->cmd, 0, 1, &viewport);
 }
 
 void vk_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline)
 {
     assert(cmd && pipeline);
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
     vk_pipeline_t * vkpipeline = (vk_pipeline_t*)pipeline;
 
-    vkCmdBindPipeline(vk_cmd->cmd, vkpipeline->bind_point, vkpipeline->pipeline);
+    vkCmdBindPipeline(vcmd->cmd, vkpipeline->bind_point, vkpipeline->pipeline);
 }
 
 void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor)
@@ -3173,7 +3294,7 @@ void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_de
         return;
     }
 
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
     vk_descriptor_set_t* set = (vk_descriptor_set_t*)descriptor;
     vk_shader_t * shader = set->shader;
 
@@ -3185,90 +3306,96 @@ void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_de
     VkDescriptorSet descriptor_set = set->descriptor_set;
     VkPipelineLayout pipeline_layout = set->shader->pipeline_layout;
 
-    vkCmdBindDescriptorSets(vk_cmd->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, slot, 1u, &descriptor_set, 0, nullptr);
+    vkCmdBindDescriptorSets(vcmd->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, slot, 1u, &descriptor_set, 0, nullptr);
 }
 
 void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_handle_pool_map(vk_cmd->ctx->buffers_pool, buffer->idx);
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_handle_pool_map(vcmd->ctx->buffers_pool, buffer->idx);
 
     VkIndexType index_type = gfx_index_format_2_vk(format);
-    vkCmdBindIndexBuffer(vk_cmd->cmd, vkbuffer->buffer, offset, index_type);
+    vkCmdBindIndexBuffer(vcmd->cmd, vkbuffer->buffer, offset, index_type);
 }
 
 void vk_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t binding, uint32_t offset, gfx_buffer_t* buffer)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
 
-    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_handle_pool_map(vk_cmd->ctx->buffers_pool, buffer->idx);
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_handle_pool_map(vcmd->ctx->buffers_pool, buffer->idx);
     VkDeviceSize offsets[] = { offset };
-    vkCmdBindVertexBuffers(vk_cmd->cmd, binding, 1, &vkbuffer->buffer, offsets);
+    vkCmdBindVertexBuffers(vcmd->cmd, binding, 1, &vkbuffer->buffer, offsets);
 }
 
 void vk_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-    vkCmdDraw(vk_cmd->cmd, vertex_count, instance_count, 0, 0);
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vkCmdDraw(vcmd->cmd, vertex_count, instance_count, 0, 0);
 }
 
 void vk_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-    vkCmdDrawIndexed(vk_cmd->cmd, idx_count, instance_count, first_idx, vertex_offset, 0);
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vkCmdDrawIndexed(vcmd->cmd, idx_count, instance_count, first_idx, vertex_offset, 0);
 }
 
 void vk_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride)
 {
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_handle_pool_map(vk_cmd->ctx->buffers_pool, buffer->idx);
-    vkCmdDrawIndexedIndirect(vk_cmd->cmd, vkbuffer->buffer, offset, draw_count, stride);
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_buffer_t* vkbuffer = (vk_buffer_t*)gfx_handle_pool_map(vcmd->ctx->buffers_pool, buffer->idx);
+    vkCmdDrawIndexedIndirect(vcmd->cmd, vkbuffer->buffer, offset, draw_count, stride);
 }
 
 void vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z)
 {
-    vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
-    vkCmdDispatch(vkcmd->cmd, x, y, z);
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vkCmdDispatch(vcmd->cmd, x, y, z);
 }
 
 void vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
 {
-    vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
-    vk_context_t* ctx = vkcmd->ctx;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* ctx = vcmd->ctx;
 
-    if(ctx->vk_dbg_cmd_push_label != nullptr)
+    if (ctx->vk_dbg_cmd_push_label != nullptr)
     {
         VkDebugUtilsLabelEXT label  = { VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
         label.pLabelName            = marker;
-        ctx->vk_dbg_cmd_push_label(vkcmd->cmd, &label);
+        ctx->vk_dbg_cmd_push_label(vcmd->cmd, &label);
     }
 
-    uint32_t start_idx = vkcmd->time_query_current_index;
+    if (vcmd->time_query_current_index >= MAX_TIMESTAMP_QUERIES - 1) return;
+    if (vcmd->time_query_stack_top >= MAX_TIMESTAMP_NESTING_LEVEL) return;
 
-    vkCmdWriteTimestamp(vkcmd->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vkcmd->time_query_pool, start_idx);
+    uint32_t start_idx = vcmd->time_query_current_index;
 
-    vkcmd->marker_names[start_idx] = marker;
-    vkcmd->time_query_stack[++vkcmd->time_query_stack_top] = start_idx;
-    vkcmd->time_query_current_index += 2; // reserve pair (start, end)
+    vkCmdWriteTimestamp(vcmd->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vcmd->time_query_pool, start_idx);
+
+    // Store the marker name in a dense index for output
+    // Since the current marker has a number (start_idx / 2), we are guaranteed to write without gaps: 0, 1, 2, 3...
+    uint32_t pair_idx = start_idx / 2;
+    vcmd->marker_names[pair_idx] = marker;
+
+    vcmd->time_query_stack[vcmd->time_query_stack_top++] = start_idx;
+    vcmd->time_query_current_index += 2; // reserve pair (start, end)
 }
 
 void vk_cmd_pop_marker(gfx_command_buffer_t* cmd)
 {
-    vk_command_buffer_t* vkcmd = (vk_command_buffer_t*)cmd;
-    vk_context_t* ctx = vkcmd->ctx;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* ctx = vcmd->ctx;
 
-    if (vkcmd->time_query_stack_top > 0)
+    if (vcmd->time_query_stack_top > 0)
     {
-        uint32_t start_idx = vkcmd->time_query_stack[vkcmd->time_query_stack_top--];
+        uint32_t start_idx = vcmd->time_query_stack[--vcmd->time_query_stack_top];
         uint32_t end_idx = start_idx + 1;
 
-        vkCmdWriteTimestamp(vkcmd->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vkcmd->time_query_pool, end_idx);
-        vkcmd->stamp_count++;
-        vkcmd->time_query_index--;
+        vkCmdWriteTimestamp(vcmd->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vcmd->time_query_pool, end_idx);
+        vcmd->stamp_count++;
     }
 
     if (ctx->vk_dbg_cmd_pop_label != nullptr)
-        ctx->vk_dbg_cmd_pop_label(vkcmd->cmd);
+        ctx->vk_dbg_cmd_pop_label(vcmd->cmd);
 }
 
 void vk_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier old_state, gfx_barrier new_state)
@@ -3358,6 +3485,63 @@ void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures,
     dependency_info.pImageMemoryBarriers    = image_barrier_count > 0 ? image_barriers : NULL;;
     vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
+
+
+void vk_cmd_draw_mesh_tasks(gfx_command_buffer_t* cmd, uint32_t task_count_x, uint32_t task_count_y, uint32_t task_count_z)
+{
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* ctx = vcmd->ctx;
+
+    gfx_stub_not_implemented(ctx->dbg_log, "vk_cmd_draw_mesh_tasks");
+}
+
+void vk_cmd_draw_mesh_tasks_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride)
+{
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* ctx = vcmd->ctx;
+
+    gfx_stub_not_implemented(ctx->dbg_log, "vk_cmd_draw_mesh_tasks_indirect");
+}
+
+
+void vk_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** out_acc)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    gfx_stub_not_implemented(vctx->dbg_log, "gfx_acceleration_structure_create");
+}
+
+void vk_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t acceleration_structure)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    gfx_stub_not_implemented(vctx->dbg_log, "gfx_acceleration_structure_destroy");
+}
+
+void vk_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** out)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    gfx_stub_not_implemented(vctx->dbg_log, "gfx_sbt_create");
+}
+
+void vk_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t sbt)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    gfx_stub_not_implemented(vctx->dbg_log, "gfx_sbt_destroy");
+}
+
+void vk_cmd_build_acceleration_structure(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t dst, gfx_acceleration_structure_t src)
+{
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* vctx = vcmd->ctx;
+    gfx_stub_not_implemented(vctx->dbg_log, "gfx_cmd_build_acceleration_structure");
+}
+
+void vk_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth)
+{
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* vctx = vcmd->ctx;
+    gfx_stub_not_implemented(vctx->dbg_log, "gfx_cmd_build_acceleration_structure");
+}
+
 
 
 ///////////////////////
@@ -3454,14 +3638,17 @@ void vk_cmd_begin(gfx_command_buffer_t* cmd)
 {
     vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
 
+    vk_cmd->stamp_count = 0;
+    vk_cmd->time_query_stack_top = 0;
+    vk_cmd->time_query_current_index = 0;
+
     VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
     vkResetCommandPool(vk_cmd->device, vk_cmd->pool, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
 
     if (auto result = vkBeginCommandBuffer(vk_cmd->cmd, &begin)) {
-        auto err_str = string_VkResult(result);
-        vk_cmd->ctx->dbg_log(gfx_msg_error, "vkBeginCommandBuffer failed!(s)", err_str);
+        vk_cmd->ctx->dbg_log(gfx_msg_error, "vkBeginCommandBuffer failed!(s)", string_VkResult(result));
     }
 
     vkCmdResetQueryPool(vk_cmd->cmd, vk_cmd->time_query_pool, 0, MAX_TIMESTAMP_QUERIES);
@@ -3496,8 +3683,7 @@ void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_opt
 
     if (auto result = vkQueueSubmit(vkctx->graphics_queue.queue, 1, &submit, fence))
     {
-        auto err_str = string_VkResult(result);
-        vkctx->dbg_log(gfx_msg_error, "vkQueueSubmit failed!(%s)", err_str);
+        vkctx->dbg_log(gfx_msg_error, "vkQueueSubmit failed!(%s)", string_VkResult(result));
     }
 
     VkResult wait_result = VK_SUCCESS;

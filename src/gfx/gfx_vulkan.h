@@ -274,7 +274,10 @@ typedef struct vk_descriptor_set_t {
     VkDescriptorSet                     descriptor_set;
 } vk_descriptor_set_t;
 
-
+typedef struct gfx_timestamp_t {
+    const char* name;
+    float       duration_ms;
+} gfx_timestamp_t;
 
 typedef struct vk_command_buffer_t {
     gfx_command_buffer_t                handle;
@@ -301,6 +304,9 @@ typedef struct vk_command_buffer_t {
     uint32_t                            time_query_current_index = 0;
     uint64_t                            time_query_results[MAX_TIMESTAMP_QUERIES];
     const char*                         marker_names[MAX_TIMESTAMP_QUERIES];
+
+    uint32_t                            resolved_stamp_count = 0;
+    gfx_timestamp_t                     resolved_stamps[MAX_TIMESTAMP_QUERIES];
 
 } vk_command_buffer_t;
 
@@ -408,7 +414,23 @@ gfx_api void vk_cmd_push_marker(gfx_command_buffer_t* cmd, const char * marker);
 gfx_api void vk_cmd_pop_marker(gfx_command_buffer_t* cmd);
 
 
+/// wip mesh shaders
+gfx_api void vk_cmd_draw_mesh_tasks(gfx_command_buffer_t* cmd, uint32_t task_count_x, uint32_t task_count_y, uint32_t task_count_z);
+gfx_api void vk_cmd_draw_mesh_tasks_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
 
+// wip ray tracing
+gfx_api void vk_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t ** out_acc);
+gfx_api void vk_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t acceleration_structure);
+
+gfx_api void vk_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t ** out);
+gfx_api void vk_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t sbt);
+
+gfx_api void vk_cmd_build_acceleration_structure(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t dst, gfx_acceleration_structure_t src);
+gfx_api void vk_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
+
+
+
+// internal utility funcs
 extern void    _vk_create_renderpass(vk_context_t* ctx, VkFormat format, VkFormat depthformat, VkSampleCountFlagBits samples, VkRenderPass* renderpass);
 extern void     vk_debug_set_name(vk_context_t* ctx, uint64_t vkobject, VkObjectType type, const char* name);
 extern void     vk_debug_set_texture_name(vk_context_t* ctx, vk_texture_t* texture, const char* name);

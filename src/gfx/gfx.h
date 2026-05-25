@@ -332,6 +332,12 @@ typedef enum gfx_blend_op {
 } gfx_blend_op;
 
 
+typedef enum gfx_load_op {
+    gfx_load_op_dont_care,
+    gfx_load_op_load,
+    gfx_load_op_clear
+} gfx_load_op;
+
 typedef enum gfx_pipeline_flags {
     gfx_colormask_r     = 1 << 0,       /**< Enable Red color channel output writes */
     gfx_colormask_g     = 1 << 1,       /**< Enable Green color channel output writes */
@@ -388,7 +394,9 @@ typedef enum gfx_shader_stage {
 // todo: replace gfx_barrier_graphics to gfx_barrier_graphics_read + gfx_barrier_graphics_write - do not use write on gpu with TBDRA
 typedef enum gfx_barrier {
     gfx_barrier_indirect,               /**< Barrier for buffers driving indirect command execution arguments */
-    gfx_barrier_compute,                /**< Barrier separating compute shader read/write hazards */
+    //gfx_barrier_compute,              /**< Barrier separating compute shader read/write hazards */
+    gfx_barrier_compute_read,           /**< Barrier separating compute shader read hazards */
+    gfx_barrier_compute_write,          /**< Barrier separating compute shader write hazards */
     gfx_barrier_graphics,               /**< General graphics barrier executed before vertex work or after fragment shading */
     gfx_barrier_render_target,          /**< Layout transition barrier optimized for attachment color buffers writes */
     gfx_barrier_depth_stencil,          /**< Layout transition barrier optimized for depth/stencil buffers writes */
@@ -803,13 +811,13 @@ typedef struct gfx_pass_info_t {
  * @brief Fixed hardware memory layout driving indexed indirect draw argument evaluations.
  * @note Binary layout directly matches VkDrawIndexedIndirectCommand and D3D12_DRAW_INDEXED_ARGUMENTS.
  */
-typedef struct indirect_data_t {
+typedef struct gfx_indirect_data_t {
     uint32_t                    index_count;                /**< Number of indices to read from the bound index buffer */
     uint32_t                    instance_count;             /**< Number of geometry instances to draw via instanced rendering */
     uint32_t                    first_index;                /**< Element offset position location mapped within the bound index buffer */
     int32_t                     base_vertex;                /**< Signed constant value added to vertex index indices inside hardware streams */
     uint32_t                    first_instance;             /**< Starting base identification instance register value id */
-} indirect_data_t;
+} gfx_indirect_data_t;
 
 
 typedef struct gfx_frame_t {
@@ -1495,19 +1503,20 @@ gfx_api void gfx_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace
 
 
 
-// utility
+// ============================================================================
+// ---                          Utils                                      ---
+// ============================================================================
+
 uint32_t            gfx_utils_thread_id();
 uint32_t            gfx_utils_hash(const void * data, uint32_t size, uint32_t seed = 0);
 gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format);
 gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width);
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
 
-// memory
 
-typedef struct mem_statistic_t {
-    uint32_t capacity;
-    uint32_t allocated;
-};
+// ============================================================================
+// ---                          Memory management                           ---
+// ============================================================================
 
 /**
  * @struct gfx_handle_pool_t
