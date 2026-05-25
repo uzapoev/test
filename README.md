@@ -47,7 +47,7 @@ void render_frame(gfx_context_t* ctx, gfx_surface_t* surface) {
     
     // Bindless descriptors & draw execution indirect loop
     gfx_cmd_bind_descriptor_set(cmd, 0, scene_data_set);
-    gfx_cmd_draw_mesh_tasks_indirect(cmd, indirect_draw_buffer, 0, max_draw_commands, sizeof(VkDrawMeshTasksIndirectCommandEXT));
+    gfx_cmd_draw_mesh_tasks_indirect(cmd, indirect_draw_buffer, 0, max_draw_commands, sizeof(gfx_indirect_data_t));
 
     gfx_cmd_end_pass(cmd);
 
