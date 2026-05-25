@@ -77,6 +77,7 @@ typedef struct vk_context_t
     VkPhysicalDeviceProperties          device_properties   = {};
 
 
+
     // --- Bindless Resources ---
     VkDescriptorSet                     bindless_descriptor_set         = VK_NULL_HANDLE;
     VkDescriptorPool                    bindless_descriptor_pool        = VK_NULL_HANDLE;
@@ -91,6 +92,8 @@ typedef struct vk_context_t
     gfx_buffer_t*                       default_storage_buffer  = nullptr;
 
     VkRenderPass                        vk_default_renderpass      = nullptr; //fuuuuu!
+
+    gfx_offset_allocator_t*             uniform_buffer_allocator = nullptr;
 
     // --- Command Buffers ---
     vk_command_buffer_t*                cmd_buffer_pool[32];
@@ -115,6 +118,18 @@ typedef struct vk_context_t
     PFN_vkSetDebugUtilsObjectNameEXT    vk_dbg_set_object_name;
     PFN_vkCmdBeginDebugUtilsLabelEXT    vk_dbg_cmd_push_label;
     PFN_vkCmdEndDebugUtilsLabelEXT      vk_dbg_cmd_pop_label;
+
+    // mesh shading extension
+    PFN_vkCmdDrawMeshTasksEXT           vk_cmd_draw_mesh_tasks_pfn;
+    PFN_vkCmdDrawMeshTasksIndirectEXT   vk_cmd_draw_mesh_tasks_indirect_pfn;
+
+    // raytracing
+    PFN_vkCreateAccelerationStructureKHR        vkCreateAccelerationStructureKHR = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR       vkDestroyAccelerationStructureKHR = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR     vkCmdBuildAccelerationStructuresKHR = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
+    PFN_vkCmdTraceRaysKHR                       vkCmdTraceRaysKHR = nullptr;
+
 } vk_context_t;
 
 
@@ -247,6 +262,9 @@ typedef struct vk_render_target_t {
 typedef struct vk_descriptor_pool_t {
     uint32_t                            bindings_hash;          // Hash of descriptor layout bindings for validation
 
+    uint32_t                            set_binding_count = { 0 };  // per set
+    VkDescriptorSetLayoutBinding        set_bindings[8];            // per set
+
     VkDescriptorPool                    pool;                   // Native Vulkan descriptor pool handle
     uint32_t                            capacity;               // Total number of descriptor sets available in this pool
     uint32_t                            free_set_count;         // Remaining number of unallocated descriptor sets
@@ -255,7 +273,6 @@ typedef struct vk_descriptor_pool_t {
     uint64_t*                           bitset_mask;            // Array of bitmasks tracking allocation status per set
     uint32_t                            bitset_word_count;      // Number of 64-bit words in the bitset_mask array
 
-    vk_buffer_t*                        ubo_buffer;             // Cached reference to the backing uniform buffer object
     vk_descriptor_set_t*                descriptor_sets;        // Array of managed descriptor set wrappers (size equals capacity)
 } vk_descriptor_pool_t;
 
@@ -264,13 +281,12 @@ typedef struct vk_descriptor_pool_t {
 typedef struct vk_descriptor_set_t {
     gfx_descriptor_set_t                handle;
 
-    vk_shader_t *                       shader;
+    vk_shader_t *                       shader;                 
     vk_descriptor_pool_t *              pool;                   // Owner pool from which this set was allocated
-    uint8_t *                           ubo_mapped_data;        // Pointer to the mapped uniform buffer data chunk
-    uint32_t                            ubo_offset;             // Byte offset inside the pool's global UBO buffer
+    uint16_t                            index_in_pool;
+    uint16_t                            index_in_sets;
 
-    VkBool32                            is_free;                // Flag indicating if this set slot is unallocated
-    uint32_t                            index_in_pool;
+    uint32_t                            ubo_offset;             // Byte offset inside the pool's global UBO buffer
     VkDescriptorSet                     descriptor_set;
 } vk_descriptor_set_t;
 
@@ -313,7 +329,6 @@ typedef struct vk_command_buffer_t {
 
 gfx_api void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** ctx);
 gfx_api void vk_destroy_renderer(gfx_context_t* ctx);
-
 gfx_api void vk_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
 // surface

@@ -743,7 +743,7 @@ static VkPhysicalDevice _vk_create_physical_device(VkInstance instance, VkPhysic
 static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface, uint32_t* out_graphics, uint32_t* out_present)
 {
     if (physdevice == nullptr || surface == nullptr)
-        return;
+        return VK_NULL_HANDLE;
 
     VkBool32 supports_present[16] = { 0 };
 
@@ -806,12 +806,24 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
 
     VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, nullptr };
     VkPhysicalDeviceDescriptorIndexingFeatures  bindless_features       = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,  &dynamic_rendering_features  };
-    VkPhysicalDeviceFeatures2                   supported_features      = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &bindless_features };
+    VkPhysicalDeviceMeshShaderFeaturesEXT       mesh_features           = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,  &bindless_features };
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR       rt_pipeline     = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,  &mesh_features };
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR    rt_as           = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &rt_pipeline };
+    VkPhysicalDeviceRayQueryFeaturesKHR                 rt_query        = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, &rt_as };
+
+    VkPhysicalDeviceFeatures2                 supported_features        = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &rt_query };
     vkGetPhysicalDeviceFeatures2(physdevice, &supported_features);
 
-
+    // for device initialization instead of create_info.ppEnabledExtensionNames
     VkPhysicalDeviceDynamicRenderingFeatures active_dynamic_rendering   = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES    };
-    VkPhysicalDeviceDescriptorIndexingFeatures active_bindless          = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES    };
+    VkPhysicalDeviceDescriptorIndexingFeatures active_bindless          = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES  };
+    VkPhysicalDeviceMeshShaderFeaturesEXT active_mesh_sahder_features   = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT      };
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR active_rt_pipeline    = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR active_rt_as       = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+    VkPhysicalDeviceRayQueryFeaturesKHR active_rt_query                 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+
     VkPhysicalDeviceFeatures2 enabled_device_features                   = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 
     enabled_device_features.features.samplerAnisotropy = supported_features.features.samplerAnisotropy;
@@ -864,6 +876,30 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
 
         *pnext_chain_tail = &active_dynamic_rendering;
         pnext_chain_tail = &active_dynamic_rendering.pNext;
+    }
+
+    // mesh shaders
+    if (mesh_features.meshShader) {
+        device_extensions[extension_count++] = VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME;
+        device_extensions[extension_count++] = VK_KHR_SPIRV_1_4_EXTENSION_NAME;
+        device_extensions[extension_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
+    }
+
+    // ray tracing core
+    if (rt_as.accelerationStructure ) {
+        device_extensions[extension_count++] = VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME;
+        device_extensions[extension_count++] = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
+        device_extensions[extension_count++] = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME;
+    }
+
+    // ray tracind
+    if (rt_pipeline.rayTracingPipeline && rt_as.accelerationStructure) {
+        device_extensions[extension_count++] = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
+    }
+
+    //ray query
+    if ( rt_query.rayQuery && rt_as.accelerationStructure) {
+        device_extensions[extension_count++] = VK_KHR_RAY_QUERY_EXTENSION_NAME;
     }
 
     *pnext_chain_tail = NULL;
@@ -1238,6 +1274,15 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vctx->vk_dbg_cmd_push_label     = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(vctx->vk_device, "vkCmdBeginDebugUtilsLabelEXT");
     vctx->vk_dbg_cmd_pop_label      = (PFN_vkCmdEndDebugUtilsLabelEXT)  vkGetDeviceProcAddr(vctx->vk_device, "vkCmdEndDebugUtilsLabelEXT");
 
+    vctx->vk_cmd_draw_mesh_tasks_pfn = (PFN_vkCmdDrawMeshTasksEXT) vkGetDeviceProcAddr(vctx->vk_device, "vkCmdDrawMeshTasksEXT");
+    vctx->vk_cmd_draw_mesh_tasks_indirect_pfn = (PFN_vkCmdDrawMeshTasksIndirectEXT)vkGetDeviceProcAddr(vctx->vk_device, "vkCmdDrawMeshTasksIndirectEXT");
+
+    vctx->vkCreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(vctx->vk_device, "vkCreateAccelerationStructureKHR");
+    vctx->vkDestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(vctx->vk_device, "vkDestroyAccelerationStructureKHR");
+    vctx->vkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(vctx->vk_device, "vkCmdBuildAccelerationStructuresKHR");
+    vctx->vkGetAccelerationStructureBuildSizesKHR = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(vctx->vk_device, "vkGetAccelerationStructureBuildSizesKHR");
+    vctx->vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR) vkGetDeviceProcAddr(vctx->vk_device, "vkCmdTraceRaysKHR");
+
     vkGetPhysicalDeviceFeatures(vctx->vk_physical_device, &vctx->device_features);
     vkGetPhysicalDeviceProperties(vctx->vk_physical_device, &vctx->device_properties);
     vkGetPhysicalDeviceMemoryProperties(vctx->vk_physical_device, &vctx->memory_properties);
@@ -1254,10 +1299,20 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     gfx_handle_pool_create(sizeof(vk_pipeline_t),  cfg->limits.pipeline_pool_capacity, &vctx->pipeline_pool, &vctx->allocator);
     gfx_handle_pool_create(sizeof(vk_compute_pipeline_t),  cfg->limits.compute_pipeline_pool_capacity, &vctx->compute_pipeline_pool, &vctx->allocator);
 
+    if(cfg->limits.uniform_buffer_size < 1 * 1024 * 1024)
+        cfg->limits.uniform_buffer_size < 1 * 1024 * 1024;
+
+    cfg->limits.uniform_buffer_size = gfx_utils_align_up(cfg->limits.uniform_buffer_size, vctx->gpu_caps.min_uniform_buffer_offset_alignment);
+
+    uint32_t buffer_size = cfg->limits.uniform_buffer_size;
+    uint32_t buffer_aligment = vctx->gpu_caps.min_uniform_buffer_offset_alignment;
+    gfx_offset_allocator_create(buffer_size, buffer_aligment, &vctx->uniform_buffer_allocator);
+   // gfx_offset_allocator_allocate(vctx->uniform_buffer_allocator, 1024); re
 
     gfx_buffer_t* uniform_buffer = nullptr;
     gfx_buffer_desc_t ubo_descriptor = {};
         ubo_descriptor.label                = "unifrom_buffer_object";
+        ubo_descriptor.memory_hint          = gfx_memory_cpu_to_gpu;
         ubo_descriptor.mapped               = true;
         ubo_descriptor.size                 = cfg->limits.uniform_buffer_size;
         ubo_descriptor.usage                = gfx_buffer_usage_uniform;
@@ -1755,7 +1810,7 @@ void vk_frame_end(gfx_frame_t* frame)
         vcmd->stamp_count = 0;
         vcmd->time_query_stack_top = 0;
         vcmd->time_query_current_index = 0;
-        vctx->dbg_log(gfx_msg_info, "gpu time %.3f ", delta_in_ms);
+      //  vctx->dbg_log(gfx_msg_info, "gpu time %.3f ", delta_in_ms);
     }
 
     surface->current_frame = (surface->current_frame + 1) % GFX_MAX_FRAME_IN_FLIGHT;
@@ -1973,17 +2028,37 @@ void vk_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer)
 
 void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t set_idx, uint32_t capacity, vk_descriptor_pool_t** out_pool)
 {
-    vk_descriptor_pool_t* pool = (vk_descriptor_pool_t*)_gfx_alloc(ctx, sizeof(vk_descriptor_pool_t));
-    vk_descriptor_set_t*  sets = (vk_descriptor_set_t*)_gfx_alloc(ctx, sizeof(vk_descriptor_set_t) * capacity);
+    if(ctx == nullptr) return;
+    if(shader == nullptr) return;
+    if(out_pool == nullptr) return;
 
-    if (pool == nullptr || sets == nullptr) {
-        _gfx_free(ctx, pool);
-        _gfx_free(ctx, sets);
+    uint32_t buffer_alignment = alignof(void*);
+
+    uint32_t pool_size = gfx_utils_align_up(sizeof(vk_descriptor_pool_t), buffer_alignment);
+    uint32_t sets_size = gfx_utils_align_up(sizeof(vk_descriptor_set_t) * capacity, buffer_alignment);
+    uint32_t set_mask_size = gfx_utils_align_up(sizeof(uint64_t) * capacity/64, buffer_alignment);
+    uint32_t total_size = pool_size + sets_size + set_mask_size;
+
+    void * buffer = _gfx_alloc(ctx, total_size);
+    if(buffer == nullptr) {
+        const char * shader_name = shader->label ? shader->label: " -noname- ";
+        ctx->dbg_log(gfx_msg_error, "failed to allocate vk_create_descriptor_pool(sahder:%s, capacity: %d)", shader_name, capacity);
         return;
     }
 
-    uint32_t binding_count = shader->set_binding_count[set_idx];
+    uint8_t* byte_ptr = (uint8_t*)buffer;
+    vk_descriptor_pool_t* pool  = (vk_descriptor_pool_t*)byte_ptr;   byte_ptr += pool_size;
+    vk_descriptor_set_t* sets   = (vk_descriptor_set_t*)byte_ptr;    byte_ptr += sets_size;
+    pool->bitset_mask           = (uint64_t*)byte_ptr;               byte_ptr += set_mask_size;
+    pool->bitset_word_count     = set_mask_size;
+
     VkDescriptorSetLayoutBinding* set_layout_bindings = shader->set_bindings[set_idx];
+
+    pool->set_binding_count = shader->set_binding_count[set_idx];;
+    for (int i = 0; i < pool->set_binding_count; ++i){
+        pool->set_bindings[i] = set_layout_bindings[i];
+    }
+    
 
     const uint32_t VK_DESCRIPTOR_TYPE_RANGE_SIZE = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
 
@@ -1993,7 +2068,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
     for (int i = 0; i < VK_DESCRIPTOR_TYPE_RANGE_SIZE; ++i)
         pool_sizes_by_type[i].type = (VkDescriptorType)i;
 
-    for (size_t i = 0; i < binding_count; ++i)
+    for (size_t i = 0; i < pool->set_binding_count; ++i)
         pool_sizes_by_type[set_layout_bindings[i].descriptorType].descriptorCount++;
 
     uint32_t pool_size_count = 0;
@@ -2009,33 +2084,30 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
     }
 
     // Descriptor pool
-    VkDescriptorPoolCreateInfo poolCreateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-        poolCreateInfo.maxSets          = capacity;
-        poolCreateInfo.poolSizeCount    = pool_size_count;
-        poolCreateInfo.pPoolSizes       = pool_sizes;
-    auto result = vkCreateDescriptorPool(ctx->vk_device, &poolCreateInfo, NULL, &pool->pool);
-
-    uint32_t ubo_buffer_size = 256;
-
-    uint32_t alignment = (uint32_t)ctx->device_properties.limits.minUniformBufferOffsetAlignment;
-    uint32_t aligned_size = gfx_utils_align_up(ubo_buffer_size, alignment);
-    ubo_buffer_size = aligned_size * capacity;
-
-    if (ubo_buffer_size > 0)
-    {
-        gfx_buffer_t* buffer = nullptr;
-        gfx_buffer_desc_t buff_desc = {};
-            buff_desc.label = "ubo";
-            buff_desc.usage = gfx_buffer_usage_uniform;
-            buff_desc.size  = ubo_buffer_size;
-        vk_buffer_create(&ctx->handle, &buff_desc, &buffer);
-
-        pool->ubo_buffer = (vk_buffer_t*)gfx_handle_pool_map(ctx->buffers_pool, buffer->idx);
+    VkDescriptorPoolCreateInfo pool_ci = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+        pool_ci.maxSets          = capacity;
+        pool_ci.poolSizeCount    = pool_size_count;
+        pool_ci.pPoolSizes       = pool_sizes;
+    if(auto result = vkCreateDescriptorPool(ctx->vk_device, &pool_ci, NULL, &pool->pool)) {
+        _gfx_free(ctx, buffer);
+        ctx->dbg_log(gfx_msg_error, "vkCreateDescriptorPool failed!(%s)", string_VkResult(result));
+        return;
     }
+
+    uint32_t ubo_buffer_size = 0;
+    for(uint32_t i = 0; i < shader->uniform_count; ++i)
+    {
+        auto uniform = &shader->uniforms[i];
+        if(uniform->group == set_idx && uniform->type == gfx_uniform_ubo)
+            ubo_buffer_size += uniform->buffer.size;
+    }
+    uint32_t alignment = (uint32_t)ctx->gpu_caps.min_uniform_buffer_offset_alignment;
+    uint32_t aligned_size = gfx_utils_align_up(ubo_buffer_size, alignment);
 
     pool->capacity = capacity;
     pool->free_set_count = capacity;
-    pool->descriptor_sets = sets;
+    pool->descriptor_sets = sets;  
+    vk_buffer_t * ubo_buffer = ctx->uniform_buffer;
 
     for (uint32_t i = 0; i < capacity; i++)
     {
@@ -2054,16 +2126,11 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
             ctx->dbg_log(gfx_msg_error, "failed to create descriptor pool (%s)", string_VkResult(result));
         }
 
-        vk_buffer_t * ubo_buffer = pool->ubo_buffer;
+        current_set->shader         = shader;
+        current_set->pool           = pool;
+        current_set->index_in_sets  = set_idx;
 
-        current_set->is_free     = true;
-        current_set->shader      = shader;
-        current_set->pool        = pool;
-
-        if(ubo_buffer_size > 0 && pool->ubo_buffer != nullptr)
-            current_set->ubo_mapped_data = (uint8_t*)pool->ubo_buffer->data_ptr + aligned_size * i;
-
-        for(uint32_t j = 0;  j < binding_count; ++j)
+        for(uint32_t j = 0;  j < pool->set_binding_count; ++j)
         {
             auto& binding = set_layout_bindings[j];
 
@@ -2085,10 +2152,11 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
             {
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+                    current_set->ubo_offset = gfx_offset_allocator_allocate(ctx->uniform_buffer_allocator, aligned_size);
+
                     descriptor_buffer_info[writes_idx].buffer = ubo_buffer ? ubo_buffer->buffer : nullptr;
                     descriptor_buffer_info[writes_idx].range  = aligned_size;
-                    descriptor_buffer_info[writes_idx].offset = aligned_size * i;
-
+                    descriptor_buffer_info[writes_idx].offset = current_set->ubo_offset;
                     descriptor_writes[writes_idx].pBufferInfo = &descriptor_buffer_info[writes_idx];
                     break;
 
@@ -2989,6 +3057,29 @@ uint64_t _descriptor_set_layout_hash(VkDescriptorSetLayoutBinding* bindings, siz
     return hash;
 };
 
+inline uint32_t ctz64(uint64_t x) {
+    assert(x != 0);
+#if defined(_MSC_VER)
+    unsigned long index;
+    _BitScanForward64(&index, x);
+    return (uint32_t)index;
+#else
+    return (uint32_t)__builtin_ctzll(x);
+#endif
+}
+
+inline void bitmask_set(uint64_t* _bitmask, size_t index, bool value) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    if (value)  _bitmask[w] |= (1ull << b);
+    else        _bitmask[w] &= ~(1ull << b);
+}
+
+inline bool bitmask_value(uint64_t* _bitmask, size_t index) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    return (_bitmask[w]) >> b & 1ull;
+}
 
 void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
 {
@@ -3018,20 +3109,27 @@ void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
     {
         vk_create_descriptor_pool(vctx, vk_shader, 0, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
     }
+    pool = vk_shader->pool;
 
-    uint32_t next_free = vk_shader->pool->next_free_index;
-
-    for(uint32_t i = next_free; i < vk_shader->pool->capacity; ++i)
+    
+    for (uint32_t i = 0; i < pool->bitset_word_count; ++i)
     {
-        if(!vk_shader->pool->descriptor_sets[i].is_free)
-            continue;
+        uint64_t orig = pool->bitset_mask[i];
+        uint64_t inv = ~pool->bitset_mask[i];
+        if(inv != 0)
+        {
+            uint32_t pos = ctz64(inv) + i * 64;
+            bitmask_set(pool->bitset_mask, pos, true);
 
-        vk_shader->pool->descriptor_sets[i].is_free = false;
-        vk_shader->pool->free_set_count--;
-        vk_shader->pool->next_free_index = i + 1;
+            pool->free_set_count--;
+            pool->descriptor_sets[pos].index_in_pool = pos;
+            *out_set = &vk_shader->pool->descriptor_sets[pos].handle;
+            return;
+        }
+    }
 
-        *out_set = &vk_shader->pool->descriptor_sets[i].handle;
-        break;
+    for(int i = 0; i < 1024; ++i) {
+        printf("\n%d", pool->descriptor_sets[i].index_in_pool);
     }
 }
 
@@ -3042,11 +3140,33 @@ void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descrip
         return;
 
     vk_context_t* vctx = from_ctx(ctx);
-    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)descriptor;
+    vk_descriptor_set_t* vset = (vk_descriptor_set_t*)descriptor;
+    vk_descriptor_pool_t * pool = vset->pool;
 
-    vkset->is_free = true;
-    vkset->pool->next_free_index = vkset->index_in_pool;
-    vkset->pool->free_set_count++;
+    vk_texture_t* default_texture = vctx->default_texture;
+    auto sampler = (vk_sampler_t*)gfx_handle_pool_map(vctx->sampler_pool, vctx->default_sampler->idx);
+    VkImageView image_view = default_texture->view;
+
+    // todo: write utility function for reset descriptor set bindingds to default values
+    // that mathot can be used in create_descriptor_pool
+    for(uint32_t i = 0; i < pool->set_binding_count; ++i) {
+        if(pool->set_bindings[i].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
+
+            VkDescriptorImageInfo image_info = { 0 };
+                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                image_info.imageView = image_view;
+                image_info.sampler = sampler->sampler;
+
+            VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                write.dstSet = vset->descriptor_set;
+                write.dstBinding = pool->set_bindings[i].binding;
+                write.descriptorCount = 1;
+                write.pImageInfo = &image_info;
+            vkUpdateDescriptorSets(vctx->vk_device, 1, &write, 0, nullptr);
+        }
+    }
+    bitmask_set(pool->bitset_mask, vset->index_in_pool, false);
 }
 
 
@@ -3056,28 +3176,30 @@ void vk_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t han
         return;
 
     vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
-    vk_shader_t* shader   = vkset->shader;
-    vk_context_t* vkctx     = shader->ctx;
+    vk_shader_t* shader     = vkset->shader;
+    vk_context_t* vctx     = shader->ctx;
 
     gfx_uniform_loc_t loc = { handle };
 
     if (shader->hash32 != loc.shader_hash) {
-        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
+        vctx->dbg_log(gfx_msg_warning, "handle from another shader");
         return;
     }
 
     gfx_uniform_type type = (gfx_uniform_type)loc.type;
     if (type != gfx_uniform_ubo) {
-        vkctx->dbg_log(gfx_msg_warning, "type mismatch");
+        vctx->dbg_log(gfx_msg_warning, "type mismatch");
         return;
     }
 
     const gfx_uniform_t* uniform = loc.binding < shader->uniform_count ? &shader->uniforms[loc.binding] : nullptr;
 
+    uint8_t* ubo_ptr = (uint8_t*)vctx->uniform_buffer->data_ptr;
+
     if ((uniform != nullptr) && (uniform->type == gfx_uniform_ubo) && (loc.member_idx < uniform->buffer.field_count))
     {
-        uint32_t offset = uniform->buffer.fields[loc.member_idx].offset;
-        memcpy(vkset->ubo_mapped_data + offset, data, size);
+        uint32_t offset = vkset->ubo_offset + uniform->buffer.fields[loc.member_idx].offset;
+        memcpy(ubo_ptr + offset, data, size);
     }
 }
 
@@ -3488,19 +3610,44 @@ void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures,
 
 
 void vk_cmd_draw_mesh_tasks(gfx_command_buffer_t* cmd, uint32_t task_count_x, uint32_t task_count_y, uint32_t task_count_z)
-{
-    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
-    vk_context_t* ctx = vcmd->ctx;
+{   
+    if (cmd == nullptr) return;
 
-    gfx_stub_not_implemented(ctx->dbg_log, "vk_cmd_draw_mesh_tasks");
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* vctx = vcmd->ctx;
+
+
+    if (vctx->vk_cmd_draw_mesh_tasks_pfn == nullptr) {
+        vctx->dbg_log(gfx_msg_error, "vkCmdDrawMeshTasksEXT is not available (mesh shader extension not enabled)");
+        return;
+    }
+
+    if (task_count_x == 0 || task_count_y == 0 || task_count_z == 0) {
+        return;
+    }
+
+    vctx->vk_cmd_draw_mesh_tasks_pfn(vcmd->cmd, task_count_x, task_count_y, task_count_z);
 }
 
 void vk_cmd_draw_mesh_tasks_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride)
 {
-    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
-    vk_context_t* ctx = vcmd->ctx;
+    if (cmd == nullptr) return;
 
-    gfx_stub_not_implemented(ctx->dbg_log, "vk_cmd_draw_mesh_tasks_indirect");
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    vk_context_t* vctx = vcmd->ctx;
+
+    if (vctx->vk_cmd_draw_mesh_tasks_indirect_pfn == nullptr) {
+        vctx->dbg_log(gfx_msg_error, "vkCmdDrawMeshTasksIndirectEXT is not available (mesh shader extension not enabled)");
+        return;
+    }
+
+    vk_buffer_t* vkbuf = (vk_buffer_t*)gfx_handle_pool_map(vctx->buffers_pool, buffer->idx);
+    if (vkbuf == nullptr || vkbuf->buffer == VK_NULL_HANDLE) {
+        vctx->dbg_log(gfx_msg_error, "invalid buffer passed to vk_cmd_draw_mesh_tasks_indirect");
+        return;
+    }
+
+    vctx->vk_cmd_draw_mesh_tasks_indirect_pfn(vcmd->cmd, vkbuf->buffer, offset, draw_count, stride);
 }
 
 
