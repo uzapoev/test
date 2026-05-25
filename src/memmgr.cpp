@@ -211,7 +211,7 @@ struct mem_traker
 
 aligned_allocator::aligned_allocator(const char* tag)
 {
-    strcpy(m_name, tag);
+    strncpy(m_name, tag, sizeof(m_name) - 2);
     m_traker = new mem_traker();
 }
 

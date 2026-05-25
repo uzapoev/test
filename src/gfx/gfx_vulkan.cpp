@@ -10,6 +10,31 @@
     #pragma comment(lib, "../lib/vulkan-1.lib")
 #endif
 
+inline uint32_t ctz64(uint64_t x) {
+    assert(x != 0);
+#if defined(_MSC_VER)
+    unsigned long index;
+    _BitScanForward64(&index, x);
+    return (uint32_t)index;
+#else
+    return (uint32_t)__builtin_ctzll(x);
+#endif
+}
+
+inline void bitmask_set(uint64_t* _bitmask, size_t index, bool value) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    if (value)  _bitmask[w] |= (1ull << b);
+    else        _bitmask[w] &= ~(1ull << b);
+}
+
+inline bool bitmask_value(uint64_t* _bitmask, size_t index) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    return (_bitmask[w]) >> b & 1ull;
+}
+
+
 extern const char* gfx_to_string(gfx_buffer_usage usage);
 extern const char* gfx_to_string(gfx_shader_stage stage);
 extern const char* gfx_to_string(gfx_texture_type type);
@@ -228,19 +253,6 @@ VkImageAspectFlags determine_aspect_mask(VkFormat format)
 }
 
 
-typedef struct vk_copy_info_t
-{
-    VkImage             dst_image;
-    uint32_t            dst_image_mips;
-    gfx_pixel_format    dst_image_format;
-    VkExtent3D          dst_image_extend;
-
-    VkBuffer            dst_buffer;
-    uint32_t            dst_buffer_offset;
-    uint32_t            dst_buffer_size;
-}vk_copy_info_t;
-
-
 typedef struct vk_state_mapping_t {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2        access;
@@ -346,38 +358,6 @@ static vk_context_t* from_ctx(gfx_context_t* ctx)
 
 
 
-VkAllocationCallbacks *vk_default_allocation_callbacks()
-{
-    static VkAllocationCallbacks cb;
-    if(cb.pfnAllocation == nullptr)
-        cb.pfnAllocation = [](void* pUserData, size_t size, size_t alignment, VkSystemAllocationScope allocationScope) {
-            return malloc(size);
-        };
-
-    if (cb.pfnReallocation == nullptr)
-        cb.pfnReallocation = [](void* pUserData, void* pOriginal, size_t size, size_t alignment, VkSystemAllocationScope allocationScope) {
-            return realloc(pOriginal, size);
-        };
-
-    if (cb.pfnFree == nullptr)
-        cb.pfnFree = [](void* pUserData, void* ptr) {
-            free(ptr);
-        };
-
-    if (cb.pfnInternalAllocation == nullptr)
-        cb.pfnInternalAllocation = [] (void*  pUserData, size_t size, VkInternalAllocationType allocationType, VkSystemAllocationScope allocationScope) {
-            printf("\npInternalAllocation(%zd)", size);
-        };
-
-    if (cb.pfnInternalFree == nullptr)
-        cb.pfnInternalFree = [](void* pUserData, size_t size, VkInternalAllocationType allocationType, VkSystemAllocationScope allocationScope) {
-            printf("\npInternalFree(%zd)", size);
-         };
-
-    return &cb;
-}
-
-
 // The callback returns a VkBool32 that indicates to the calling layer if the Vulkan call should be aborted or not. 
 // Applications should always return VK_FALSE so that they see the same behavior with and without validation layers enabled.
 // If the application returns VK_TRUE from its callback and the Vulkan call being aborted returns a VkResult, the layer will return VK_ERROR_VALIDATION_FAILED_EXT
@@ -402,7 +382,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vkDebugCallback(VkDebugReportFlagsEXT flag
     return VK_FALSE;
 }
 
-static VkBool32  vkDebugCallback2( VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
+static VkBool32  vkDebugCallback2(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
 {
     printf( "Vulkan-Validation [ID: %d, Name: %s] -> %s\n",
         pCallbackData->messageIdNumber,
@@ -486,13 +466,9 @@ void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gf
     if (!physical_device || !caps) return;
     memset(caps, 0, sizeof(gfx_caps_t));
 
-    // =========================================================================
-    // 1. BASE PROPERTIES AND LIMITS
-    // =========================================================================
-    VkPhysicalDeviceProperties properties;
+    VkPhysicalDeviceProperties properties = { };
     vkGetPhysicalDeviceProperties(physical_device, &properties);
 
-    // Copy device strings safely
     strncpy(caps->gpu_name, properties.deviceName, sizeof(caps->gpu_name) - 1);
     strncpy(caps->gpu_vendor, _vk_resolve_vendor_name(properties.vendorID), sizeof(caps->gpu_vendor) - 1);
 
@@ -513,28 +489,28 @@ void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gf
     // 2. FEATURE EXTRACTION VIA pNext CHAIN (Vulkan 1.1+)
     // =========================================================================
 
-    // Allocate structures on the stack and link them into the pNext chain
-    VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+
 
     // Vulkan 1.2 features (Bindless/Descriptor Indexing, 8-bit/16-bit storage)
     VkPhysicalDeviceVulkan12Features feats12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
-    features2.pNext = &feats12;
 
     // Vulkan 1.3 features (Additional core features/atomics)
-    VkPhysicalDeviceVulkan13Features feats13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
-    feats12.pNext = &feats13;
+    VkPhysicalDeviceVulkan13Features feats13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, &feats12 };
 
     // Extension: Mesh Shaders (EXT/NV)
-    VkPhysicalDeviceMeshShaderFeaturesEXT mesh_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
-    feats13.pNext = &mesh_feats;
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, &feats13 };
+
 
     // Extension: Floating-point atomics
-    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomic_float_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT };
-    mesh_feats.pNext = &atomic_float_feats;
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomic_float_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT, &mesh_feats };
 
     // Extension: Fragment shader barycentrics
-    VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV barycentric_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_NV };
-    atomic_float_feats.pNext = &barycentric_feats;
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV barycentric_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_NV, &atomic_float_feats };
+
+    // Allocate structures on the stack and link them into the pNext chain
+    VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,  &barycentric_feats };
+
+
 
     // Properties chain to fetch extended limits (like max bindless descriptor array size)
     VkPhysicalDeviceProperties2 properties2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -573,7 +549,7 @@ void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gf
         caps->support_bindless = true;
         // Extract the actual maximum size for texture arrays bound as bindless resources.
         // Usually matches maxDescriptorSetUpdateAfterBindSampledImages.
-        caps->max_bindless_sampleable_textures = props12.maxDescriptorSetUpdateAfterBindSampledImages;
+        caps->max_bindless_sampleable_textures = gfx_clamp(props12.maxDescriptorSetUpdateAfterBindSampledImages, 0, 8192);
     }
     else
     {
@@ -647,9 +623,6 @@ static VkInstance _vk_create_instance(bool isdebug)
     char* extensions_debug[]  =  { VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME    };
     char* extensions_release[] = { VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION_NAME };
 
-   //char* extensions_debug[] =   { VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_REPORT_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
-   // char* extensions_release[] = { VK_KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_REPORT_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
-
     char**   extension_names = isdebug ? extensions_debug : extensions_release;
     uint32_t extension_count = isdebug ? _countof(extensions_debug) : _countof(extensions_release);
 
@@ -673,9 +646,7 @@ static VkInstance _vk_create_instance(bool isdebug)
 
     VkDebugUtilsMessengerCreateInfoEXT debug_info = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT, nullptr };
     if (isdebug) {
-        debug_info.messageSeverity =   // VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                       // VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
-                                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+        debug_info.messageSeverity =    VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                                         VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 
         debug_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
@@ -1092,47 +1063,6 @@ static void _vk_image_transition(vk_context_t* ctx, VkImage image, uint16_t mips
     vk_cmd_destroy(&ctx->handle, cmd);
 }
 
-static void _vk_copy_buffer_to(vk_context_t* ctx, VkBuffer src, vk_copy_info_t * dst_info)
-{
-    gfx_command_buffer_t* cmd = nullptr;
-    vk_cmd_create(&ctx->handle, &cmd);
-    vk_cmd_begin(cmd);
-    vk_command_buffer_t* vk_cmd = (vk_command_buffer_t*)cmd;
-
-    if (dst_info->dst_buffer != VK_NULL_HANDLE && dst_info->dst_buffer_size > 0)
-    {
-        VkBufferCopy region = { 0, dst_info->dst_buffer_offset, dst_info->dst_buffer_size };
-        vkCmdCopyBuffer(vk_cmd->cmd, src, dst_info->dst_buffer, 1, &region);
-    }
-
-    VkBufferImageCopy regions[16] = {}; // maximum 16 mip levels(65536)
-    if (dst_info->dst_image != VK_NULL_HANDLE)
-    {
-        uint32_t offset = 0;
-        for (uint8_t i = 0; i < dst_info->dst_image_mips; i++)
-        {
-            uint32_t width  = max(dst_info->dst_image_extend.width >> i, 1);
-            uint32_t height = max(dst_info->dst_image_extend.height >> i, 1);
-            uint32_t depth  = max(dst_info->dst_image_extend.depth >> i, 1);
-
-            regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            regions[i].imageSubresource.baseArrayLayer = 0;
-            regions[i].imageSubresource.layerCount = 1;
-            regions[i].imageSubresource.mipLevel = i;
-
-            regions[i].imageOffset = { 0, 0, 0 };
-            regions[i].imageExtent = { width, height, depth };
-            regions[i].bufferOffset = offset;
-
-            offset += gfx_utils_image_layer_size(width, height, depth, dst_info->dst_image_format);
-        }
-        vkCmdCopyBufferToImage(vk_cmd->cmd, src, dst_info->dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dst_info->dst_image_mips, regions);
-    }
-    vk_cmd_end(cmd);
-    vk_cmd_submit(&ctx->handle, cmd, gfx_submit_wait_for_fence);
-    vk_cmd_destroy(&ctx->handle, cmd);
-}
-
 static void _vk_copy_buffer_to_image(vk_context_t* ctx, VkBuffer src, VkImage image, uint32_t mips, gfx_pixel_format format, VkExtent3D extend)
 {
     gfx_command_buffer_t* cmd = nullptr;
@@ -1185,7 +1115,7 @@ static void _vk_copy_buffer_to_buffer(vk_context_t* ctx, VkBuffer src, VkBuffer 
     vk_cmd_destroy(&ctx->handle, cmd);
 }
 
-void _destroy_vk_texture(vk_context_t * ctx, vk_texture_t* texture)
+static void _destroy_vk_texture(vk_context_t * ctx, vk_texture_t* texture)
 {
     if(texture->view)
         vkDestroyImageView(ctx->vk_device, texture->view, nullptr);
@@ -1200,6 +1130,7 @@ void _destroy_vk_texture(vk_context_t * ctx, vk_texture_t* texture)
     texture->image = VK_NULL_HANDLE;
     texture->memory = VK_NULL_HANDLE;
 }
+
 
 uint32_t gfx_gpu_ram_usage(gfx_context_t* ctx)
 {
@@ -1968,14 +1899,8 @@ void vk_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data,
             if (staging->data_ptr == nullptr)
                 vkMapMemory(vkctx->vk_device, staging->memory, 0, staging->buffer_size, 0, &staging->data_ptr);
             memcpy(staging->data_ptr, data, size);
-            // vkUnmapMemory(ctx->device, s_staging.memory);
-             //vkFlushMappedMemoryRanges();
 
-            vk_copy_info_t info = { };
-                info.dst_buffer = vkbuf->buffer;
-                info.dst_buffer_size = (uint32_t)size;
-                info.dst_buffer_offset = offset;
-            _vk_copy_buffer_to(vkctx, vkctx->staging_buffer->buffer, &info);
+            _vk_copy_buffer_to_buffer(vkctx, vkctx->staging_buffer->buffer, vkbuf->buffer, offset, size);
         }
         else
         {
@@ -1991,11 +1916,7 @@ void vk_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data,
                 staging.data_ptr = nullptr;
             }
 
-            vk_copy_info_t info = { };
-            info.dst_buffer = vkbuf->buffer;
-            info.dst_buffer_size = (uint32_t)size;
-            _vk_copy_buffer_to(vkctx, staging.buffer, &info);
-
+            _vk_copy_buffer_to_buffer(vkctx, staging.buffer, vkbuf->buffer, 0, size);
             vkDestroyBuffer(vkctx->vk_device, staging.buffer, nullptr);
             vkFreeMemory(vkctx->vk_device, staging.memory, nullptr);
         }
@@ -2054,9 +1975,9 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
 
     VkDescriptorSetLayoutBinding* set_layout_bindings = shader->set_bindings[set_idx];
 
-    pool->set_binding_count = shader->set_binding_count[set_idx];;
-    for (int i = 0; i < pool->set_binding_count; ++i){
-        pool->set_bindings[i] = set_layout_bindings[i];
+    pool->set_layout_binding_count = shader->set_binding_count[set_idx];;
+    for (int i = 0; i < pool->set_layout_binding_count; ++i){
+        pool->set_layout_bindings[i] = set_layout_bindings[i];
     }
     
 
@@ -2068,7 +1989,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
     for (int i = 0; i < VK_DESCRIPTOR_TYPE_RANGE_SIZE; ++i)
         pool_sizes_by_type[i].type = (VkDescriptorType)i;
 
-    for (size_t i = 0; i < pool->set_binding_count; ++i)
+    for (size_t i = 0; i < pool->set_layout_binding_count; ++i)
         pool_sizes_by_type[set_layout_bindings[i].descriptorType].descriptorCount++;
 
     uint32_t pool_size_count = 0;
@@ -2130,7 +2051,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
         current_set->pool           = pool;
         current_set->index_in_sets  = set_idx;
 
-        for(uint32_t j = 0;  j < pool->set_binding_count; ++j)
+        for(uint32_t j = 0;  j < pool->set_layout_binding_count; ++j)
         {
             auto& binding = set_layout_bindings[j];
 
@@ -2156,7 +2077,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
 
                     descriptor_buffer_info[writes_idx].buffer = ubo_buffer ? ubo_buffer->buffer : nullptr;
                     descriptor_buffer_info[writes_idx].range  = aligned_size;
-                    descriptor_buffer_info[writes_idx].offset = current_set->ubo_offset;
+               //     descriptor_buffer_info[writes_idx].offset = current_set->ubo_offset;
                     descriptor_writes[writes_idx].pBufferInfo = &descriptor_buffer_info[writes_idx];
                     break;
 
@@ -2295,7 +2216,7 @@ static void _vk_create_descriptor_layouts(vk_context_t * ctx, vk_shader_t* shade
         VkDescriptorType texture_type = HAS_FLAG(u->stage_mask, 1 << gfx_shader_compute) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                                                                                          : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         switch (u->type) {
-            case gfx_uniform_ubo:       bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;   break;
+            case gfx_uniform_ubo:       bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;   break;
             case gfx_uniform_sampler:   bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;          break;
             case gfx_uniform_storage_buffer:   bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;   break;
 
@@ -3057,29 +2978,6 @@ uint64_t _descriptor_set_layout_hash(VkDescriptorSetLayoutBinding* bindings, siz
     return hash;
 };
 
-inline uint32_t ctz64(uint64_t x) {
-    assert(x != 0);
-#if defined(_MSC_VER)
-    unsigned long index;
-    _BitScanForward64(&index, x);
-    return (uint32_t)index;
-#else
-    return (uint32_t)__builtin_ctzll(x);
-#endif
-}
-
-inline void bitmask_set(uint64_t* _bitmask, size_t index, bool value) {
-    size_t w = index / 64;
-    size_t b = index % 64;
-    if (value)  _bitmask[w] |= (1ull << b);
-    else        _bitmask[w] &= ~(1ull << b);
-}
-
-inline bool bitmask_value(uint64_t* _bitmask, size_t index) {
-    size_t w = index / 64;
-    size_t b = index % 64;
-    return (_bitmask[w]) >> b & 1ull;
-}
 
 void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
 {
@@ -3149,8 +3047,8 @@ void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descrip
 
     // todo: write utility function for reset descriptor set bindingds to default values
     // that mathot can be used in create_descriptor_pool
-    for(uint32_t i = 0; i < pool->set_binding_count; ++i) {
-        if(pool->set_bindings[i].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
+    for(uint32_t i = 0; i < pool->set_layout_binding_count; ++i) {
+        if(pool->set_layout_bindings[i].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
 
             VkDescriptorImageInfo image_info = { 0 };
                 image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -3160,7 +3058,7 @@ void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descrip
             VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
                 write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
                 write.dstSet = vset->descriptor_set;
-                write.dstBinding = pool->set_bindings[i].binding;
+                write.dstBinding = pool->set_layout_bindings[i].binding;
                 write.descriptorCount = 1;
                 write.pImageInfo = &image_info;
             vkUpdateDescriptorSets(vctx->vk_device, 1, &write, 0, nullptr);
@@ -3428,7 +3326,8 @@ void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_de
     VkDescriptorSet descriptor_set = set->descriptor_set;
     VkPipelineLayout pipeline_layout = set->shader->pipeline_layout;
 
-    vkCmdBindDescriptorSets(vcmd->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, slot, 1u, &descriptor_set, 0, nullptr);
+    uint32_t dynamic_offset = set->ubo_offset;
+    vkCmdBindDescriptorSets(vcmd->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, slot, 1u, &descriptor_set, 1, &dynamic_offset);
 }
 
 void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)

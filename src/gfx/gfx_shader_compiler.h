@@ -295,7 +295,7 @@ static int  gfx_compile_shader(gfx_shader_compiler_context_t * context, const ch
         {
             program->blobs[i].stage_data_size = (uint32_t)shlang_blob->getBufferSize();
             program->blobs[i].stage_data = (char*)calloc(1, shlang_blob->getBufferSize());
-            strcpy(program->blobs[i].stage_entry_point_name, entry_point_names[i]);
+            strncpy(program->blobs[i].stage_entry_point_name, entry_point_names[i], sizeof(program->blobs[i].stage_entry_point_name) - 2);
 
             if (program->blobs[i].stage_data != nullptr)
                 memcpy(program->blobs[i].stage_data, shlang_blob->getBufferPointer(), shlang_blob->getBufferSize());

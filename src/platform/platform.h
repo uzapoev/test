@@ -154,24 +154,20 @@ static touch_id touch_id_2_id(uint64_t touchid, int arg)
     return touch_id_1;
 }
 
+extern platform_ctx_t* g_platform_ctx;
 
-extern input_event_t    g_events[];
-extern int              g_current_event_idx;
-extern uint8_t          g_keyboard_key_states[];
-extern input_point_t    g_point_states[];
-extern input_state      g_mouse_btn_states[];
 
 static void input_push_event(input_event_t event)
 {
-    int idx = (g_current_event_idx++) % 1024;
-    g_events[idx] = event;
+    int idx = (g_platform_ctx->g_current_event_idx++) % 1024;
+    g_platform_ctx->g_events[idx] = event;
 }
 
 static int input_pop_event(input_event_t* event)
 {
-    if (g_current_event_idx > 0)
+    if (g_platform_ctx->g_current_event_idx > 0)
     {
-        *event = g_events[--g_current_event_idx];
+        *event = g_platform_ctx->g_events[--g_platform_ctx->g_current_event_idx];
         return 1;
     }
     return 0;
@@ -179,18 +175,18 @@ static int input_pop_event(input_event_t* event)
 
 static input_point_t input_point_pos(int id = 0)
 {
-    return g_point_states[id];
+    return g_platform_ctx->g_point_states[id];
 }
 
 static input_state input_mouse_button_state(mouse_button button)
 {
-   return g_mouse_btn_states[button];
+   return g_platform_ctx->g_mouse_btn_states[button];
 }
 
 
 static int input_kb_state(uint8_t key)
 {
-    return g_keyboard_key_states[key];
+    return g_platform_ctx->g_keyboard_key_states[key];
 }
 
 
@@ -216,13 +212,13 @@ static void push_input_touch_event(int16_t x, int16_t y, int16_t dx, int16_t dy,
 static void push_input_mouse_event(int16_t x, int16_t y, int16_t dx, int16_t dy, input_state state, mouse_button button)
 {
     if(state == input_state_down || state == input_state_up)
-        g_mouse_btn_states[button] = state;
+        g_platform_ctx->g_mouse_btn_states[button] = state;
 
     input_event_t event = { input_device_mouse, state };
         event.mouse.btn = button;
         event.mouse.pos = { x, y, dx, dy };
     input_push_event(event);
-    g_point_states[button] = event.mouse.pos;
+    g_platform_ctx->g_point_states[button] = event.mouse.pos;
 }
 
 
@@ -232,7 +228,7 @@ static void push_input_keyboard_event(uint8_t key, input_state state)
     event.keyboard.key = key;
     input_push_event(event);
 
-    g_keyboard_key_states[key] = (state == input_state_down) ? 1 : 0;
+    g_platform_ctx->g_keyboard_key_states[key] = (state == input_state_down) ? 1 : 0;
 }
 
 

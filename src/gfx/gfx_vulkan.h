@@ -262,13 +262,12 @@ typedef struct vk_render_target_t {
 typedef struct vk_descriptor_pool_t {
     uint32_t                            bindings_hash;          // Hash of descriptor layout bindings for validation
 
-    uint32_t                            set_binding_count = { 0 };  // per set
-    VkDescriptorSetLayoutBinding        set_bindings[8];            // per set
+    uint32_t                            set_layout_binding_count = { 0 };  // per set
+    VkDescriptorSetLayoutBinding        set_layout_bindings[8];            // per set
 
     VkDescriptorPool                    pool;                   // Native Vulkan descriptor pool handle
     uint32_t                            capacity;               // Total number of descriptor sets available in this pool
     uint32_t                            free_set_count;         // Remaining number of unallocated descriptor sets
-    uint32_t                            next_free_index;        // Optimization hint pointing to the next likely free slot
 
     uint64_t*                           bitset_mask;            // Array of bitmasks tracking allocation status per set
     uint32_t                            bitset_word_count;      // Number of 64-bit words in the bitset_mask array
@@ -287,6 +286,7 @@ typedef struct vk_descriptor_set_t {
     uint16_t                            index_in_sets;
 
     uint32_t                            ubo_offset;             // Byte offset inside the pool's global UBO buffer
+    uint32_t                            ubo_offsets[GFX_MAX_FRAME_IN_FLIGHT];
     VkDescriptorSet                     descriptor_set;
 } vk_descriptor_set_t;
 

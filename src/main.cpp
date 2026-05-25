@@ -78,7 +78,7 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         settings.handle     = handle;
         settings.backend    = gfx_backend_vulkan;
     //    settings.backend    = gfx_backend_webgpu;
-        settings.options    = gfx_options_debug;
+    //    settings.options    = gfx_options_debug;
         settings.dbglog     = log_func;
         settings.allocator  = &gfx_allocator;
     gfx_init(&settings, &ctx);

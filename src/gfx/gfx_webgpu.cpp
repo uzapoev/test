@@ -433,7 +433,7 @@ static uint32_t get_shader_uniforms(const void* data, uint32_t size, gfx_uniform
         for (uint32_t idx = 0; idx < reflect->uniform_count; ++idx, uniform_count++)
         {
             auto current_uniform = reflect->uniforms[idx];
-            strcpy(uniforms[uniform_count].name, current_uniform.name);
+            strncpy(uniforms[uniform_count].name, current_uniform.name, sizeof(uniforms[uniform_count].name) - 2);
             uniforms[uniform_count].binding = current_uniform.binding;
             if (reflect->uniforms[idx].type == SpvOpTypeStruct)
             {
