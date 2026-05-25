@@ -71,7 +71,7 @@ typedef struct camera_data {
 }camera_data;
 
 typedef struct mesh_info {
-};
+} mesh_info;
 
 typedef struct instance_data {
     mat4                    model;
@@ -140,7 +140,7 @@ class geometry_pass  : render_pass { };
 // class geometry_deferred_pass : render_pass { };
 
 
-struct render_system
+class render_system
 {
 public:
     static void create_and_make_shader(gfx_context_t* ctx) {

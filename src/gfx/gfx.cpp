@@ -70,6 +70,261 @@ uint32_t gfx_failover_texture_data[] = {
     0xFFFF0000
 };
 
+
+#pragma region to sting
+const char* gfx_to_string(gfx_buffer_usage usage)
+{
+    switch (usage)
+    {
+        case gfx_buffer_usage_index:        return  "index";
+        case gfx_buffer_usage_vertex:       return  "vertex";
+        case gfx_buffer_usage_uniform:      return  "uniform";
+        case gfx_buffer_usage_storage:      return  "storage";
+        case gfx_buffer_usage_indirect:     return  "indirect";
+    }
+    return "invalid arg in gfx_to_string(gfx_buffer_usage usage)";
+}
+
+const char* gfx_to_string(gfx_shader_stage stage)
+{
+    switch (stage)
+    {
+        case gfx_shader_vertex:           return "vertex";
+        case gfx_shader_fragment:         return "fragment";
+
+        case gfx_shader_amplify:          return "amplify";
+        case gfx_shader_mesh:             return "mesh";
+
+        case gfx_shader_compute:          return "compute";
+
+        case gfx_shader_rt_raygen:        return "raygen";
+        case gfx_shader_rt_any_hit:       return "any_hit";
+        case gfx_shader_rt_closest_hit:   return "closest_hit";
+        case gfx_shader_rt_miss:          return "miss";
+        case gfx_shader_rt_intersect:     return "intersect";
+        case gfx_shader_rt_callable:      return "callable";
+
+        default: return "invalid arg in gfx_to_string(gfx_shader_stage stage)";
+    }
+    return "invalid arg in gfx_to_string(gfx_shader_stage stage)";
+}
+
+const char* gfx_to_string(gfx_texture_type type)
+{
+    switch (type)
+    {
+        case gfx_texture2d:         return "texture2d";
+        case gfx_texture2d_cube:    return "texture2d_cube";
+        case gfx_texture2d_array:   return "texture2d_array";
+        case gfx_texture3d:         return "texture3d";
+    }
+    return "invalid arg in gfx_to_string(gfx_texture_type type)";
+}
+
+const char* gfx_to_string(gfx_pixel_format format)
+{
+    switch (format)
+    {
+        case gfx_pixel_format_unknown:      return "unknown";
+        case gfx_pixel_format_a8:           return "a8";
+        case gfx_pixel_format_rgba4444:     return "rgba4444";
+        case gfx_pixel_format_rgb5a1:       return "rgb5a1";
+        case gfx_pixel_format_rgb565:       return "rgb565";
+        case gfx_pixel_format_rgba8:        return "rgba8";
+
+        case gfx_pixel_format_etc1:         return "etc1";
+        case gfx_pixel_format_etc2_rgb8a1:  return "etc2_rgb8a1";
+        case gfx_pixel_format_etc2_rgba8:   return "etc2_rgba8";
+
+        case gfx_pixel_format_bc1:          return "bc1";
+        case gfx_pixel_format_bc3:          return "bc3";
+        case gfx_pixel_format_bc4:          return "bc4";
+        case gfx_pixel_format_bc5:          return "bc5";
+        case gfx_pixel_format_bc6h:         return "bc6h";
+        case gfx_pixel_format_bc7:          return "bc7";
+
+        case gfx_pixel_format_astc4x4:      return "astc4x4";
+        case gfx_pixel_format_astc5x5:      return "astc5x5";
+        case gfx_pixel_format_astc6x6:      return "astc6x6";
+        case gfx_pixel_format_astc8x8:      return "astc8x8";
+        case gfx_pixel_format_astc10x10:    return "astc10x10_srgb";
+        case gfx_pixel_format_astc12x12:    return "astc12x12_srgb";
+
+        case gfx_pixel_format_r16f:         return "r16";
+        case gfx_pixel_format_rg16f:        return "rg16";
+        case gfx_pixel_format_rgba16f:      return "rgba16";
+
+        case gfx_pixel_format_r32f:         return "r32";
+        case gfx_pixel_format_rg32f:        return "rg32";
+        case gfx_pixel_format_rgba32f:      return "rgba32";
+
+        case gfx_pixel_format_d24x8:        return "d24x8";
+        case gfx_pixel_format_d24s8:        return "d24s8";
+    }
+
+    return "invalid arg in gfx_to_string(gfx_pixel_format format)";
+}
+
+#pragma endregion
+
+
+#pragma region gfx utils
+uint32_t gfx_utils_thread_id()
+{
+    static thread_local const uint32_t s_unique_id = []() {
+        static std::atomic<uint32_t> s_counter = 1;
+        return s_counter.fetch_add(1, std::memory_order_relaxed);
+        }();
+        return s_unique_id;
+}
+
+
+uint32_t gfx_utils_hash(const void* data, uint32_t size, uint32_t seed)
+{
+    const uint8_t* bytes = (const uint8_t*)data;
+    const int nblocks = size / 4;
+    uint32_t h1 = seed;
+
+    const uint32_t c1 = 0xcc9e2d51;
+    const uint32_t c2 = 0x1b873593;
+
+    const uint32_t* blocks = (const uint32_t*)(bytes + nblocks * 4);
+
+    for (int i = -nblocks; i; i++) {
+        uint32_t k1 = blocks[i];
+
+        k1 *= c1;
+        k1 = (k1 << 15) | (k1 >> 17);
+        k1 *= c2;
+
+        h1 ^= k1;
+        h1 = (h1 << 13) | (h1 >> 19);
+        h1 = h1 * 5 + 0xe6546b64;
+    }
+
+    const uint8_t* tail = (const uint8_t*)(bytes + nblocks * 4);
+    uint32_t k1 = 0;
+
+    switch (size & 3) {
+    case 3: k1 ^= tail[2] << 16;
+    case 2: k1 ^= tail[1] << 8;
+    case 1: k1 ^= tail[0];
+        k1 *= c1;
+        k1 = (k1 << 15) | (k1 >> 17);
+        k1 *= c2;
+        h1 ^= k1;
+    };
+
+    h1 ^= size;
+    h1 ^= h1 >> 16;
+    h1 *= 0x85ebca6b;
+    h1 ^= h1 >> 13;
+    h1 *= 0xc2b2ae35;
+    h1 ^= h1 >> 16;
+
+    return h1;
+}
+
+
+static uint32_t gfx_block_count(uint32_t s, uint32_t b) { return ((s + b - 1) / b); }
+
+uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format)
+{
+    uint32_t w = width;
+    uint32_t h = height;
+    uint32_t d = gfx_max(1, depth);//(depth > 0)?depth:1; // clamp [1..depth]
+    switch (format)
+    {
+        case gfx_pixel_format_rgb5a1:
+        case gfx_pixel_format_rgb565:
+        case gfx_pixel_format_rgba4444:         return w * h * d * sizeof(uint16_t);
+
+        case gfx_pixel_format_rgba8:            return w * h * d * 4;
+
+        case gfx_pixel_format_etc1:             return (w >> 2) * (h >> 2) * 8;     //! Compresses RGB888 data without Alpha channel
+        case gfx_pixel_format_etc2_rgb8a1:		return (w >> 2) * (h >> 2) * 16;    //! Compresses RGB888 data without Alpha channel
+        case gfx_pixel_format_etc2_rgba8:		return (w >> 2) * (h >> 2) * 8;     //! Compresses RGBA8888 data with full alpha support
+
+        case gfx_pixel_format_bc1:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
+        case gfx_pixel_format_bc4:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
+        case gfx_pixel_format_bc3:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
+        case gfx_pixel_format_bc5:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
+        case gfx_pixel_format_bc6h:             return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
+        case gfx_pixel_format_bc7:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
+
+        case gfx_pixel_format_astc4x4:          return gfx_block_count(w, 4) * gfx_block_count(h, 4) * gfx_block_count(d, 4) * 16;
+        case gfx_pixel_format_astc5x5:          return gfx_block_count(w, 5) * gfx_block_count(h, 5) * gfx_block_count(d, 5) * 16;
+        case gfx_pixel_format_astc6x6:          return gfx_block_count(w, 6) * gfx_block_count(h, 6) * gfx_block_count(d, 6) * 16;
+        case gfx_pixel_format_astc8x8:          return gfx_block_count(w, 8) * gfx_block_count(h, 8) * gfx_block_count(d, 8) * 16;
+        case gfx_pixel_format_astc10x10:        return gfx_block_count(w, 10) * gfx_block_count(h, 10) * gfx_block_count(d, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return gfx_block_count(w, 12) * gfx_block_count(h, 12) * gfx_block_count(d, 12) * 16;
+
+        case gfx_pixel_format_r16f:             return w * h * d * sizeof(uint16_t);
+        case gfx_pixel_format_rg16f:            return w * h * d * sizeof(uint16_t) * 2;
+        case gfx_pixel_format_rgba16f:          return w * h * d * sizeof(uint16_t) * 4;
+
+        case gfx_pixel_format_r32f:             return w * h * d * sizeof(float);
+        case gfx_pixel_format_rg32f:            return w * h * d * sizeof(float) * 2;
+        case gfx_pixel_format_rgba32f:          return w * h * d * sizeof(float) * 4;
+
+        case gfx_pixel_format_d24x8:            return w * h * d * sizeof(uint32_t);
+        case gfx_pixel_format_d24s8:            return w * h * d * sizeof(uint32_t);
+
+        default: assert(0); break;
+    }
+    return 0;
+}
+
+uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
+{
+    switch (fmt)
+    {
+        case gfx_pixel_format_a8:               return width * sizeof(uint8_t);
+        case gfx_pixel_format_rgb5a1:
+        case gfx_pixel_format_rgb565:
+        case gfx_pixel_format_rgba4444:         return width * sizeof(uint16_t);
+
+        case gfx_pixel_format_rgba8:            return width * sizeof(uint32_t);
+
+        case gfx_pixel_format_etc1:             return gfx_max(2, (width >> 2)) * 8;
+        case gfx_pixel_format_etc2_rgba8:       return gfx_max(2, (width >> 2)) * 16;
+        case gfx_pixel_format_etc2_rgb8a1:      return gfx_max(2, (width >> 2)) * 8;
+
+        case gfx_pixel_format_bc1:              return gfx_max(1, width >> 2) * 8;
+        case gfx_pixel_format_bc3:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc4:              return gfx_max(1, width >> 2) * 8;
+        case gfx_pixel_format_bc5:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc6h:             return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc7:              return gfx_max(1, width >> 2) * 16;
+
+        case gfx_pixel_format_astc4x4:          return gfx_block_count(width, 4) * 16;
+        case gfx_pixel_format_astc5x5:          return gfx_block_count(width, 5) * 16;
+        case gfx_pixel_format_astc6x6:          return gfx_block_count(width, 6) * 16;
+        case gfx_pixel_format_astc8x8:          return gfx_block_count(width, 8) * 16;
+        case gfx_pixel_format_astc10x10:        return gfx_block_count(width, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return gfx_block_count(width, 12) * 16;
+
+        case gfx_pixel_format_r16f:             return width * sizeof(uint16_t);
+        case gfx_pixel_format_rg16f:            return width * sizeof(uint16_t) * 2;
+        case gfx_pixel_format_rgba16f:          return width * sizeof(uint16_t) * 4;
+
+        case gfx_pixel_format_r32f:             return width * sizeof(float);
+        case gfx_pixel_format_rg32f:            return width * sizeof(float) * 2;
+        case gfx_pixel_format_rgba32f:          return width * sizeof(float) * 4;
+
+        case gfx_pixel_format_d24x8:            return width * sizeof(uint32_t);
+        case gfx_pixel_format_d24s8:            return width * sizeof(uint32_t);
+    }
+    return 0;
+}
+
+uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
+{
+    return ((n + alignment - 1) / alignment) * alignment;
+}
+#pragma endregion
+
+
 static gfx_allocator_t* gfx_default_allocator()
 {
     static gfx_allocator_t s_allocator = {};
@@ -89,10 +344,9 @@ typedef struct gfx_handle_t {
     union {
         uint64_t                handle;
         struct {
+            uint32_t            pool_hash;
             uint16_t            index;
-            uint16_t            hash;
             uint16_t            generation;
-            uint16_t            flag;
         };
     };
 } gfx_handle_t;
@@ -105,7 +359,7 @@ typedef struct gfx_handle_pool_t {
 
     size_t              capacity;
     size_t              stride;
-    uint16_t            hash;
+    uint32_t            hash;
 
     size_t              used_chunks;
     gfx_handle_t*       handles;
@@ -115,16 +369,6 @@ typedef struct gfx_handle_pool_t {
     gfx_allocator_t*    allocator;
 } gfx_handle_pool_t;
 
-
-static uint16_t hash16(const char* str, size_t len)
-{
-    int hash = 0;
-    for (int i = 0; i < len; i++) {
-        hash = hash + ((hash) << 5) + (str[i] + i) + (((str[i] + i)) << 7);
-    }
-
-    return ((hash) ^ (hash >> 16)) & 0xffff;
-}
 
 static uint32_t hash32(const char* str, size_t len)
 {
@@ -171,13 +415,12 @@ void gfx_handle_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** 
     pool->stride        = stride;
     pool->capacity      = capacity;
     pool->used_chunks   = 0;
-    pool->hash          = hash16((char*)pool, sizeof(intptr_t));
+    pool->hash          = hash32((char*)pool, sizeof(intptr_t));
 
     for (uint32_t i = 0; i < capacity; ++i) {
         pool->free_list[i] = i;
         pool->handles[i].index = i;
-        pool->handles[i].flag = 0;
-        pool->handles[i].hash = pool->hash;
+        pool->handles[i].pool_hash = pool->hash;
         pool->handles[i].generation = pool->generation_counters[i];
     }
 
@@ -231,7 +474,7 @@ void gfx_handle_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 void * gfx_handle_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
 {
     gfx_handle_t handle = { _handle };
-    if(handle.hash != pool->hash)
+    if(handle.pool_hash != pool->hash)
         return nullptr;
 
     if (handle.index >= pool->capacity) 
@@ -909,260 +1152,6 @@ void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures
 }
 
 
-#pragma region to sting
-const char* gfx_to_string(gfx_buffer_usage usage)
-{
-    switch (usage)
-    {
-        case gfx_buffer_usage_index:        return  "index";
-        case gfx_buffer_usage_vertex:       return  "vertex";
-        case gfx_buffer_usage_uniform:      return  "uniform";
-        case gfx_buffer_usage_storage:      return  "storage";
-        case gfx_buffer_usage_indirect:     return  "indirect";
-    }
-    return "invalid arg in gfx_to_string(gfx_buffer_usage usage)";
-}
-
-const char* gfx_to_string(gfx_shader_stage stage)
-{
-    switch (stage) 
-    {
-        case gfx_shader_vertex:           return "vertex";
-        case gfx_shader_fragment:         return "fragment";
-                                          
-        case gfx_shader_amplify:          return "amplify";
-        case gfx_shader_mesh:             return "mesh";
-                                          
-        case gfx_shader_compute:          return "compute";
-                                          
-        case gfx_shader_rt_raygen:        return "raygen";
-        case gfx_shader_rt_any_hit:       return "any_hit";
-        case gfx_shader_rt_closest_hit:   return "closest_hit";
-        case gfx_shader_rt_miss:          return "miss";
-        case gfx_shader_rt_intersect:     return "intersect";
-        case gfx_shader_rt_callable:      return "callable";
-
-        default: return "invalid arg in gfx_to_string(gfx_shader_stage stage)";
-    }
-    return "invalid arg in gfx_to_string(gfx_shader_stage stage)";
-}
-
-const char* gfx_to_string(gfx_texture_type type)
-{
-    switch (type)
-    {
-        case gfx_texture2d:         return "texture2d";
-        case gfx_texture2d_cube:    return "texture2d_cube";
-        case gfx_texture2d_array:   return "texture2d_array";
-        case gfx_texture3d:         return "texture3d";
-    }
-    return "invalid arg in gfx_to_string(gfx_texture_type type)";
-}
-
-const char* gfx_to_string(gfx_pixel_format format)
-{
-    switch (format)
-    {
-        case gfx_pixel_format_unknown:      return "unknown";
-        case gfx_pixel_format_a8:           return "a8";
-        case gfx_pixel_format_rgba4444:     return "rgba4444";
-        case gfx_pixel_format_rgb5a1:       return "rgb5a1";
-        case gfx_pixel_format_rgb565:       return "rgb565";
-        case gfx_pixel_format_rgba8:        return "rgba8";
-
-        case gfx_pixel_format_etc1:         return "etc1";
-        case gfx_pixel_format_etc2_rgb8a1:  return "etc2_rgb8a1";
-        case gfx_pixel_format_etc2_rgba8:   return "etc2_rgba8";
-
-        case gfx_pixel_format_bc1:          return "bc1";
-        case gfx_pixel_format_bc3:          return "bc3";
-        case gfx_pixel_format_bc4:          return "bc4";
-        case gfx_pixel_format_bc5:          return "bc5";
-        case gfx_pixel_format_bc6h:         return "bc6h";
-        case gfx_pixel_format_bc7:          return "bc7";
-
-        case gfx_pixel_format_astc4x4:      return "astc4x4";
-        case gfx_pixel_format_astc5x5:      return "astc5x5";
-        case gfx_pixel_format_astc6x6:      return "astc6x6";
-        case gfx_pixel_format_astc8x8:      return "astc8x8";
-        case gfx_pixel_format_astc10x10:    return "astc10x10_srgb";
-        case gfx_pixel_format_astc12x12:    return "astc12x12_srgb";
-
-        case gfx_pixel_format_r16f:         return "r16";
-        case gfx_pixel_format_rg16f:        return "rg16";
-        case gfx_pixel_format_rgba16f:      return "rgba16";
-
-        case gfx_pixel_format_r32f:         return "r32";
-        case gfx_pixel_format_rg32f:        return "rg32";
-        case gfx_pixel_format_rgba32f:      return "rgba32";
-
-        case gfx_pixel_format_d24x8:        return "d24x8";
-        case gfx_pixel_format_d24s8:        return "d24s8";
-    }
-
-    return "invalid arg in gfx_to_string(gfx_pixel_format format)";
-}
-
-#pragma endregion
-
-
-#pragma region gfx utils
-uint32_t gfx_utils_thread_id()
-{
-    static thread_local const uint32_t s_unique_id = []() {
-        static std::atomic<uint32_t> s_counter = 1;
-        return s_counter.fetch_add(1, std::memory_order_relaxed);
-     }();
-     return s_unique_id;
-}
-
-
-uint32_t gfx_utils_hash(const void* data, uint32_t size, uint32_t seed)
-{
-    const uint8_t* bytes = (const uint8_t*)data;
-    const int nblocks = size / 4;
-    uint32_t h1 = seed;
-
-    const uint32_t c1 = 0xcc9e2d51;
-    const uint32_t c2 = 0x1b873593;
-
-    const uint32_t* blocks = (const uint32_t*)(bytes + nblocks * 4);
-
-    for (int i = -nblocks; i; i++) {
-        uint32_t k1 = blocks[i]; 
-
-        k1 *= c1;
-        k1 = (k1 << 15) | (k1 >> 17);
-        k1 *= c2;
-
-        h1 ^= k1;
-        h1 = (h1 << 13) | (h1 >> 19);
-        h1 = h1 * 5 + 0xe6546b64;
-    }
-
-    const uint8_t* tail = (const uint8_t*)(bytes + nblocks * 4);
-    uint32_t k1 = 0;
-
-    switch (size & 3) {
-    case 3: k1 ^= tail[2] << 16; 
-    case 2: k1 ^= tail[1] << 8;
-    case 1: k1 ^= tail[0];
-        k1 *= c1;
-        k1 = (k1 << 15) | (k1 >> 17);
-        k1 *= c2;
-        h1 ^= k1;
-    };
-
-    h1 ^= size;
-    h1 ^= h1 >> 16;
-    h1 *= 0x85ebca6b;
-    h1 ^= h1 >> 13;
-    h1 *= 0xc2b2ae35;
-    h1 ^= h1 >> 16;
-
-    return h1;
-}
-
-
-static uint32_t gfx_max(uint32_t a, uint32_t b)            { return  (a > b ? a : b); }
-
-static uint32_t gfx_block_count(uint32_t s, uint32_t b)    { return ((s + b - 1) / b); }
-
-uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format)
-{
-    uint32_t w = width;
-    uint32_t h = height;
-    uint32_t d = gfx_max(1, depth);//(depth > 0)?depth:1; // clamp [1..depth]
-    switch (format)
-    {
-        case gfx_pixel_format_rgb5a1:
-        case gfx_pixel_format_rgb565:
-        case gfx_pixel_format_rgba4444:         return w * h * d * sizeof(uint16_t);
-
-        case gfx_pixel_format_rgba8:            return w * h * d * 4;
-
-        case gfx_pixel_format_etc1:             return (w >> 2) * (h >> 2) * 8;     //! Compresses RGB888 data without Alpha channel
-        case gfx_pixel_format_etc2_rgb8a1:		return (w >> 2) * (h >> 2) * 16;    //! Compresses RGB888 data without Alpha channel
-        case gfx_pixel_format_etc2_rgba8:		return (w >> 2) * (h >> 2) * 8;     //! Compresses RGBA8888 data with full alpha support
-
-        case gfx_pixel_format_bc1:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
-        case gfx_pixel_format_bc4:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
-        case gfx_pixel_format_bc3:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
-        case gfx_pixel_format_bc5:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
-        case gfx_pixel_format_bc6h:             return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
-        case gfx_pixel_format_bc7:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
-
-        case gfx_pixel_format_astc4x4:          return gfx_block_count(w, 4)  * gfx_block_count(h, 4)  * gfx_block_count(d, 4) * 16;
-        case gfx_pixel_format_astc5x5:          return gfx_block_count(w, 5)  * gfx_block_count(h, 5)  * gfx_block_count(d, 5) * 16;
-        case gfx_pixel_format_astc6x6:          return gfx_block_count(w, 6)  * gfx_block_count(h, 6)  * gfx_block_count(d, 6) * 16;
-        case gfx_pixel_format_astc8x8:          return gfx_block_count(w, 8)  * gfx_block_count(h, 8)  * gfx_block_count(d, 8) * 16;
-        case gfx_pixel_format_astc10x10:        return gfx_block_count(w, 10) * gfx_block_count(h, 10) * gfx_block_count(d, 10) * 16;
-        case gfx_pixel_format_astc12x12:        return gfx_block_count(w, 12) * gfx_block_count(h, 12) * gfx_block_count(d, 12) * 16;
-
-        case gfx_pixel_format_r16f:             return w * h * d * sizeof(uint16_t);
-        case gfx_pixel_format_rg16f:            return w * h * d * sizeof(uint16_t) * 2;
-        case gfx_pixel_format_rgba16f:          return w * h * d * sizeof(uint16_t) * 4;
-         
-        case gfx_pixel_format_r32f:             return w * h * d * sizeof(float);
-        case gfx_pixel_format_rg32f:            return w * h * d * sizeof(float) * 2;
-        case gfx_pixel_format_rgba32f:          return w * h * d * sizeof(float) * 4;
-
-        case gfx_pixel_format_d24x8:            return w * h * d * sizeof(uint32_t);
-        case gfx_pixel_format_d24s8:            return w * h * d * sizeof(uint32_t);
-
-        default: assert(0); break;
-    }
-    return 0; 
-}
-
-uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width) 
-{
-    switch (fmt) 
-    {
-        case gfx_pixel_format_a8:               return width * sizeof(uint8_t);
-        case gfx_pixel_format_rgb5a1:
-        case gfx_pixel_format_rgb565:
-        case gfx_pixel_format_rgba4444:         return width * sizeof(uint16_t);
-
-        case gfx_pixel_format_rgba8:            return width * sizeof(uint32_t);
-
-        case gfx_pixel_format_etc1:             return gfx_max(2, (width >> 2)) * 8;
-        case gfx_pixel_format_etc2_rgba8:       return gfx_max(2, (width >> 2)) * 16;
-        case gfx_pixel_format_etc2_rgb8a1:      return gfx_max(2, (width >> 2)) * 8;
-
-        case gfx_pixel_format_bc1:              return gfx_max(1, width >> 2) * 8;
-        case gfx_pixel_format_bc3:              return gfx_max(1, width >> 2) * 16;
-        case gfx_pixel_format_bc4:              return gfx_max(1, width >> 2) * 8;
-        case gfx_pixel_format_bc5:              return gfx_max(1, width >> 2) * 16;
-        case gfx_pixel_format_bc6h:             return gfx_max(1, width >> 2) * 16;
-        case gfx_pixel_format_bc7:              return gfx_max(1, width >> 2) * 16;
-
-        case gfx_pixel_format_astc4x4:          return gfx_block_count(width, 4)  * 16;
-        case gfx_pixel_format_astc5x5:          return gfx_block_count(width, 5)  * 16;
-        case gfx_pixel_format_astc6x6:          return gfx_block_count(width, 6)  * 16;
-        case gfx_pixel_format_astc8x8:          return gfx_block_count(width, 8)  * 16;
-        case gfx_pixel_format_astc10x10:        return gfx_block_count(width, 10) * 16;
-        case gfx_pixel_format_astc12x12:        return gfx_block_count(width, 12) * 16;
-
-        case gfx_pixel_format_r16f:             return width * sizeof(uint16_t);
-        case gfx_pixel_format_rg16f:            return width * sizeof(uint16_t) * 2;
-        case gfx_pixel_format_rgba16f:          return width * sizeof(uint16_t) * 4;
-
-        case gfx_pixel_format_r32f:             return width * sizeof(float);
-        case gfx_pixel_format_rg32f:            return width * sizeof(float) * 2;
-        case gfx_pixel_format_rgba32f:          return width * sizeof(float) * 4;
-
-        case gfx_pixel_format_d24x8:            return width * sizeof(uint32_t);
-        case gfx_pixel_format_d24s8:            return width * sizeof(uint32_t);
-    }
-    return 0;
-}
-
-uint32_t gfx_utils_align_up(uint32_t n, uint32_t alignment)
-{
-    return ((n + alignment - 1) / alignment) * alignment; 
-}
-#pragma endregion
 
 
 #ifdef VULKAN_AVAILABLE
@@ -1254,11 +1243,10 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 }
 
 
+
 #if __has_include("gfx_webgpu.h")
  #include "gfx_webgpu.h"
 #endif 
-
-
 
 void gfx_init_webgpu(gfx_api_pfn* func_table)
 {

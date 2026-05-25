@@ -1503,13 +1503,27 @@ gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t wid
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
 
 // memory
-// pool 
+
+typedef struct mem_statistic_t {
+    uint32_t capacity;
+    uint32_t allocated;
+};
+
+/**
+ * @struct gfx_handle_pool_t
+ * @brief  Fixed-capacity pool allocator for Data-Oriented scene resource management.
+ * * Ensures stable memory addresses and safe access via Generational Handles
+ * (uint64_t: Index + Generation + Pool Hash), preventing Use-After-Free and dangling pointer bugs.
+ * Not thread-safe. Data is tightly packed (stride) for optimal CPU cache utilization.
+ */
 struct gfx_handle_pool_t;
+
 gfx_api void        gfx_handle_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t * allocator);
 gfx_api void        gfx_handle_pool_destroy(gfx_handle_pool_t* pool);
-gfx_api void*       gfx_handle_pool_allocate_data(gfx_handle_pool_t* pool, uint64_t * out_handle); // return pointer to allocated data, out parameter returns handle
 
+gfx_api void*       gfx_handle_pool_allocate_data(gfx_handle_pool_t* pool, uint64_t * out_handle); // return pointer to allocated data, out parameter returns handle
 gfx_api void        gfx_handle_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
+
 gfx_api void*       gfx_handle_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api size_t      gfx_handle_pool_get_size(gfx_handle_pool_t* pool);
 gfx_api size_t      gfx_handle_pool_get_capacity(gfx_handle_pool_t* pool);
@@ -1530,13 +1544,17 @@ gfx_api intptr_t    gfx_offset_allocator_allocate(gfx_offset_allocator_t* alloca
 gfx_api void        gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, intptr_t offset);
 
 
-
 //
-static uint32_t gfx_fourcc(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+#define             gfx_max(a, b) (((a) > (b)) ? (a) : (b))
+#define             gfx_min(a, b) (((a) < (b)) ? (a) : (b))
+
+
+static uint32_t     gfx_fourcc(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(g) << 16) | ((uint32_t)(r) << 24));
 }
 
-static uint32_t gfx_make_swizzle_mask(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+// for texture channel swizzling like bgra->rgba 
+static uint32_t     gfx_make_swizzle_mask(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return  (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(r));
 }
 

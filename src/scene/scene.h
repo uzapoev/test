@@ -109,9 +109,9 @@ struct tinynode
 
     uint64_t                id; 
 
-    class transform *       m_transform = nullptr;
-    class hierarchy *       m_hierarchy = nullptr;
-    class componentlist *   m_components = nullptr;
+    struct transform *       m_transform = nullptr;
+    struct hierarchy *       m_hierarchy = nullptr;
+    struct componentlist *   m_components = nullptr;
 };
 
 class scene

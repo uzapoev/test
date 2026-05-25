@@ -4,6 +4,80 @@
 #include "gfx.h"
 #include "spirvflect.h"
 
+
+/**
+ * @brief Safely scans a memory block for a specific text substring without exceeding boundaries.
+ * @note Replaces unsafe strstr() to prevent out-of-bounds reads on binary data streams.
+ */
+static const char* gfx_utils_internal_memstr(const char* buffer, uint32_t buffer_size, const char* substring)
+{
+    if (!buffer || !substring || buffer_size == 0) return NULL;
+
+    size_t sub_len = strlen(substring);
+    if (sub_len > buffer_size) return NULL;
+
+    uint32_t search_limit = buffer_size - (uint32_t)sub_len + 1;
+    for (uint32_t i = 0; i < search_limit; ++i) {
+        if (buffer[i] == substring[0]) {
+            if (memcmp(&buffer[i], substring, sub_len) == 0) {
+                return &buffer[i];
+            }
+        }
+    }
+    return NULL;
+}
+
+gfx_shader_format_flags gfx_utils_detect_shader_format(const void* shader_data, uint32_t size)
+{
+    if (!shader_data || size < 4) {
+        return gfx_shader_format_unknown;
+    }
+
+    const uint32_t* magic = (const uint32_t*)shader_data;
+    const char* text = (const char*)shader_data;
+
+    // Check for Khronos SPIR-V standard or byte-swapped magic numbers (0x07230203)
+    if (*magic == 0x07230203 || *magic == 0x03022307) {
+        return gfx_shader_format_spirv;
+    }
+
+    // Check for DXIL containers: 'DXBC' (0x43425844) or raw LLVM bitcode 'BC\xC0\xDE' (0xDEC04342)
+    if (*magic == 0x43425844 || *magic == 0xDEC04342) {
+        return gfx_shader_format_dxil;
+    }
+
+    // Check for Apple Metal precompiled library container: 'MTLB' (0x424C544D)
+    if (*magic == 0x424C544D) {
+        return gfx_shader_format_msl;
+    }
+
+    // Scan for WebGPU Shading Language (WGSL) exclusive decorators and structural keywords
+    if (gfx_utils_internal_memstr(text, size, "@vertex")  || 
+        gfx_utils_internal_memstr(text, size, "@fragment") || 
+        gfx_utils_internal_memstr(text, size, "@group") ||
+        gfx_utils_internal_memstr(text, size, "fn ")) {
+        return gfx_shader_format_wgsl;
+    }
+
+    // Scan for your cross-compilation pipeline markers (WSL / Slang / HLSL Source text)
+    if (gfx_utils_internal_memstr(text, size, "#pragma vertex") || 
+        gfx_utils_internal_memstr(text, size, "#pragma fragment") || 
+        gfx_utils_internal_memstr(text, size, "float4")) {
+        return gfx_shader_format_hlsl;
+    }
+
+    // Scan for your cross-compilation pipeline markers (WSL / Slang / HLSL Source text)
+    if (gfx_utils_internal_memstr(text, size, "vec2") || 
+        gfx_utils_internal_memstr(text, size, "vec3") || 
+        gfx_utils_internal_memstr(text, size, "mat4")) {
+        return gfx_shader_format_glsl;
+    }
+
+    return gfx_shader_format_unknown;
+}
+
+
+
 /*
 static const unsigned int SPVMagicNumber = 0x07230203;
 static const unsigned int SPVVersion = 0x00010600;
@@ -73,7 +147,7 @@ static void reflect_spirv(const char* data, uint32_t size, gfx_uniform_t* out_un
             default: break;
             case SpvOpTypeStruct: {
 
-                out_uniforms[i].type = spvflect->uniforms[i].is_storage ? gfx_uniform_storage :
+                out_uniforms[i].type = spvflect->uniforms[i].is_storage ? gfx_uniform_storage_buffer :
                                                                           gfx_uniform_ubo;
 
                 out_uniforms[i].storage.access = spv_2_gfx_access(spvflect->uniforms[i].storage.access);
@@ -119,6 +193,8 @@ static void reflect_msl(const char* data, size_t size, gfx_uniform_t* out_unifor
 {
 }
 
+
+
 static int match(const char* pattern, const char* str, const char** out) throw()
 {
     if (!pattern || !str) return 0;
@@ -130,10 +206,158 @@ static int match(const char* pattern, const char* str, const char** out) throw()
     return (*str == *pattern) & match(pattern + 1, str + 1, out);
 }
 
+/**
+ * @brief Helper to safely parse numeric values inside attribute parentheses, skipping spaces.
+ */
+static uint16_t wgsl_parse_attribute_value(const char* start_key)
+{
+    while (*start_key && *start_key != '(') start_key++;
+    if (*start_key == '(') start_key++;
+    while (*start_key && isspace((unsigned char)*start_key)) start_key++;
+    return (uint16_t)strtoul(start_key, NULL, 10);
+}
 
+
+// ============================================================================
+// Custom Structure Data Definitions (Used inside uniform/storage blocks)
+// ============================================================================
+// struct ModelData {
+//      matrix: mat4x4<f32>,
+//      color : vec4<f32>,
+// };
+// 
+// struct Particle {
+//      position: vec3<f32>,
+//      velocity: vec3<f32>,
+// };
+// 
+// ============================================================================
+// Hardware Resource Declarations (Uniforms, Images, Samplers)
+// ============================================================================
+// 
+// @group(0) @binding(0) var<uniform> global_constants : ModelData;                             // Standard Uniform Buffer Object (UBO)
+// @group(0) @binding(1) var<storage, read> dynamic_mesh_vertices : array<vec4<f32>>;           // Storage Buffer Object (SSBO) - Read-Only Access
+// @group(0) @binding(2) var<storage, read_write> particle_simulation_pool : array<Particle>;   // Storage Buffer Object (SSBO) - Read-Write Access
+// @group(1) @binding(0) var linear_clamp_sampler : sampler;                                    // Standard 2D Texture Sampler State Register
+// @group(1) @binding(1) var albedo_texture_2d : texture_2d<f32>;                               // Classic 2D Material Albedo Diffuse Texture Map
+// @group(1) @binding(2) var volumetric_density_texture_3d : texture_3d<f32>;                   // 3D Volumetric Density Sampling Map (Voxel fields)
+// @group(1) @binding(3) var environment_skybox_texture_cube : texture_cube<f32>;               // Cube Map Environment Lookup Skybox Map
+// @group(1) @binding(4) var shadow_cascades_texture_2d_array : texture_2d_array<f32>;          // Texture 2D Array Container (e.g., Terrain texture sheets or cascade shadow maps)
 static void reflect_wgsl(const char* data, size_t size, gfx_uniform_t* out_uniforms, uint32_t* uniforms_count)
 {
-    const char k_group_key[] = "@group(";
+    if (!data || size == 0) {
+        *uniforms_count = 0;
+        return;
+    }
+
+    uint32_t count = 0;
+    const char* ptr = data;
+    const char* end_of_data = data + size;
+
+    while (ptr < end_of_data)
+    {
+        // Find variable declaration by "var" token. 
+        // This is highly reliable since @group and @binding are always attached to a variable.
+        ptr = strstr(ptr, "var");
+        if (!ptr) break;
+
+        // Ensure "var" is a whole token and not part of an identifier (e.g., my_var)
+        if (ptr > data && (isalnum((unsigned char)ptr[-1]) || ptr[-1] == '_')) {
+            ptr += 3; // Skip "var" and advance
+            continue;
+        }
+
+        // Locate the statement terminator semicolon
+        const char* stmt_end = strchr(ptr, ';');
+        if (!stmt_end || stmt_end >= end_of_data) break;
+
+        // Rollback from "var" to locate @group and @binding attributes associated with it.
+        // Limit search bounds to 128 bytes backwards to prevent scanning the entire file.
+        const char* search_start = (ptr - 128 < data) ? data : ptr - 128;
+
+        const char* group_ptr = strstr(search_start, "@group");
+        const char* bind_ptr = strstr(search_start, "@binding");
+
+        // If the variable has no hardware layout bindings (e.g., local variable), skip it
+        if (!group_ptr || group_ptr > stmt_end || !bind_ptr || bind_ptr > stmt_end) {
+            ptr = stmt_end + 1;
+            continue;
+        }
+
+        // Parse and assign hardware layout register slots
+        out_uniforms[count].group = wgsl_parse_attribute_value(group_ptr);
+        out_uniforms[count].binding = wgsl_parse_attribute_value(bind_ptr);
+
+        // Advance past "var" token to parse the variable identifier name and type classification
+        const char* var_content = ptr + 3;
+        while (var_content < stmt_end && isspace((unsigned char)*var_content)) var_content++;
+
+        // Step 1: Detect address space container block type (<uniform> or <storage>)
+        gfx_uniform_type detected_type = gfx_uniform_ubo; // Default classification
+
+        if (*var_content == '<') {
+            if (strncmp(var_content, "<uniform>", 9) == 0) {
+                detected_type = gfx_uniform_ubo;
+                var_content += 9;
+            }
+            else if (strncmp(var_content, "<storage", 8) == 0) {
+                detected_type = gfx_uniform_storage_buffer;
+                // Skip inner access qualifiers (e.g., <storage, read> or <storage, read_write>)
+                while (var_content < stmt_end && *var_content != '>') var_content++;
+                if (*var_content == '>') var_content++;
+            }
+        }
+
+        while (var_content < stmt_end && isspace((unsigned char)*var_content)) var_content++;
+
+        // Step 2: Extract variable name using the colon separator position
+        const char* colon = strchr(var_content, ':');
+        if (colon && colon < stmt_end) {
+            size_t name_len = colon - var_content;
+            // Trim trailing spaces before the colon symbol
+            while (name_len > 0 && isspace((unsigned char)var_content[name_len - 1])) name_len--;
+
+            if (name_len >= sizeof(out_uniforms[count].name)) {
+                name_len = sizeof(out_uniforms[count].name) - 1;
+            }
+            memcpy(out_uniforms[count].name, var_content, name_len);
+            out_uniforms[count].name[name_len] = '\0';
+
+            // Step 3: Classify the specific hardware resource type after the colon
+            const char* type_ptr = colon + 1;
+            while (type_ptr < stmt_end && isspace((unsigned char)*type_ptr)) type_ptr++;
+
+            // Match against known WGSL resource type tokens
+            if (strncmp(type_ptr, "sampler", 7) == 0) {
+                detected_type = gfx_uniform_sampler;
+            }
+            else if (strncmp(type_ptr, "texture_2d", 10) == 0) {
+                detected_type = gfx_uniform_texture2d;
+            }
+            else if (strncmp(type_ptr, "texture_3d", 10) == 0) {
+                detected_type = gfx_uniform_texture3d;
+            }
+            else if (strncmp(type_ptr, "texture_cube", 12) == 0) {
+                detected_type = gfx_uniform_texture2d_cube;
+            }
+            else if (strncmp(type_ptr, "texture_2d_array", 16) == 0) {
+                detected_type = gfx_uniform_texture2d_array;
+            }
+            else {
+                // If it's a custom user struct token (UBO), keep GFX_UNIFORM_TYPE_BUFFER
+            }
+        }
+
+        out_uniforms[count].type = detected_type;
+        count++;
+
+        // Shift tracking pointer past the current semicolon statement block
+        ptr = stmt_end + 1;
+    }
+
+    *uniforms_count = count;
+
+ /*   const char k_group_key[] = "@group(";
     const char k_binding_key[] = "@binding(";
     const size_t k_group_key_len = sizeof(k_group_key) - 1;
     const size_t k_binding_key_len = sizeof(k_binding_key) - 1;
@@ -158,7 +382,7 @@ static void reflect_wgsl(const char* data, size_t size, gfx_uniform_t* out_unifo
         const char* end = end_group;
 
         intptr_t len = end - start;
-        strncpy(buffer, start, len);
+        strncpy(buffer, start, sizeof(buffer) - 1);
         ptr = end;
 
         out_uniforms[count].group = atoi(start_group + k_group_key_len);
@@ -205,7 +429,7 @@ static void reflect_wgsl(const char* data, size_t size, gfx_uniform_t* out_unifo
         count++;
     }
 
-    *uniforms_count = count;
+    *uniforms_count = count;*/
 }
 
 
@@ -216,9 +440,8 @@ uint32_t gfx_merge_uniforms(gfx_uniform_t* uniforms, uint32_t count)
             int res = !strcmp(a->name, b->name) &&
                 a->binding == b->binding &&
                 a->type == b->type &&
-                a->binding == b->binding &&
+                a->group == b->group &&
                 !memcmp(&a->buffer, &b->buffer, sizeof(gfx_uniform_t::buffer));
-         //       a->field_count == b->field_count;
             return res;
         };
 

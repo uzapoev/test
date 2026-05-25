@@ -131,7 +131,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
 bool load_mesh_from_file_path(gfx_context_t* ctx, mesh_pool_t * pool, const char * path, render_mesh_t* out_mesh)
 {
     char* data = nullptr;
-    size_t size = read_file_data2(path, &data);
+    uint32_t size = read_file_data2(path, &data);
     if(size != 0)
     {
         load_mesh_from_file_data(ctx, pool, strrchr(path, '/'), data, size, out_mesh);
@@ -324,7 +324,7 @@ void load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_textu
 {
     char* data = nullptr;
 
-    size_t size = read_file_data(path, &data);
+    uint32_t size = read_file_data(path, &data);
 
     if (size != 0)
         load_texture_from_file_data(ctx, strrchr(path, '/'), data, size, out_texture);
@@ -634,7 +634,7 @@ void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct g
 {
     char* data = nullptr;
 
-    size_t size = read_file_data(path, &data);
+    uint32_t size = read_file_data(path, &data);
 
     if (size != 0)
         load_material_from_file_data(ctx, data, size, material);
