@@ -338,6 +338,7 @@ typedef enum gfx_load_op {
     gfx_load_op_clear
 } gfx_load_op;
 
+
 typedef enum gfx_pipeline_flags {
     gfx_colormask_r     = 1 << 0,       /**< Enable Red color channel output writes */
     gfx_colormask_g     = 1 << 1,       /**< Enable Green color channel output writes */
@@ -367,11 +368,9 @@ typedef enum gfx_semantic {
 
 
 typedef enum gfx_shader_stage {
-    // Standard Graphics Pipeline
     gfx_shader_vertex,                  /**< Vertex shader stage (transforms per-vertex data) */
     gfx_shader_fragment,                /**< Fragment/Pixel shader stage (calculates pixel color output) */
 
-    // Compute Pipeline
     gfx_shader_compute,                 /**< Compute shader stage for general GPU data processing */
 
     // Hardware Ray Tracing Pipeline (VK_KHR_ray_tracing_pipeline / DX12 DXR)
@@ -521,9 +520,9 @@ typedef struct gfx_caps_t {
     // Hardware Constraints & Limits Boundaries
     uint32_t                max_texture_dimension_2d;           /**< Maximum allowed width/height for a 2D texture allocation */
     uint32_t                max_compute_work_group_invocations; /**< Maximum total number of threads inside a single compute work group */
-    uint64_t                min_uniform_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic UBO bindings */
-    uint64_t                min_storage_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic SSBO bindings */
-    uint64_t                max_uniform_buffer_range;           /**< Maximum byte allocation size range that can be bound to a single UBO slot */
+    uint32_t                min_uniform_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic UBO bindings */
+    uint32_t                min_storage_buffer_offset_alignment;/**< Required byte alignment offset multiplier for dynamic SSBO bindings */
+    uint32_t                max_uniform_buffer_range;           /**< Maximum byte allocation size range that can be bound to a single UBO slot */
     uint32_t                max_bindless_sampleable_textures;   /**< max_bindless_sampleable_textures */
 
     // Extended Shader Data Types & Atomics
@@ -542,7 +541,6 @@ typedef struct gfx_caps_t {
 // ============================================================================
 // --- Core Resource Descriptors ---
 // ============================================================================
-
 
 typedef struct gfx_surface_desc_t {
     const char*             label;              /**< Optional debug metadata string literal identifier */
@@ -793,13 +791,13 @@ typedef struct gfx_pass_info_t {
     float                       depth_clear_value;      /**< Packed depth precision scaling token used to wipe z-buffer values on load */
     uint32_t                    stencil_clear_value;    /**< Packed depth precision scaling token used to wipe z-buffer values on load */
 
-    gfx_render_target_t*        target;                     // todo: replace to color + depth attachment
-    gfx_texture_t*              color_attachment[8];        // todo: switch to this after getting rid of gfx_render_target_t
-    gfx_texture_t*              depth_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
+    gfx_load_op                 color_load_op[4];           //
+    gfx_texture_t*              color_attachment[4];        // todo: switch to this after getting rid of gfx_render_target_t
 
-    // todo: load operator - clear, store, dont_care
-    //gfx_load_op               color_load_op[8];
-    //gfx_load_op               depth_load_op;
+    gfx_texture_t*              depth_attachment;           // todo: switch to this after getting rid of gfx_render_target_t
+    gfx_load_op                 depth_load_op;              // todo: load operator - clear, store, dont_care
+
+    [[deprecated]] gfx_render_target_t* target;       // todo: replace to color + depth attachment
 } gfx_pass_info_t;
 
 
@@ -832,6 +830,11 @@ typedef struct gfx_frame_t {
     gfx_command_buffer_t*       cmd;                        /**< Primary command buffer instance logging commands generated during this frame step */
 } gfx_frame_t;
 
+
+typedef struct gfx_timestamp_t {
+    const char*                 name;
+    float                       duration_ms;
+} gfx_timestamp_t;
 
 
 // ============================================================================
@@ -1171,6 +1174,8 @@ gfx_api void gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker);
  */
 gfx_api void gfx_cmd_pop_marker(gfx_command_buffer_t* cmd);
 
+
+gfx_api void gfx_cmd_get_timestamps(gfx_command_buffer_t* cmd, gfx_timestamp_t * timestamps);
 /**
  * @brief Opens a new hardware rendering pass block clearing and binding active attachments views targets.
  * @param cmd Active command buffer token recording graphic draw state sequences tokens.
@@ -1373,10 +1378,10 @@ typedef struct gfx_rt_transform_t {
  */
 typedef struct gfx_rt_instance_desc_t {
     gfx_rt_transform_t          transform;              /**< Spatial affine 3x4 transformation matrix mapping instance space */
-    uint32_t                    instance_id : 24; /**< Custom user 24-bit identifier accessible inside shaders via gl_InstanceCustomIndexEXT */
-    uint32_t                    mask : 8;  /**< 8-bit visibility test visibility mask to filter ray intersections testing */
-    uint32_t                    instance_offset : 24; /**< Shader Binding Table hit group index calculation offset mapping multiplier */
-    uint32_t                    flags : 8;  /**< Geometry culling flag overrides (e.g., force opaque, cull backface) */
+    uint32_t                    instance_id : 24;       /**< Custom user 24-bit identifier accessible inside shaders via gl_InstanceCustomIndexEXT */
+    uint32_t                    mask : 8;               /**< 8-bit visibility test visibility mask to filter ray intersections testing */
+    uint32_t                    instance_offset : 24;   /**< Shader Binding Table hit group index calculation offset mapping multiplier */
+    uint32_t                    flags : 8;              /**< Geometry culling flag overrides (e.g., force opaque, cull backface) */
     gfx_acceleration_structure_t blas;                  /**< Handle referencing the target Bottom-Level Acceleration Structure asset */
 } gfx_rt_instance_desc_t;
 
@@ -1390,11 +1395,11 @@ typedef struct gfx_acceleration_structure_desc_t {
 
     // BLAS execution inputs configuration properties
     uint32_t                    geometry_count;         /**< Length of active geometries description blocks array (BLAS input data) */
-    gfx_rt_geometry_desc_t* geometries;             /**< Array containing geometries description blocks arrays references */
+    gfx_rt_geometry_desc_t*     geometries;             /**< Array containing geometries description blocks arrays references */
 
     // TLAS execution inputs configuration properties
     uint32_t                    instance_count;         /**< Total number of physical BLAS instances to pack inside the structure (TLAS input data) */
-    gfx_buffer_t* instance_buffer;        /**< Hardware buffer holding populated arrays of gfx_rt_instance_desc_t elements */
+    gfx_buffer_t*               instance_buffer;        /**< Hardware buffer holding populated arrays of gfx_rt_instance_desc_t elements */
 } gfx_acceleration_structure_desc_t;
 
 
@@ -1502,6 +1507,9 @@ gfx_api void gfx_cmd_build_acceleration_structure(gfx_command_buffer_t* cmd, gfx
 gfx_api void gfx_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
 
 
+gfx_api void gfx_cmd_trace_ray_query(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t tlas, uint32_t width, uint32_t height, uint32_t depth = 1);
+
+
 
 // ============================================================================
 // ---                          Utils                                      ---
@@ -1512,6 +1520,40 @@ uint32_t            gfx_utils_hash(const void * data, uint32_t size, uint32_t se
 gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format);
 gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width);
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
+
+inline uint32_t     gfx_utils_ctz64(uint64_t x) {
+    assert(x != 0);
+#if defined(_MSC_VER)
+    unsigned long index;
+    _BitScanForward64(&index, x);
+    return (uint32_t)index;
+#else
+    return (uint32_t)__builtin_ctzll(x);
+#endif
+}
+
+inline void gfx_utils_bitmask_set(uint64_t* _bitmask, size_t index, bool value) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    if (value)  _bitmask[w] |= (1ull << b);
+    else        _bitmask[w] &= ~(1ull << b);
+}
+
+inline bool gfx_utils_bitmask_value(uint64_t* _bitmask, size_t index) {
+    size_t w = index / 64;
+    size_t b = index % 64;
+    return (_bitmask[w]) >> b & 1ull;
+}
+
+inline int32_t gfx_utils_bitmask_first_pop(uint64_t* _bitmask, size_t word_count) {
+    for(uint32_t i = 0; i < word_count; ++i){
+        uint64_t inv = ~_bitmask[i];
+        if (inv != 0)
+            return gfx_utils_ctz64(inv) + i * 64;
+    }
+    return -1;
+}
+
 
 
 // ============================================================================
@@ -1526,12 +1568,14 @@ gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
  * Not thread-safe. Data is tightly packed (stride) for optimal CPU cache utilization.
  */
 struct gfx_handle_pool_t;
+typedef bool (*gfx_handle_pool_predicate_fn)(const void* element, void* user_data);
 
-gfx_api void        gfx_handle_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t * allocator);
+gfx_api void        gfx_handle_pool_create(uint32_t stride, uint32_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t * allocator);
 gfx_api void        gfx_handle_pool_destroy(gfx_handle_pool_t* pool);
 
 gfx_api void*       gfx_handle_pool_allocate_data(gfx_handle_pool_t* pool, uint64_t * out_handle); // return pointer to allocated data, out parameter returns handle
 gfx_api void        gfx_handle_pool_free(gfx_handle_pool_t* pool, uint64_t handle);
+void*               gfx_handle_pool_find_if(gfx_handle_pool_t* pool, gfx_handle_pool_predicate_fn predicate, void * userdata, uint64_t * out_handle);
 
 gfx_api void*       gfx_handle_pool_map(gfx_handle_pool_t* pool, uint64_t handle);
 gfx_api size_t      gfx_handle_pool_get_size(gfx_handle_pool_t* pool);
@@ -1556,6 +1600,7 @@ gfx_api void        gfx_offset_allocator_free(gfx_offset_allocator_t* allocator,
 //
 #define             gfx_max(a, b) (((a) > (b)) ? (a) : (b))
 #define             gfx_min(a, b) (((a) < (b)) ? (a) : (b))
+#define             gfx_clamp(x, lo, hi)  gfx_min(hi, gfx_max(x, lo));
 
 
 static uint32_t     gfx_fourcc(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {

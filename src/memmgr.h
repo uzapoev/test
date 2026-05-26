@@ -80,20 +80,21 @@ struct paged_pool_allocator : iallocator
     virtual void        deallocate(void* ptr);
 
 private:
+    struct page {
+        page* next = nullptr;
+        uint64_t* bitmask = nullptr;
+        char* data = nullptr;
+    };
 
-    struct page *       allocate_page();
 
-    struct page *       find_page_with_free_blocs();
+    page *       allocate_page();
 
-    struct page *       find_page_for_ptr(void * ptr);
+    page *       find_page_with_free_blocs();
+
+    page *       find_page_for_ptr(void * ptr);
 
 private:
-    typedef struct page_ {
-        page_*      _next           = nullptr;
-        size_t      _bitmask_len    = 0;
-        uint64_t*   _bitmask        = nullptr;
-        char*       _data           = nullptr;
-    } page_;
+
 
 private:
     iallocator*         m_allocator = nullptr;
@@ -140,35 +141,6 @@ private:
 };
 
 
-struct offset_allocator
-{
-    offset_allocator(size_t size, size_t min_size = 16);
-
-    ptrdiff_t           allocate(size_t size, size_t alignment = 0);
-    void                deallocate(size_t offset);
-
-protected:
-    void                merge_free_blocks();
-
-    size_t              buffer_size() const         {   return m_buffer_size;    }
-
-private:
-    struct Block {
-        size_t offset = 0;
-        size_t size = 0;
-
-        Block(size_t off, size_t sz) : offset(off), size(sz) {}
-        Block(){}
-    };
-
-    size_t                  m_min_size;
-    size_t                  m_buffer_size;
-    std::vector<Block>      m_free_blocks;
-    std::vector<Block>      m_allocated_blocks;
-    mutable std::mutex      m_mutex;
-};
-
-
 struct memory
 {
     static void    enable_tracking();
@@ -181,7 +153,7 @@ typedef void    (*allocation_callback_pfn)(size_t sz, void* ptr, void* data);
 
 ////////////////////////
 //
-#if 1
+#if 0
 
 /***************************************************************
  *        MemoryManager

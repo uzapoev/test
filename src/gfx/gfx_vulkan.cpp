@@ -10,31 +10,6 @@
     #pragma comment(lib, "../lib/vulkan-1.lib")
 #endif
 
-inline uint32_t ctz64(uint64_t x) {
-    assert(x != 0);
-#if defined(_MSC_VER)
-    unsigned long index;
-    _BitScanForward64(&index, x);
-    return (uint32_t)index;
-#else
-    return (uint32_t)__builtin_ctzll(x);
-#endif
-}
-
-inline void bitmask_set(uint64_t* _bitmask, size_t index, bool value) {
-    size_t w = index / 64;
-    size_t b = index % 64;
-    if (value)  _bitmask[w] |= (1ull << b);
-    else        _bitmask[w] &= ~(1ull << b);
-}
-
-inline bool bitmask_value(uint64_t* _bitmask, size_t index) {
-    size_t w = index / 64;
-    size_t b = index % 64;
-    return (_bitmask[w]) >> b & 1ull;
-}
-
-
 extern const char* gfx_to_string(gfx_buffer_usage usage);
 extern const char* gfx_to_string(gfx_shader_stage stage);
 extern const char* gfx_to_string(gfx_texture_type type);
@@ -251,6 +226,11 @@ VkImageAspectFlags determine_aspect_mask(VkFormat format)
         default:                                return VK_IMAGE_ASPECT_COLOR_BIT;
     }
 }
+
+
+typedef struct descriptor_pool_holder_t {
+    vk_descriptor_pool_t* pool;
+} descriptor_pool_holder_t;
 
 
 typedef struct vk_state_mapping_t {
@@ -478,8 +458,8 @@ void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gf
     // Hardware limits mapping
     caps->max_texture_dimension_2d = properties.limits.maxImageDimension2D;
     caps->max_compute_work_group_invocations = properties.limits.maxComputeWorkGroupInvocations;
-    caps->min_uniform_buffer_offset_alignment = properties.limits.minUniformBufferOffsetAlignment;
-    caps->min_storage_buffer_offset_alignment = properties.limits.minStorageBufferOffsetAlignment;
+    caps->min_uniform_buffer_offset_alignment = (uint32_t)properties.limits.minUniformBufferOffsetAlignment;
+    caps->min_storage_buffer_offset_alignment = (uint32_t)properties.limits.minStorageBufferOffsetAlignment;
     caps->max_uniform_buffer_range = properties.limits.maxUniformBufferRange;
 
     // SPIR-V support is guaranteed for core Vulkan devices
@@ -489,17 +469,14 @@ void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gf
     // 2. FEATURE EXTRACTION VIA pNext CHAIN (Vulkan 1.1+)
     // =========================================================================
 
-
-
     // Vulkan 1.2 features (Bindless/Descriptor Indexing, 8-bit/16-bit storage)
-    VkPhysicalDeviceVulkan12Features feats12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    VkPhysicalDeviceVulkan12Features feats12 =  { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
 
     // Vulkan 1.3 features (Additional core features/atomics)
-    VkPhysicalDeviceVulkan13Features feats13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, &feats12 };
+    VkPhysicalDeviceVulkan13Features feats13 =  { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, &feats12 };
 
     // Extension: Mesh Shaders (EXT/NV)
     VkPhysicalDeviceMeshShaderFeaturesEXT mesh_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, &feats13 };
-
 
     // Extension: Floating-point atomics
     VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomic_float_feats = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT, &mesh_feats };
@@ -509,7 +486,6 @@ void vk_fill_device_caps(vk_context_t* ctx, VkPhysicalDevice physical_device, gf
 
     // Allocate structures on the stack and link them into the pNext chain
     VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,  &barycentric_feats };
-
 
 
     // Properties chain to fetch extended limits (like max bindless descriptor array size)
@@ -713,6 +689,12 @@ static VkPhysicalDevice _vk_create_physical_device(VkInstance instance, VkPhysic
 
 static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surface, uint32_t* out_graphics, uint32_t* out_present)
 {
+
+#ifdef __APPLE__
+    #warning "For macOS you will need to enable the VK_KHR_portability_enumeration instance extension and set the VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR flag \
+              otherwise MoltenVK will not return the base device on Apple Silicon M1 / M2 / M3 chips."
+#endif // __APPLE__
+
     if (physdevice == nullptr || surface == nullptr)
         return VK_NULL_HANDLE;
 
@@ -1230,8 +1212,11 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     gfx_handle_pool_create(sizeof(vk_pipeline_t),  cfg->limits.pipeline_pool_capacity, &vctx->pipeline_pool, &vctx->allocator);
     gfx_handle_pool_create(sizeof(vk_compute_pipeline_t),  cfg->limits.compute_pipeline_pool_capacity, &vctx->compute_pipeline_pool, &vctx->allocator);
 
+    gfx_handle_pool_create(sizeof(descriptor_pool_holder_t), 1024, &vctx->descriptor_set_holder_pools, &vctx->allocator);
+    
+
     if(cfg->limits.uniform_buffer_size < 1 * 1024 * 1024)
-        cfg->limits.uniform_buffer_size < 1 * 1024 * 1024;
+        cfg->limits.uniform_buffer_size = 1 * 1024 * 1024;
 
     cfg->limits.uniform_buffer_size = gfx_utils_align_up(cfg->limits.uniform_buffer_size, vctx->gpu_caps.min_uniform_buffer_offset_alignment);
 
@@ -1946,6 +1931,65 @@ void vk_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer)
 
 
 // --- SHADER ---
+/*
+void _vk_reset_descriptor_set(vk_context_t* ctx, vk_descriptor_pool_t* pool, vk_descriptor_set_t * inout_set)
+{
+    VkWriteDescriptorSet    descriptor_writes[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
+    VkDescriptorImageInfo   descriptor_image_info[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
+    VkDescriptorBufferInfo  descriptor_buffer_info[GFX_MAX_DESCRIPTOR_BINDINGS] = { };
+
+    for (uint32_t j = 0; j < pool->set_layout_binding_count; ++j)
+    {
+        auto& binding = pool->set_layout_bindings[j];
+
+        uint32_t writes_idx = binding.binding;
+
+        if (writes_idx >= GFX_MAX_DESCRIPTOR_BINDINGS) {
+            ctx->dbg_log(gfx_msg_error, "binding index %d exceeds GFX_MAX_DESCRIPTOR_BINDINGS", writes_idx);
+            assert(false);
+            continue;
+        }
+
+        descriptor_writes[writes_idx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_writes[writes_idx].dstSet = inout_set->descriptor_set;
+        descriptor_writes[writes_idx].dstBinding = binding.binding;
+        descriptor_writes[writes_idx].descriptorType = binding.descriptorType;
+        descriptor_writes[writes_idx].descriptorCount = binding.descriptorCount;
+
+        switch (binding.descriptorType)
+        {
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+                inout_set->ubo_offset = gfx_offset_allocator_allocate(ctx->uniform_buffer_allocator, aligned_size);
+
+                descriptor_buffer_info[writes_idx].buffer = ctx->uniform_buffer;
+                descriptor_buffer_info[writes_idx].range = aligned_size;
+                //     descriptor_buffer_info[writes_idx].offset = current_set->ubo_offset;
+                descriptor_writes[writes_idx].pBufferInfo = &descriptor_buffer_info[writes_idx];
+                break;
+
+        case VK_DESCRIPTOR_TYPE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+            descriptor_image_info[writes_idx].sampler = ((vk_sampler_t*)ctx->default_sampler)->sampler;
+            descriptor_image_info[writes_idx].imageView = ((vk_texture_t*)ctx->default_texture)->view;
+            descriptor_image_info[writes_idx].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            descriptor_writes[writes_idx].pImageInfo = &descriptor_image_info[writes_idx];
+            break;
+
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+            // todo: 
+            //sets[i].write_infos[j].buffer_info.buffer = ;
+            assert(false);
+            break;
+
+        default: assert(false); break;
+        }
+    }
+}*/
+
+
 
 void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t set_idx, uint32_t capacity, vk_descriptor_pool_t** out_pool)
 {
@@ -1961,26 +2005,26 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
     uint32_t total_size = pool_size + sets_size + set_mask_size;
 
     void * buffer = _gfx_alloc(ctx, total_size);
+    uint8_t* byte_ptr = (uint8_t*)buffer;
+
     if(buffer == nullptr) {
         const char * shader_name = shader->label ? shader->label: " -noname- ";
         ctx->dbg_log(gfx_msg_error, "failed to allocate vk_create_descriptor_pool(sahder:%s, capacity: %d)", shader_name, capacity);
         return;
     }
 
-    uint8_t* byte_ptr = (uint8_t*)buffer;
     vk_descriptor_pool_t* pool  = (vk_descriptor_pool_t*)byte_ptr;   byte_ptr += pool_size;
     vk_descriptor_set_t* sets   = (vk_descriptor_set_t*)byte_ptr;    byte_ptr += sets_size;
     pool->bitset_mask           = (uint64_t*)byte_ptr;               byte_ptr += set_mask_size;
-    pool->bitset_word_count     = set_mask_size;
+    pool->bitset_word_count     = capacity/64;
 
     VkDescriptorSetLayoutBinding* set_layout_bindings = shader->set_bindings[set_idx];
 
     pool->set_layout_binding_count = shader->set_binding_count[set_idx];;
-    for (int i = 0; i < pool->set_layout_binding_count; ++i){
+    for (uint32_t i = 0; i < pool->set_layout_binding_count; ++i){
         pool->set_layout_bindings[i] = set_layout_bindings[i];
     }
     
-
     const uint32_t VK_DESCRIPTOR_TYPE_RANGE_SIZE = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
 
     VkDescriptorPoolSize pool_sizes[VK_DESCRIPTOR_TYPE_RANGE_SIZE] = {};
@@ -2217,8 +2261,8 @@ static void _vk_create_descriptor_layouts(vk_context_t * ctx, vk_shader_t* shade
                                                                                          : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         switch (u->type) {
             case gfx_uniform_ubo:       bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;   break;
-            case gfx_uniform_sampler:   bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;          break;
-            case gfx_uniform_storage_buffer:   bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;   break;
+            case gfx_uniform_sampler:   bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;                  break;
+            case gfx_uniform_storage_buffer: bindings_per_set[s][sidx].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;      break;
 
             case gfx_uniform_texture2d:         bindings_per_set[s][sidx].descriptorType = texture_type;    break;
             case gfx_uniform_texture3d:         bindings_per_set[s][sidx].descriptorType = texture_type;    break;
@@ -2327,7 +2371,7 @@ uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name)
         if (strcmp(name, uniform->name))
             continue;
 
-        return  make_uniform_loc(hash, uniform->type, uniform->group, uniform_id, 0).handle;
+        return  make_uniform_loc(hash, uniform->type, (uint8_t)uniform->group, uniform_id, 0).handle;
     }
     return 0;
 }
@@ -2341,6 +2385,275 @@ void vk_shader_destroy(gfx_context_t* ctx, gfx_shader_t* _shader)
    // shader->pool
 
     //destroy all pools and pool datas
+}
+
+
+// --- DESCRIPTOR SET ---
+
+static bool find_pool_by_hash_predicat(const void* element, void* user_data) 
+{
+    descriptor_pool_holder_t* pool_holder = (descriptor_pool_holder_t*)element;
+
+    uint32_t hash = *(uint32_t*)(user_data);
+    bool has_free = pool_holder->pool->free_set_count > 0;
+    bool match_hash = pool_holder->pool->bindings_hash == hash;
+
+    return has_free && match_hash;
+}
+
+vk_descriptor_pool_t* _get_or_create_descriptor_set_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t set_idx, uint32_t hash)
+{
+    vk_descriptor_pool_t * pool = nullptr;
+
+    descriptor_pool_holder_t* pool_holder = (descriptor_pool_holder_t*)gfx_handle_pool_find_if(ctx->descriptor_set_holder_pools, find_pool_by_hash_predicat, &hash, nullptr);
+    
+    if(pool_holder == nullptr) {
+        descriptor_pool_holder_t* holder = (descriptor_pool_holder_t*)gfx_handle_pool_allocate_data(ctx->descriptor_set_holder_pools, nullptr);
+        if(holder != nullptr){
+            vk_create_descriptor_pool(ctx, shader, 0, MAX_DESCRIPTOR_POOL_SET_SIZE, &holder->pool);
+            holder->pool->bindings_hash = hash;
+            return holder->pool;
+        }
+        return nullptr;
+    }
+
+    return pool_holder->pool;
+}
+
+uint64_t _descriptor_set_layout_hash(VkDescriptorSetLayoutBinding* bindings, size_t count)
+{
+    uint64_t hash = (uint64_t)count * 0x100000001B3ULL;   // FNV prime
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        const VkDescriptorSetLayoutBinding* b = &bindings[i];
+
+        uint64_t v = ((uint64_t)b->binding) |
+            ((uint64_t)b->descriptorType << 16) |
+            ((uint64_t)b->descriptorCount << 24) |
+            ((uint64_t)b->stageFlags << 32);
+
+        hash ^= v;
+        hash *= 0x100000001B3ULL;        // FNV prime 64-bit
+        hash ^= hash >> 32;
+    }
+
+    return hash;
+};
+
+
+void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
+{
+    assert(ctx && shader && out_set);
+
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_shader_t* vk_shader = (vk_shader_t*)shader;
+
+    if (set_idx > (vk_shader->set_count - 1)) {
+        vctx->dbg_log(gfx_msg_error, "Descriptor set index(%u) is out of bounds(valid range is 0 to %u)", set_idx, vk_shader->set_count - 1);
+        return;
+    }
+
+    // 
+    uint32_t bindings_hash = _descriptor_set_layout_hash(vk_shader->set_bindings[set_idx], vk_shader->set_binding_count[set_idx]);
+    vk_descriptor_pool_t* pool = _get_or_create_descriptor_set_pool(vctx, vk_shader, set_idx, bindings_hash);
+
+    for (uint32_t i = 0; i < pool->bitset_word_count; ++i)
+    {
+        uint64_t inv = ~pool->bitset_mask[i];
+        if (inv != 0)
+        {
+            uint32_t pos = gfx_utils_ctz64(inv) + i * 64;
+            gfx_utils_bitmask_set(pool->bitset_mask, pos, true);
+
+            pool->free_set_count--;
+            pool->descriptor_sets[pos].index_in_pool = pos;
+            *out_set = &pool->descriptor_sets[pos].handle;
+            return;
+        }
+    }
+
+    for (int i = 0; i < 1024; ++i) {
+        printf("\n%d", pool->descriptor_sets[i].index_in_pool);
+    }
+}
+
+
+void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)
+{
+    if (!ctx || !descriptor)
+        return;
+
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_descriptor_set_t* vset = (vk_descriptor_set_t*)descriptor;
+    vk_descriptor_pool_t* pool = vset->pool;
+
+    vk_texture_t* default_texture = vctx->default_texture;
+    auto sampler = (vk_sampler_t*)gfx_handle_pool_map(vctx->sampler_pool, vctx->default_sampler->idx);
+    VkImageView image_view = default_texture->view;
+
+    // todo: write utility function for reset descriptor set bindingds to default values
+    // that mathot can be used in create_descriptor_pool
+    for (uint32_t i = 0; i < pool->set_layout_binding_count; ++i) {
+      //  gfx_descriptor_set_write_texture(descriptor, 0, nullptr);
+      //  gfx_descriptor_set_write_sampler(descriptor, 0, nullptr);
+      //  gfx_descriptor_set_write_buffer(descriptor, 0, nullptr);
+
+        if (pool->set_layout_bindings[i].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
+
+            VkDescriptorImageInfo image_info = { 0 };
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            image_info.imageView = image_view;
+            image_info.sampler = sampler->sampler;
+
+            VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            write.dstSet = vset->descriptor_set;
+            write.dstBinding = pool->set_layout_bindings[i].binding;
+            write.descriptorCount = 1;
+            write.pImageInfo = &image_info;
+            vkUpdateDescriptorSets(vctx->vk_device, 1, &write, 0, nullptr);
+        }
+    }
+    gfx_utils_bitmask_set(pool->bitset_mask, vset->index_in_pool, false);
+}
+
+
+void vk_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size)
+{
+    if (set == NULL || handle == 0)
+        return;
+
+    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
+    vk_shader_t* shader = vkset->shader;
+    vk_context_t* vctx = shader->ctx;
+
+    gfx_uniform_loc_t loc = { handle };
+
+    if (shader->hash32 != loc.shader_hash) {
+        vctx->dbg_log(gfx_msg_warning, "handle from another shader");
+        return;
+    }
+
+    gfx_uniform_type type = (gfx_uniform_type)loc.type;
+    if (type != gfx_uniform_ubo) {
+        vctx->dbg_log(gfx_msg_warning, "type mismatch");
+        return;
+    }
+
+    const gfx_uniform_t* uniform = loc.binding < shader->uniform_count ? &shader->uniforms[loc.binding] : nullptr;
+
+    uint8_t* ubo_ptr = (uint8_t*)vctx->uniform_buffer->data_ptr;
+
+    if ((uniform != nullptr) && (uniform->type == gfx_uniform_ubo) && (loc.member_idx < uniform->buffer.field_count))
+    {
+        uint32_t offset = vkset->ubo_offset + uniform->buffer.fields[loc.member_idx].offset;
+        memcpy(ubo_ptr + offset, data, size);
+    }
+}
+
+
+void vk_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset)
+{
+    if (set == NULL || handle == 0)
+        return;
+
+    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
+
+    vk_shader_t* vkshader = vkset->shader;
+    vk_context_t* vkctx = vkshader->ctx;
+
+    gfx_uniform_loc_t loc = { handle };
+
+    if (vkshader->hash32 != loc.shader_hash) {
+        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
+        return;
+    }
+    assert(false);
+}
+
+
+void vk_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)
+{
+    if (set == NULL || handle == 0)
+        return;
+
+    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
+
+    vk_shader_t* vkshader = vkset->shader;
+    vk_context_t* vkctx = vkshader->ctx;
+
+    gfx_uniform_loc_t loc = { handle };
+
+    if (vkshader->hash32 != loc.shader_hash) {
+        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
+        return;
+    }
+
+    gfx_uniform_type type = (gfx_uniform_type)loc.type;
+    if (type != gfx_uniform_texture2d && type != gfx_uniform_texture3d && type != gfx_uniform_texture2d_cube && type != gfx_uniform_texture2d_array) {
+        vkctx->dbg_log(gfx_msg_warning, "type mismatch: expected gfx_uniform_textureXXX");
+        return;
+    }
+
+    auto binding = vkshader->uniforms[loc.binding].binding;
+
+    vk_texture_t* vktexture = texture ? (vk_texture_t*)gfx_handle_pool_map(vkctx->texture_pool, texture->idx) : vkctx->default_texture;
+    VkImageView image_view = vktexture->view;
+    auto sampler = (vk_sampler_t*)gfx_handle_pool_map(vkctx->sampler_pool, vkctx->default_sampler->idx);
+
+    VkDescriptorImageInfo image_info = { 0 };
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.imageView = image_view;
+        image_info.sampler = sampler->sampler;
+
+    VkWriteDescriptorSet write  = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.dstSet            = vkset->descriptor_set;
+        write.dstBinding        = binding;
+        write.descriptorCount   = 1;
+        write.pImageInfo        = &image_info;
+    vkUpdateDescriptorSets(vkctx->vk_device, 1, &write, 0, nullptr);
+}
+
+
+void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)
+{
+    if (set == NULL || handle == 0)
+        return;
+
+    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
+    vk_shader_t* vkshader = vkset->shader;
+    vk_context_t* vkctx = vkshader->ctx;
+    vk_sampler_t* vksampler = (vk_sampler_t*)sampler;
+
+    gfx_uniform_loc_t loc = { handle };
+
+    if (vkshader->hash32 != loc.shader_hash) {
+        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
+        return;
+    }
+
+    gfx_uniform_type type = (gfx_uniform_type)loc.type;
+    if (type != gfx_uniform_sampler) {
+        vkctx->dbg_log(gfx_msg_warning, "type mismatch: expected gfx_uniform_textureXXX");
+        return;
+    }
+
+    auto binding = vkshader->uniforms[loc.binding].binding;
+
+    VkDescriptorImageInfo image_info = { 0 };
+        image_info.imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.sampler      = vksampler->sampler;
+        image_info.imageView    = vkctx->default_texture->view;
+
+    VkWriteDescriptorSet write  = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLER;
+        write.dstSet            = vkset->descriptor_set;
+        write.dstBinding        = binding;
+        write.descriptorCount   = 1;
+        write.pImageInfo        = &image_info;
+    vkUpdateDescriptorSets(vkctx->vk_device, 1, &write, 0, nullptr);
 }
 
 
@@ -2947,265 +3260,6 @@ void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* desc)
 void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline)
 {
 }
-
-
-
-// --- DESCRIPTOR SET ---
-
-vk_descriptor_pool_t * _get_or_create_descriptor_set_pool(vk_context_t* ctx, uint32_t hash)
-{
-    return nullptr;
-}
-
-uint64_t _descriptor_set_layout_hash(VkDescriptorSetLayoutBinding* bindings, size_t count)
-{
-    uint64_t hash = (uint64_t)count * 0x100000001B3ULL;   // FNV prime
-
-    for (size_t i = 0; i < count; ++i)
-    {
-        const VkDescriptorSetLayoutBinding* b = &bindings[i];
-
-        uint64_t v = ((uint64_t)b->binding) |
-                     ((uint64_t)b->descriptorType << 16) |
-                     ((uint64_t)b->descriptorCount << 24) |
-                     ((uint64_t)b->stageFlags << 32);
-
-        hash ^= v;
-        hash *= 0x100000001B3ULL;        // FNV prime 64-bit
-        hash ^= hash >> 32;
-    }
-
-    return hash;
-};
-
-
-void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
-{
-    assert(ctx && shader && out_set);
-
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_shader_t* vk_shader = (vk_shader_t*)shader;
-
-    if(set_idx > (vk_shader->set_count - 1)) {
-        vctx->dbg_log(gfx_msg_error, "Descriptor set index(%u) is out of bounds(valid range is 0 to %u)", set_idx,  vk_shader->set_count-1);
-        return;
-    }
-
-    // 
-    char * data_ptr = (char*)vk_shader->set_bindings[set_idx];
-    uint32_t data_size = sizeof(VkDescriptorSetLayoutBinding) * vk_shader->set_binding_count[set_idx];
-    uint32_t bindings_hash = gfx_utils_hash(data_ptr, data_size);
-    vk_descriptor_pool_t * pool = _get_or_create_descriptor_set_pool(vctx, bindings_hash);
-
-    if(vk_shader->pool == nullptr)
-    {
-       // vk_create_descriptor_pool(vctx, vk_shader, 0, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
-        vk_create_descriptor_pool(vctx, vk_shader, 0, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
-    }
-
-    if(vk_shader->pool->free_set_count == 0)
-    {
-        vk_create_descriptor_pool(vctx, vk_shader, 0, MAX_DESCRIPTOR_POOL_SET_SIZE, &vk_shader->pool);
-    }
-    pool = vk_shader->pool;
-
-    
-    for (uint32_t i = 0; i < pool->bitset_word_count; ++i)
-    {
-        uint64_t orig = pool->bitset_mask[i];
-        uint64_t inv = ~pool->bitset_mask[i];
-        if(inv != 0)
-        {
-            uint32_t pos = ctz64(inv) + i * 64;
-            bitmask_set(pool->bitset_mask, pos, true);
-
-            pool->free_set_count--;
-            pool->descriptor_sets[pos].index_in_pool = pos;
-            *out_set = &vk_shader->pool->descriptor_sets[pos].handle;
-            return;
-        }
-    }
-
-    for(int i = 0; i < 1024; ++i) {
-        printf("\n%d", pool->descriptor_sets[i].index_in_pool);
-    }
-}
-
-
-void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)
-{
-    if (!ctx || !descriptor)
-        return;
-
-    vk_context_t* vctx = from_ctx(ctx);
-    vk_descriptor_set_t* vset = (vk_descriptor_set_t*)descriptor;
-    vk_descriptor_pool_t * pool = vset->pool;
-
-    vk_texture_t* default_texture = vctx->default_texture;
-    auto sampler = (vk_sampler_t*)gfx_handle_pool_map(vctx->sampler_pool, vctx->default_sampler->idx);
-    VkImageView image_view = default_texture->view;
-
-    // todo: write utility function for reset descriptor set bindingds to default values
-    // that mathot can be used in create_descriptor_pool
-    for(uint32_t i = 0; i < pool->set_layout_binding_count; ++i) {
-        if(pool->set_layout_bindings[i].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
-
-            VkDescriptorImageInfo image_info = { 0 };
-                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                image_info.imageView = image_view;
-                image_info.sampler = sampler->sampler;
-
-            VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-                write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                write.dstSet = vset->descriptor_set;
-                write.dstBinding = pool->set_layout_bindings[i].binding;
-                write.descriptorCount = 1;
-                write.pImageInfo = &image_info;
-            vkUpdateDescriptorSets(vctx->vk_device, 1, &write, 0, nullptr);
-        }
-    }
-    bitmask_set(pool->bitset_mask, vset->index_in_pool, false);
-}
-
-
-void vk_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size)
-{
-    if (set == NULL || handle == 0)
-        return;
-
-    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
-    vk_shader_t* shader     = vkset->shader;
-    vk_context_t* vctx     = shader->ctx;
-
-    gfx_uniform_loc_t loc = { handle };
-
-    if (shader->hash32 != loc.shader_hash) {
-        vctx->dbg_log(gfx_msg_warning, "handle from another shader");
-        return;
-    }
-
-    gfx_uniform_type type = (gfx_uniform_type)loc.type;
-    if (type != gfx_uniform_ubo) {
-        vctx->dbg_log(gfx_msg_warning, "type mismatch");
-        return;
-    }
-
-    const gfx_uniform_t* uniform = loc.binding < shader->uniform_count ? &shader->uniforms[loc.binding] : nullptr;
-
-    uint8_t* ubo_ptr = (uint8_t*)vctx->uniform_buffer->data_ptr;
-
-    if ((uniform != nullptr) && (uniform->type == gfx_uniform_ubo) && (loc.member_idx < uniform->buffer.field_count))
-    {
-        uint32_t offset = vkset->ubo_offset + uniform->buffer.fields[loc.member_idx].offset;
-        memcpy(ubo_ptr + offset, data, size);
-    }
-}
-
-
-void vk_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* data, uint32_t offset)
-{
-    if (set == NULL || handle == 0)
-        return;
-
-    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
-
-    vk_shader_t* vkshader = vkset->shader;
-    vk_context_t* vkctx = vkshader->ctx;
-
-    gfx_uniform_loc_t loc = { handle };
-
-    if (vkshader->hash32 != loc.shader_hash) {
-        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
-        return;
-    }
-    assert(false);
-}
-
-
-void vk_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)
-{
-    if (set == NULL || handle == 0)
-        return;
-
-    vk_descriptor_set_t* vkset = (vk_descriptor_set_t*)set;
-
-    vk_shader_t * vkshader      = vkset->shader;
-    vk_context_t* vkctx         = vkshader->ctx;
-
-    gfx_uniform_loc_t loc = { handle };
-
-    if (vkshader->hash32 != loc.shader_hash) {
-        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
-        return;
-    }
-
-    gfx_uniform_type type = (gfx_uniform_type)loc.type;
-    if(type != gfx_uniform_texture2d && type != gfx_uniform_texture3d && type != gfx_uniform_texture2d_cube && type != gfx_uniform_texture2d_array) {
-        vkctx->dbg_log(gfx_msg_warning, "type mismatch: expected gfx_uniform_textureXXX");
-        return;
-    }
-
-    auto binding = vkshader->uniforms[loc.binding].binding;
-
-    vk_texture_t* vktexture = texture ? (vk_texture_t*)gfx_handle_pool_map(vkctx->texture_pool, texture->idx) : vkctx->default_texture;
-    VkImageView image_view  = vktexture->view;
-    auto sampler = (vk_sampler_t*)gfx_handle_pool_map(vkctx->sampler_pool, vkctx->default_sampler->idx);
-
-    VkDescriptorImageInfo image_info = { 0 };
-        image_info.imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.imageView    = image_view;
-        image_info.sampler      = sampler->sampler;
-
-     VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        write.dstSet            = vkset->descriptor_set;
-        write.dstBinding        = binding;
-        write.descriptorCount   = 1;
-        write.pImageInfo        = &image_info;
-    vkUpdateDescriptorSets(vkctx->vk_device, 1, &write, 0, nullptr);
-}
-
-
-void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)
-{
-    if (set == NULL || handle == 0)
-        return;
-
-    vk_descriptor_set_t* vkset  = (vk_descriptor_set_t*)set;
-    vk_shader_t* vkshader       = vkset->shader;
-    vk_context_t* vkctx         = vkshader->ctx;
-    vk_sampler_t* vksampler     = (vk_sampler_t*)sampler;
-
-    gfx_uniform_loc_t loc = { handle };
-
-    if (vkshader->hash32 != loc.shader_hash) {
-        vkctx->dbg_log(gfx_msg_warning, "handle from another shader");
-        return;
-    }
-
-    gfx_uniform_type type = (gfx_uniform_type)loc.type;
-    if (type != gfx_uniform_sampler) {
-        vkctx->dbg_log(gfx_msg_warning, "type mismatch: expected gfx_uniform_textureXXX");
-        return;
-    }
-
-    auto binding = vkshader->uniforms[loc.binding].binding;
-
-    VkDescriptorImageInfo image_info = { 0 };
-        image_info.imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.sampler      = vksampler->sampler;
-        image_info.imageView    = vkctx->default_texture->view;
-
-    VkWriteDescriptorSet write  = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        write.descriptorType    = VK_DESCRIPTOR_TYPE_SAMPLER;
-        write.dstSet            = vkset->descriptor_set;
-        write.dstBinding        = binding;
-        write.descriptorCount   = 1;
-        write.pImageInfo        = &image_info;
-    vkUpdateDescriptorSets(vkctx->vk_device, 1, &write, 0, nullptr);
-}
-
-
 
 // --- COMMAND BUFFER ---
 

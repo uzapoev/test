@@ -24,7 +24,7 @@ typedef struct texture_load_option_t {
 } texture_load_option_t;
 
 
-extern size_t   read_file_data(const char* path, char** data);
+extern uint32_t read_file_data(const char* path, char** data);
 
 extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, mesh_pool_t* pool);
 

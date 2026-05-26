@@ -338,6 +338,7 @@ static gfx_allocator_t* gfx_default_allocator()
     return &s_allocator;
 }
 
+
 #pragma region handle pool
 
 typedef struct gfx_handle_t {
@@ -356,15 +357,17 @@ static_assert(sizeof(gfx_handle_t) == sizeof(uint64_t));
 typedef struct gfx_handle_pool_t {
     size_t              size;
     void*               data;
-
-    size_t              capacity;
-    size_t              stride;
     uint32_t            hash;
 
-    size_t              used_chunks;
+    size_t              capacity;
+    size_t              item_size;
+
+    size_t              used_slots;
     gfx_handle_t*       handles;
-    uint32_t*           free_list;
     uint32_t*           generation_counters;
+
+    uint64_t*           bitmask;           // Number of uint64_t elements needed for the bitmask
+    uint32_t            bitmask_words;     // Pointer to the bit arrays (0 = free, 1 = allocated)
 
     gfx_allocator_t*    allocator;
 } gfx_handle_pool_t;
@@ -384,43 +387,51 @@ static uint32_t hash32(const char* str, size_t len)
 }
 
 
-void gfx_handle_pool_create(size_t stride, size_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t* allocator)
+void gfx_handle_pool_create(uint32_t stride, uint32_t capacity, gfx_handle_pool_t** out_pool, gfx_allocator_t* allocator)
 {
     if(allocator == nullptr)
         allocator = gfx_default_allocator();
 
     uint32_t alignment = alignof(void*);
 
-    uint32_t pool_size        = gfx_utils_align_up(sizeof(gfx_handle_pool_t), alignment);
-    uint32_t data_size        = gfx_utils_align_up(capacity * stride, alignment);
-    uint32_t handles_size     = gfx_utils_align_up(capacity * sizeof(gfx_handle_t), alignment);
-    uint32_t free_list_size   = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
-    uint32_t counters_size    = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
-    uint32_t total_size       = data_size + handles_size + free_list_size + counters_size + pool_size;
+    capacity = gfx_max(64, capacity);   // minimum, 64 elements
+
+    uint32_t bitmask_words  = gfx_utils_align_up(capacity/64, 1);
+
+    uint32_t pool_size      = gfx_utils_align_up(sizeof(gfx_handle_pool_t), alignment);
+    uint32_t data_size      = gfx_utils_align_up(capacity * stride, alignment);
+    uint32_t handles_size   = gfx_utils_align_up(capacity * sizeof(gfx_handle_t), alignment);
+    uint32_t counters_size  = gfx_utils_align_up(capacity * sizeof(uint32_t), alignment);
+    uint32_t bitmask_size   = gfx_utils_align_up(sizeof(uint64_t) * bitmask_words, 1);
+    uint32_t total_size     = data_size + handles_size + counters_size + pool_size + bitmask_size;
 
     void* buffer = allocator->gfx_alloc(total_size, allocator->user_data);
     if (buffer == nullptr)
         return;
+    memset(buffer, 0, total_size);
 
     uint8_t* byte_ptr = (uint8_t*)buffer;
 
     gfx_handle_pool_t* pool = (gfx_handle_pool_t*)byte_ptr;     byte_ptr += pool_size;
     pool->data = byte_ptr;                                      byte_ptr += data_size;
     pool->handles = (gfx_handle_t*)byte_ptr;                    byte_ptr += handles_size;
-    pool->free_list = (uint32_t*)byte_ptr;                      byte_ptr += free_list_size;
     pool->generation_counters = (uint32_t*)byte_ptr;            byte_ptr += counters_size;
+    pool->bitmask = (uint64_t*)byte_ptr;                        byte_ptr += bitmask_size;
 
     pool->allocator     = allocator;
     pool->size          = stride * capacity;
-    pool->stride        = stride;
+    pool->item_size        = stride;
     pool->capacity      = capacity;
-    pool->used_chunks   = 0;
+    pool->used_slots   = 0;
+    pool->bitmask_words = bitmask_words;
     pool->hash          = hash32((char*)pool, sizeof(intptr_t));
 
+    uintptr_t pool_address = (uintptr_t)pool;
+    pool->hash = hash32((char*)&pool_address, sizeof(pool_address));
+
     for (uint32_t i = 0; i < capacity; ++i) {
-        pool->free_list[i] = i;
-        pool->handles[i].index = i;
-        pool->handles[i].pool_hash = pool->hash;
+        pool->handles[i].pool_hash  = pool->hash;
+        pool->handles[i].index      = i;
         pool->handles[i].generation = pool->generation_counters[i];
     }
 
@@ -438,22 +449,36 @@ void gfx_handle_pool_destroy(gfx_handle_pool_t* pool)
 
 uint64_t gfx_pool_alloc(gfx_handle_pool_t* pool)
 {
-    if(pool->used_chunks >= pool->capacity)
-        return 0;
+    if (pool == nullptr) return 0;
+    if (pool->used_slots == pool->capacity) return 0; // No available chunk
 
     gfx_handle_t invalid_handle = {  };
-    if (pool->used_chunks == pool->capacity) return 0; // No available chunk
+    for(uint32_t i = 0; i < pool->bitmask_words; ++i)
+    {
+        uint64_t inv = ~pool->bitmask[i];
+        if(inv == 0)
+            continue;
 
-    uint32_t index = pool->free_list[pool->used_chunks++];
-    pool->handles[index].generation = pool->generation_counters[index];
+        uint32_t index = gfx_utils_ctz64(inv) + i * 64;
 
-    return pool->handles[index].handle;
+        if (index >= pool->capacity) return 0;
+
+        pool->handles[index].generation = pool->generation_counters[index];
+
+        gfx_utils_bitmask_set(pool->bitmask, index, true);
+        pool->used_slots++;
+        return pool->handles[index].handle;
+    }
+
+    assert(false); // how do we get there?
+    return 0;
 }
 
 void * gfx_handle_pool_allocate_data(gfx_handle_pool_t* pool, uint64_t* out_handle)
 {
-    *out_handle = gfx_pool_alloc(pool);
-    return gfx_handle_pool_map(pool, *out_handle);
+    uint64_t handle = gfx_pool_alloc(pool);
+    if(out_handle) *out_handle = handle;
+    return gfx_handle_pool_map(pool, handle);
 }
 
 
@@ -461,14 +486,38 @@ void gfx_handle_pool_free(gfx_handle_pool_t* pool, uint64_t _handle)
 {
     gfx_handle_t handle = { _handle };
 
-    if (pool->used_chunks == 0 || handle.index >= pool->capacity)
+    if (pool->used_slots == 0 || handle.index >= pool->capacity)
         return;
 
     if (pool->generation_counters[handle.index] != handle.generation) 
         return; // Handle is invalid
 
-    pool->free_list[--pool->used_chunks] = handle.index;
+    gfx_utils_bitmask_set(pool->bitmask, handle.index, false);
     pool->generation_counters[handle.index]++;
+    pool->used_slots--;
+}
+
+void* gfx_handle_pool_find_if(gfx_handle_pool_t* pool, gfx_handle_pool_predicate_fn predicate, void* userdata, uint64_t* out_handle)
+{
+    if(!pool || !predicate) return nullptr;
+    if(out_handle)
+        *out_handle = 0;
+
+    for (uint32_t i = 0; i < pool->capacity; ++i) {
+        if ((i % 64 == 0) && (pool->bitmask[i / 64] == 0)) {
+            i += 63;
+            continue;
+        }
+        if(gfx_utils_bitmask_value(pool->bitmask, i)){
+         void* element_ptr = (void*)((char*)pool->data + (i * pool->item_size));
+             if(predicate(element_ptr, userdata)){
+                 if (out_handle)
+                     *out_handle = pool->handles[i].handle;
+                return element_ptr;
+             }
+        }
+    }
+    return nullptr;
 }
 
 void * gfx_handle_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
@@ -483,7 +532,7 @@ void * gfx_handle_pool_map(gfx_handle_pool_t* pool, uint64_t _handle)
     if (pool->generation_counters[handle.index] != handle.generation) 
         return nullptr; // Handle is invalid
 
-    return (char*)pool->data + (handle.index * pool->stride);
+    return (char*)pool->data + (handle.index * pool->item_size);
 };
 
 void* gfx_pool_get_data(gfx_handle_pool_t* pool) {
@@ -491,11 +540,11 @@ void* gfx_pool_get_data(gfx_handle_pool_t* pool) {
 }
 
 size_t gfx_pool_get_stride(gfx_handle_pool_t* pool) {
-    return (pool != nullptr) ? pool->stride : 0;
+    return (pool != nullptr) ? pool->item_size : 0;
 }
 
 size_t gfx_handle_pool_get_size(gfx_handle_pool_t* pool) {
-    return (pool != nullptr) ? pool->used_chunks : 0;
+    return (pool != nullptr) ? pool->used_slots : 0;
 }
 
  size_t gfx_handle_pool_get_capacity(gfx_handle_pool_t* pool) {
@@ -503,7 +552,7 @@ size_t gfx_handle_pool_get_size(gfx_handle_pool_t* pool) {
  }
 
 size_t gfx_pool_has_free(gfx_handle_pool_t* pool) {
-    return (pool != nullptr) ? (pool->used_chunks < pool->capacity) : 0;
+    return (pool != nullptr) ? (pool->used_slots < pool->capacity) : 0;
 }
 
 
@@ -565,17 +614,6 @@ void gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator)
     if (allocator) {
         free(allocator);
     }
-}
-
-inline uint32_t ctz64(uint64_t x) {
-    assert(x != 0);
-#if defined(_MSC_VER)
-    unsigned long index;
-    _BitScanForward64(&index, x);
-    return (uint32_t)index;
-#else
-    return (uint32_t)__builtin_ctzll(x);
-#endif
 }
 
 intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size)
@@ -769,91 +807,102 @@ intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32
 
 
 
-typedef struct gfx_api_pfn
-{
-    // CONTEXT
-    void     (*pfn_init)     (gfx_settings_t* settings, gfx_context_t** ctx);
-    void     (*pfn_destroy)  (gfx_context_t* ctx);
-    void     (*pfn_get_caps) (gfx_context_t* ctx, gfx_caps_t* caps);
+ typedef struct gfx_api_pfn
+ {
+     // CONTEXT
+     void     (*pfn_init)            (gfx_settings_t* settings, gfx_context_t** ctx);
+     void     (*pfn_destroy)         (gfx_context_t* ctx);
+     void     (*pfn_get_caps)        (gfx_context_t* ctx, gfx_caps_t* caps);
 
-    // SWAPCHAIN
-    void     (*pfn_surface_create)(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
-    void     (*pfn_surface_destroy)(gfx_context_t* ctx, gfx_surface_t* surface);
+     // SWAPCHAIN / SURFACE
+     void     (*pfn_surface_create)  (gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
+     void     (*pfn_surface_destroy) (gfx_context_t* ctx, gfx_surface_t* surface);
 
-    void     (*pfn_frame_begin) (gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
-    void     (*pfn_frame_end) (gfx_frame_t* frame);
+     void     (*pfn_frame_begin)     (gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
+     void     (*pfn_frame_end)       (gfx_frame_t* frame);
 
-    // BUFFER
-    void     (*pfn_buffer_create)      (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
-    void     (*pfn_buffer_update_data) (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-    void     (*pfn_buffer_destroy)     (gfx_context_t* ctx, gfx_buffer_t* buffer);
+     // BUFFER
+     void     (*pfn_buffer_create)       (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+     void     (*pfn_buffer_update_data)  (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
+     void     (*pfn_buffer_destroy)      (gfx_context_t* ctx, gfx_buffer_t* buffer);
 
-    // SHADER
-    void     (*pfn_shader_create)    (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
-    uint32_t(*pfn_shader_get_descriptor_set_count)(gfx_shader_t* shader);
-    uint64_t(*pfn_uniform_location) (gfx_shader_t* shader, const char* name);
-    void     (*pfn_shader_destroy)   (gfx_context_t* ctx, gfx_shader_t* shader);
+     // SHADER
+     void    (*pfn_shader_create)                   (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+     uint32_t(*pfn_shader_get_descriptor_set_count) (gfx_shader_t* shader);
+     uint32_t(*pfn_shader_get_uniforms)             (gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms); // new
+     uint64_t(*pfn_uniform_location)                (gfx_shader_t* shader, const char* name);
+     void    (*pfn_shader_destroy)                  (gfx_context_t* ctx, gfx_shader_t* shader);
 
-    // SAMPLER
-    void     (*pfn_sampler_create)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
-    void     (*pfn_sampler_destroy) (gfx_context_t* ctx, gfx_sampler_t* sampler);
+     // DESCRIPTOR SET
+     void     (*pfn_descriptor_set_create)               (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
+     void     (*pfn_descriptor_set_write_buffer_data)    (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
+     void     (*pfn_descriptor_set_write_buffer)         (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
+     void     (*pfn_descriptor_set_write_texture)        (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
+     void     (*pfn_descriptor_set_write_sampler)        (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
+     void     (*pfn_descriptor_set_destroy)              (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
 
-    // TEXTURE
-    void     (*pfn_texture_create)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
-    void     (*pfn_texture_update_data)     (gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
-    void     (*pfn_texture_update_bindless) (gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
-    void     (*pfn_texture_generate_mipmap) (gfx_context_t* ctx, gfx_texture_t* texture);
-    void     (*pfn_texture_blit)            (gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
-    void     (*pfn_texture_get_data)        (gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-    void     (*pfn_texture_destroy)         (gfx_context_t* ctx, gfx_texture_t* texture);
+     // SAMPLER
+     void     (*pfn_sampler_create)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+     void     (*pfn_sampler_destroy) (gfx_context_t* ctx, gfx_sampler_t* sampler);
 
-    // PIPELINE
-    void     (*pfn_pipeline_create)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-    void     (*pfn_mesh_pipeline_create)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-    void     (*pfn_pipeline_destroy)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
+     // TEXTURE
+     void     (*pfn_texture_create)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+     void     (*pfn_texture_update_data)     (gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
+     void     (*pfn_texture_update_bindless) (gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
+     void     (*pfn_texture_generate_mipmap) (gfx_context_t* ctx, gfx_texture_t* texture);
+     void     (*pfn_texture_blit)            (gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
+     void     (*pfn_texture_get_data)        (gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+     void     (*pfn_texture_destroy)         (gfx_context_t* ctx, gfx_texture_t* texture);
 
-    void     (*pfn_pipeline_compute_create)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
-    void     (*pfn_pipeline_compute_destroy) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
+     // PIPELINE
+     void     (*pfn_pipeline_create)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+     void     (*pfn_mesh_pipeline_create)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+     void     (*pfn_pipeline_destroy)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 
-    void     (*pfn_pipeline_raytrace_create) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
-    void     (*pfn_pipeline_raytrace_destroy)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
+     void     (*pfn_pipeline_compute_create)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
+     void     (*pfn_pipeline_compute_destroy) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
-    // DESCRIPTOR SET
-    void     (*pfn_descriptor_set_create)   (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
-    void     (*pfn_descriptor_set_write_buffer_data) (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
-    void     (*pfn_descriptor_set_write_buffer)      (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
-    void     (*pfn_descriptor_set_write_texture)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
-    void     (*pfn_descriptor_set_write_sampler)     (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
-    void     (*pfn_descriptor_set_destroy)  (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
+     void     (*pfn_pipeline_raytrace_create) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+     void     (*pfn_pipeline_raytrace_destroy)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
-    void     (*pfn_cmd_begin_pass) (gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
-    void     (*pfn_cmd_end_pass)   (gfx_command_buffer_t* cmd);
+     // COMMAND BUFFER
+     void     (*pfn_cmd_begin_pass)              (gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
+     void     (*pfn_cmd_end_pass)                (gfx_command_buffer_t* cmd);
 
-    void     (*pfn_cmd_scissor)             (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-    void     (*pfn_cmd_viewport)            (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-    void     (*pfn_cmd_bind_pipeline)       (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-    void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
-    void     (*pfn_cmd_bind_buffer_ib)      (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
-    void     (*pfn_cmd_bind_buffer_vb)      (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
-    void     (*pfn_cmd_draw)                (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-    void     (*pfn_cmd_draw_indexed)        (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
-    void     (*pfn_cmd_draw_indexed_indirect)(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
-    void     (*pfn_cmd_dispatch_compute)    (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
+     void     (*pfn_cmd_scissor) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+     void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+     void     (*pfn_cmd_bind_pipeline) (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
+     void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
+     void     (*pfn_cmd_bind_index_buffer) (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
+     void     (*pfn_cmd_bind_vertex_buffer) (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
+     void     (*pfn_cmd_draw) (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
+     void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
+     void     (*pfn_cmd_draw_indexed_indirect) (gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
+     void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
 
-    void     (*pfn_cmd_push_marker)         (gfx_command_buffer_t* cmd, const char* marker);
-    void     (*pfn_cmd_pop_marker)          (gfx_command_buffer_t* cmd);
+     // Mesh Shading
+     void     (*pfn_cmd_draw_mesh_tasks)             (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);                    // new
+     void     (*pfn_cmd_draw_mesh_tasks_indirect)    (gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride); // new
 
-    void     (*pfn_cmd_buffer_barrier)  (gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
-    void     (*pfn_cmd_texture_barrier) (gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+     // Ray Tracing
+     void     (*pfn_acceleration_structure_create)   (gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** acceleration_struct);
+     void     (*pfn_acceleration_structure_destroy)  (gfx_context_t* ctx, gfx_acceleration_structure_t* acceleration_structure);
+     void     (*pfn_sbt_create)                      (gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** sbt);
+     void     (*pfn_sbt_destroy)                     (gfx_context_t* ctx, gfx_sbt_t* sbt);
+     void     (*pfn_cmd_build_acceleration_structure)(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t* dst, gfx_acceleration_structure_t* src);
+     void     (*pfn_cmd_trace_rays)                  (gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
+     void     (*pfn_cmd_trace_ray_query)             (gfx_command_buffer_t* cmd, gfx_acceleration_structure_t tlas, uint32_t width, uint32_t height, uint32_t depth); // new
 
-    // wip
-    void    (*pfn_acceleration_structure_create)(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** acceleration_struct);
-    void    (*pfn_acceleration_structure_destroy)(gfx_context_t* ctx, gfx_acceleration_structure_t* acceleration_structure);
-    void    (*pfn_sbt_create)(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t**);
-    void    (*pfn_sbt_destroy)(gfx_context_t* ctx, gfx_sbt_t* sbt);
-    void    (*pfn_cmd_build_acceleration_structure)(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t* dst, gfx_acceleration_structure_t* src);
-    void    (*pfn_cmd_trace_rays)(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
-} gfx_api_pfn;
+     // Barriers
+     void     (*pfn_cmd_buffer_barrier)      (gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
+     void     (*pfn_cmd_texture_barrier)     (gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
+
+     // Debug
+     void     (*pfn_cmd_push_marker)         (gfx_command_buffer_t* cmd, const char* marker);
+     void     (*pfn_cmd_pop_marker)          (gfx_command_buffer_t* cmd);
+     void     (*pfn_cmd_get_timestamps)      (gfx_command_buffer_t* cmd, gfx_timestamp_t* timestamps);
+
+ } gfx_api_pfn;
 
 
 static gfx_api_pfn * g_tbl = nullptr;
@@ -1087,8 +1136,8 @@ gfx_api gfx_descriptor_set_t* gfx_descriptor_set_create(gfx_context_t* ctx, gfx_
 void gfx_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) {
     g_tbl->pfn_descriptor_set_write_buffer_data(set, handle, data, size);
 }
-void gfx_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t size) {
-    g_tbl->pfn_descriptor_set_write_buffer(set, handle, buffer, size);
+void gfx_descriptor_set_write_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset) {
+    g_tbl->pfn_descriptor_set_write_buffer(set, handle, buffer, offset);
 }
 void gfx_descriptor_set_write_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture) {
     g_tbl->pfn_descriptor_set_write_texture(set, handle, texture);
@@ -1108,6 +1157,11 @@ void gfx_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker) {
 void gfx_cmd_pop_marker(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_pop_marker(cmd);
 }
+
+void gfx_cmd_get_timestamps(gfx_command_buffer_t* cmd, gfx_timestamp_t* timestamps){
+    return g_tbl->pfn_cmd_get_timestamps(cmd, timestamps);
+}
+
 void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* info) {
     g_tbl->pfn_cmd_begin_pass(cmd, info);
 }
@@ -1127,10 +1181,10 @@ void gfx_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_d
     g_tbl->pfn_cmd_bind_descriptor_set(cmd, slot, descriptor);
 }
 void gfx_cmd_bind_index_buffer(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer) {
-    g_tbl->pfn_cmd_bind_buffer_ib(cmd, format, offset, buffer);
+    g_tbl->pfn_cmd_bind_index_buffer(cmd, format, offset, buffer);
 }
 void gfx_cmd_bind_vertex_buffer(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer) {
-    g_tbl->pfn_cmd_bind_buffer_vb(cmd, slot, offset, buffer);
+    g_tbl->pfn_cmd_bind_vertex_buffer(cmd, slot, offset, buffer);
 }
 void gfx_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count) {
     g_tbl->pfn_cmd_draw(cmd, vertex_count, instance_count);
@@ -1176,11 +1230,10 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     assign_extern(func_table->pfn_frame_begin,  void, vk_frame_begin, (gfx_context_t * ctx, gfx_surface_t * in_surface, gfx_frame_t * *out_frame));
     assign_extern(func_table->pfn_frame_end,    void, vk_frame_end, (gfx_frame_t * frame));
 
-
     // BUFFER
-    func_table->pfn_buffer_create           = vk_buffer_create;
-    func_table->pfn_buffer_update_data      = vk_buffer_update_data;
-    func_table->pfn_buffer_destroy          = vk_buffer_destroy;
+    assign_extern(func_table->pfn_buffer_create,      void, vk_buffer_create,       (gfx_context_t * ctx, gfx_buffer_desc_t * desc, gfx_buffer_t * *out_buffer));
+    assign_extern(func_table->pfn_buffer_update_data, void, vk_buffer_update_data,  (gfx_context_t * ctx, gfx_buffer_t * buffer, void* data, uint32_t size, uint32_t offset));
+    assign_extern(func_table->pfn_buffer_destroy,     void, vk_buffer_destroy,      (gfx_context_t * ctx, gfx_buffer_t * buffer));
 
     // SHADER
     func_table->pfn_shader_create           = vk_shader_create;
@@ -1223,16 +1276,16 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     func_table->pfn_cmd_begin_pass          = vk_cmd_begin_pass;
     func_table->pfn_cmd_end_pass            = vk_cmd_end_pass;
 
-    func_table->pfn_cmd_scissor               = vk_cmd_scissor;
-    func_table->pfn_cmd_viewport              = vk_cmd_viewport;
-    func_table->pfn_cmd_bind_pipeline         = vk_cmd_bind_pipeline;
-    func_table->pfn_cmd_bind_descriptor_set   = vk_cmd_bind_descriptor_set;
-    func_table->pfn_cmd_bind_buffer_ib        = vk_cmd_bind_buffer_ib;
-    func_table->pfn_cmd_bind_buffer_vb        = vk_cmd_bind_buffer_vb;
-    func_table->pfn_cmd_draw                  = vk_cmd_draw;
-    func_table->pfn_cmd_draw_indexed          = vk_cmd_draw_indexed;
+    func_table->pfn_cmd_scissor             = vk_cmd_scissor;
+    func_table->pfn_cmd_viewport            = vk_cmd_viewport;
+    func_table->pfn_cmd_bind_pipeline       = vk_cmd_bind_pipeline;
+    func_table->pfn_cmd_bind_descriptor_set = vk_cmd_bind_descriptor_set;
+    func_table->pfn_cmd_bind_index_buffer   = vk_cmd_bind_buffer_ib;
+    func_table->pfn_cmd_bind_vertex_buffer  = vk_cmd_bind_buffer_vb;
+    func_table->pfn_cmd_draw                = vk_cmd_draw;
+    func_table->pfn_cmd_draw_indexed        = vk_cmd_draw_indexed;
     func_table->pfn_cmd_draw_indexed_indirect = vk_cmd_draw_indexed_indirect;
-    func_table->pfn_cmd_dispatch_compute      = vk_cmd_dispatch_compute;
+    func_table->pfn_cmd_dispatch_compute    = vk_cmd_dispatch_compute;
 
     func_table->pfn_cmd_push_marker         = vk_cmd_push_marker;
     func_table->pfn_cmd_pop_marker          = vk_cmd_pop_marker;
@@ -1305,8 +1358,8 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     func_table->pfn_cmd_viewport              = wgpu_cmd_viewport;
     func_table->pfn_cmd_bind_pipeline         = wgpu_cmd_bind_pipeline;
     func_table->pfn_cmd_bind_descriptor_set   = wgpu_cmd_bind_descriptor_set;
-    func_table->pfn_cmd_bind_buffer_ib        = wgpu_cmd_bind_buffer_ib;
-    func_table->pfn_cmd_bind_buffer_vb        = wgpu_cmd_bind_buffer_vb;
+    func_table->pfn_cmd_bind_index_buffer        = wgpu_cmd_bind_buffer_ib;
+    func_table->pfn_cmd_bind_vertex_buffer        = wgpu_cmd_bind_buffer_vb;
     func_table->pfn_cmd_draw                  = wgpu_cmd_draw;
     func_table->pfn_cmd_draw_indexed          = wgpu_cmd_draw_indexed;
     func_table->pfn_cmd_draw_indexed_indirect = wgpu_cmd_draw_indexed_indirect;

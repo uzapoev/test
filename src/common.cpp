@@ -319,7 +319,7 @@ int debug::callstack(uintptr_t* frames, uint32_t count)
     }
 
     int skipframes = 2;
-    int frame_count = RtlCaptureStackBackTrace(skipframes, (DWORD)count, (PVOID*)frames, NULL) - 5;
+    uint32_t frame_count = RtlCaptureStackBackTrace(skipframes, (DWORD)count, (PVOID*)frames, NULL) - 5;
     if(frame_count > count)
         frame_count = count;
     return frame_count;
@@ -452,9 +452,9 @@ struct stream_impl
         bool refil = (offset > m_file_pos) ||
                      (offset < m_file_pos - m_read_buffer_size);
         if (refil) {
-            int chunk = offset / m_read_buffer_size;
-            int pos = offset % m_read_buffer_size;
-            fseek(m_file, (long)chunk * m_read_buffer_size, whence);
+            size_t chunk = offset / m_read_buffer_size;
+            size_t pos = offset % m_read_buffer_size;
+            fseek(m_file, (long)(chunk * m_read_buffer_size), whence);
             refill_buffer();
         }
 

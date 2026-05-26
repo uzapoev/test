@@ -143,7 +143,7 @@ class geometry_pass  : render_pass { };
 class render_system
 {
 public:
-    static void create_and_make_shader(gfx_context_t* ctx) {
+    static void create_and_make_shared(gfx_context_t* ctx) {
         s_shared = new render_system(ctx);
     }
 

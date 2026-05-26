@@ -15,7 +15,7 @@
 #include "scene/render_system.h"
 #include "resource_loader.h"
 
-extern size_t   read_file_data(const char* path, char** data);
+extern uint32_t read_file_data(const char* path, char** data);
 extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vsize, uint32_t isize, mesh_pool_t* pool);
 
 
@@ -259,7 +259,7 @@ private:
 class resource_manager
 {
 public:
-    static void                                                     create_and_make_shader(gfx_context_t* ctx);
+    static void                                                     create_and_make_shared(gfx_context_t* ctx);
     static resource_manager *                                       shared()    { return s_shared;}
 
 public:

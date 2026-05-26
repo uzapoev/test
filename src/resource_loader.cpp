@@ -18,7 +18,7 @@ size_t filesize(FILE* file)
 }
 
 
-size_t read_file_data2(const char* path, char** data_out)
+uint32_t read_file_data2(const char* path, char** data_out)
 {
     static char * s_ptr = nullptr;
     static size_t s_size = 0;
@@ -45,7 +45,7 @@ size_t read_file_data2(const char* path, char** data_out)
 }
 
 
-size_t read_file_data(const char* path, char** data_out)
+uint32_t read_file_data(const char* path, char** data_out)
 {
     FILE* file = fopen(path, "rb");
     if (file == nullptr)
@@ -538,6 +538,15 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
     if (size == 0)
         return;
 
+    // check for exported
+    size = read_file_data(compiled_name_buff, &data);
+    if (size != 0)
+    {
+        load_shader_from_file_data(ctx, name, data, size, out_shader);
+        free(data);
+        return;
+    }/**/
+
     if(g_compiler_context == nullptr)
         gfx_shader_compiler_context_create(0, &g_compiler_context);
 
@@ -554,14 +563,6 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
         save_shader_program(compiled_name_buff, &compiled_program);
     }
 
-    // check for exported
-    size = read_file_data(compiled_name_buff, &data);
-    if (size != 0)
-    {
-        load_shader_from_file_data(ctx, name, data, size, out_shader);
-        free(data);
-        return;
-    }/**/
 
     free(data);
 }

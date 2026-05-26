@@ -117,37 +117,45 @@ struct tinynode
 class scene
 {
 public:
+
     enum component_type : uint32_t    {
-        scene_meta_data         = const_hash("meta"),
+        scene_meta_data             = const_hash("meta"),
 
-        component_node,                                         // name, guid, tag, flags
-        component_hierarchy     = const_hash("hierarhy"),       // parnet, childs;
-        component_transform     = const_hash("transform"),      // 
+        component_node              /*= const_hash("node")*/,           // name, guid, tag, flags
+        component_hierarchy         = const_hash("hierarhy"),       // parnet, childs;
+        component_transform         = const_hash("transform"),      // 
 
-        component_renderer      = const_hash("renderer"),       // mesh, materials, lightmap, renderparams(cast shadow, etc), occluder
-        component_light         = const_hash("light"),          // point/dir/area, type(static/dynamic/mixed)
-        component_lodgroup      = const_hash("lodgroup"),       // level of details
-        component_occlusion     = const_hash("occlusion"),      // occlusion data
-        component_streaming     = const_hash("streaming"),      // streaming data
-        component_lightprobes   = const_hash("lightprobes"),    // streaming data
+        component_camera            = const_hash("camera"),
+        component_renderer          = const_hash("renderer"),       // mesh, materials, lightmap, renderparams(cast shadow, etc), occluder
+        component_decal             = const_hash("decal"),           // <-- NEW:
+        component_reflection_probe  = const_hash("reflection_probe"), // <-- NEW:
+        component_particle_system   = const_hash("particles"),    // <-- NEW: (VFX)
 
-        component_collider      = const_hash("collider"),       // box, sphere, capsule, mesh, trigger
-        component_rigidbody     = const_hash("rigidbody"),      // 
+        component_light             = const_hash("light"),          // point/dir/area, type(static/dynamic/mixed)
+        component_lodgroup          = const_hash("lodgroup"),       // level of details
+        component_occlusion         = const_hash("occlusion"),      // occlusion data
+        component_streaming         = const_hash("streaming"),      // streaming data
+        component_lightprobes       = const_hash("lightprobes"),    // 
+        component_volume_profile    = const_hash("volume_profile"),
 
-        component_animator      = const_hash("animator"),       // skinned mesh animator
-        component_cinematic     = const_hash("cinematic"),      // kinda dotweens/ transform animations
+        component_collider          = const_hash("collider"),       // box, sphere, capsule, mesh, trigger
+        component_trigger           = const_hash("trigger"),
+        component_rigidbody         = const_hash("rigidbody"),      // 
 
-        component_navagent      = const_hash("navagent"),       // pathfinding
-        component_navmap        = const_hash("navmap"),         // pathfinding
-        component_navobstacle   = const_hash("navobstacle"),    // pathfinding
+        component_animator          = const_hash("animator"),       // skinned mesh animator
+        component_cinematic         = const_hash("cinematic"),      // kinda dotweens/ transform animations
 
-        component_script        = const_hash("script"),         // scripts(backends: lua/c#/native)
+        component_navagent          = const_hash("navagent"),       // pathfinding
+        component_navmap            = const_hash("navmap"),         // pathfinding
+        component_navobstacle       = const_hash("navobstacle"),    // pathfinding
 
-        component_audio_ambient = const_hash("audio_ambient"),  // scripts(backends: lua/c#/native)
-        component_audio_room    = const_hash("audio_room"),     // scripts(backends: lua/c#/native)
-        component_audio_portal  = const_hash("audio_portal"),   // scripts(backends: lua/c#/native)
+        component_audio_ambient     = const_hash("audio_ambient"),  // 
+        component_audio_room        = const_hash("audio_room"),     // 
+        component_audio_portal      = const_hash("audio_portal"),   // 
 
-        component_userdata      = const_hash("userdata"),       // user data component
+        component_canvas            = const_hash("canvas"),
+        component_script            = const_hash("script"),         // scripts(backends: lua/c#/native)
+        component_userdata          = const_hash("userdata"),       // user data component
     };
 
     static scene                            create_from_json_file(const std::string_view& path);

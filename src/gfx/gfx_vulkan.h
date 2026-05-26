@@ -110,6 +110,7 @@ typedef struct vk_context_t
     gfx_handle_pool_t*                  shaders_pool;
     gfx_handle_pool_t *                 pipeline_pool;
     gfx_handle_pool_t *                 compute_pipeline_pool;
+    gfx_handle_pool_t *                 descriptor_set_holder_pools;
 
     //gfx_linked_list_t*                  descriptor_set_pool_list; //
 
@@ -290,10 +291,6 @@ typedef struct vk_descriptor_set_t {
     VkDescriptorSet                     descriptor_set;
 } vk_descriptor_set_t;
 
-typedef struct gfx_timestamp_t {
-    const char* name;
-    float       duration_ms;
-} gfx_timestamp_t;
 
 typedef struct vk_command_buffer_t {
     gfx_command_buffer_t                handle;
@@ -304,6 +301,8 @@ typedef struct vk_command_buffer_t {
     VkDevice                            device              = VK_NULL_HANDLE;
     VkCommandPool                       pool                = VK_NULL_HANDLE;
     VkCommandBuffer                     cmd                 = VK_NULL_HANDLE;
+
+    VkFence                             vk_fence            = VK_NULL_HANDLE;
 
     // 
     uint32_t                            user_bound_mask;

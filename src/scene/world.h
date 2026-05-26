@@ -55,11 +55,11 @@ public:
         return _scene->create_node(name, guid);
     }
 
-    void save_node(class node* _node, filestream* stream)
+    void save_node(struct node* _node, filestream* stream)
     {
-        uint32_t size = _node->guid.length() + sizeof(uint16_t) +
-                        _node->name.length() + sizeof(uint16_t) +
-                        _node->tag.length()  + sizeof(uint16_t) +
+        uint32_t size = (uint32_t)_node->guid.length() + sizeof(uint16_t) +
+                        (uint32_t)_node->name.length() + sizeof(uint16_t) +
+                        (uint32_t)_node->tag.length()  + sizeof(uint16_t) +
                         sizeof(_node->flags);
 
         write_chunk_info(stream, scene::component_node, size);
@@ -91,7 +91,7 @@ public:
         return component;
     }
 
-    template<> void serialize(class renderer * _component, filestream* stream)
+    template<> void serialize(struct renderer * _component, filestream* stream)
     {
         uint32_t chunk_size =   _component->mesh_guid.length()      + sizeof(uint16_t) +
                                 _component->material_guid.length()  + sizeof(uint16_t) +
@@ -130,7 +130,7 @@ public:
     }
 
 
-    template <> void serialize(class transform* _transform, filestream* stream)
+    template <> void serialize(struct transform* _transform, filestream* stream)
     {
         uint32_t size = sizeof(vec3) + sizeof(quat) + sizeof(vec3);
         write_chunk_info(stream, scene::component_transform, size);
@@ -157,11 +157,11 @@ public:
     }
 
 
-    void register_serializer(uint32_t type, std::function<void(class scene*, class filestream*)>)
+    void register_serializer(uint32_t type, std::function<void(class scene*, struct filestream*)>)
     {
     }
 
-    bool resolve_component(uint32_t type, std::function<void(class scene*, class filestream*, struct icomponent**)>* cb)
+    bool resolve_component(uint32_t type, std::function<void(class scene*, struct filestream*, struct icomponent**)>* cb)
     {
         return false;
     }

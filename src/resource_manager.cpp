@@ -142,7 +142,7 @@ void texture_manager_prototype::purge()
 
 resource_manager * resource_manager::s_shared = nullptr;
 
-void resource_manager::create_and_make_shader(gfx_context_t* ctx) 
+void resource_manager::create_and_make_shared(gfx_context_t* ctx)
 {
     if (s_shared == nullptr) 
     {

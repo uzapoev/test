@@ -242,12 +242,6 @@ void aligned_allocator::deallocate(void* memory)
 // paged_pool_allocator
 //
 
-struct page {
-    bitmask     _bitmask;
-    page*       _next = nullptr;
-    uint64_t*   _bitset = nullptr;
-    char*       _data = nullptr;
-};
 
 paged_pool_allocator::paged_pool_allocator(iallocator* memory_resource, size_t allocation_size, size_t allocations_per_page)
 :m_allocator(memory_resource)
@@ -256,7 +250,8 @@ paged_pool_allocator::paged_pool_allocator(iallocator* memory_resource, size_t a
 {
     m_allocations_per_page = align_up(allocations_per_page, 64);
     m_bitset_word_count = m_allocations_per_page / 64;
-    m_page_size = m_allocations_per_page * allocation_size;
+    m_page_size = m_allocations_per_page * m_allocation_size;
+
     m_page_head = allocate_page();
     m_page_current = m_page_head;
 }
@@ -264,80 +259,100 @@ paged_pool_allocator::paged_pool_allocator(iallocator* memory_resource, size_t a
 paged_pool_allocator::~paged_pool_allocator()
 {
     while (m_page_head != nullptr) {
-        auto next = m_page_head->_next;
+        auto next = m_page_head->next;
         m_allocator->deallocate(m_page_head);
         m_page_head = next;
     }
     m_page_head = nullptr;
 }
 
-page* paged_pool_allocator::allocate_page()
+paged_pool_allocator::page* paged_pool_allocator::allocate_page()
 {
     // allocate page info + data size + bitset size
-    size_t size = sizeof(page) + // page info
-                  sizeof(uint64_t) + m_bitset_word_count + // bitmask size
-                  (m_allocation_size * m_allocations_per_page); // data size
+    size_t bitmask_bytes = m_bitset_word_count * sizeof(uint64_t);
+    size_t total_size = sizeof(page) + bitmask_bytes + m_page_size;
 
-    auto result = (page*)m_allocator->allocate(size, alignof(page));
+    auto* raw_mem = (char*)m_allocator->allocate(total_size, alignof(page));
+    memset(raw_mem, 0, total_size);
 
-    result->_bitmask.init(m_allocations_per_page);
-    result->_bitset = (uint64_t*)((char*)result + sizeof(page));
-    result->_data   = (char*)    ((char*)result + sizeof(page) + sizeof(uint64_t) + m_bitset_word_count);
+    auto* p = reinterpret_cast<page*>(raw_mem);
+    p->bitmask = reinterpret_cast<uint64_t*>(raw_mem + sizeof(page));
+    p->data = raw_mem + sizeof(page) + bitmask_bytes;
 
-    debug::log_error("allocated page(%s): %u  data: %u", m_allocator->tag(), result, result->_data);
-    return result;
+    return p;
 }
 
-struct page* paged_pool_allocator::find_page_with_free_blocs()
+paged_pool_allocator::page* paged_pool_allocator::find_page_with_free_blocs()
 {   
     page * tmp = m_page_head;
     while (tmp != nullptr)    {
-        if(tmp->_bitmask.has_free())
-            return tmp;
-
-        tmp = tmp->_next;
+        for (uint16_t i = 0; i < m_bitset_word_count; ++i) {
+            uint64_t inv = ~tmp->bitmask[i];
+            if (inv != 0)
+                return tmp;
+        }
+        tmp = tmp->next;
     }
     return nullptr;
 }
 
-struct page* paged_pool_allocator::find_page_for_ptr(void* ptr)
+paged_pool_allocator::page* paged_pool_allocator::find_page_for_ptr(void* ptr)
 {
     page* tmp = m_page_head;
     while (tmp != nullptr) {
-        if ( ((char*)ptr >= tmp->_data) && 
-             ((char*)ptr < (tmp->_data + m_page_size)))
+        if ( ((char*)ptr >= tmp->data) && 
+             ((char*)ptr < (tmp->data + m_page_size)))
             return tmp;
 
-        tmp = tmp->_next;
+        tmp = tmp->next;
     }
     return nullptr;
 }
 
 void* paged_pool_allocator::allocate(size_t size, size_t alignment)
 {
-    auto page = find_page_with_free_blocs();
+    page* target_page = m_page_head;
+    int free_index = -1;
 
-    if(page == nullptr)
-    {
-        auto newpage = allocate_page();
-        m_page_current->_next = newpage;
-        m_page_current = newpage;
+    while (target_page != nullptr) {
+        for (size_t w = 0; w < m_bitset_word_count; ++w) {
+            uint64_t inv = ~target_page->bitmask[w];
+            if (inv != 0) { 
+                free_index = static_cast<int>(w * 64 + ctz64(inv));
+                break;
+            }
+        }
+        if (free_index != -1) break; 
+        target_page = target_page->next;
     }
 
-    int index = m_page_current->_bitmask.first_free_index();
-    m_page_current->_bitmask.set(index, true);
+    if (target_page == nullptr) {
+        target_page = allocate_page();
+        m_page_current->next = target_page;
+        m_page_current = target_page;
+        free_index = 0;
+    }
 
-    return m_page_current->_data + m_allocation_size * index;
+    bitmask_set(target_page->bitmask, free_index, true);
+
+    return target_page->data + (m_allocation_size * free_index);
 }
 
 void paged_pool_allocator::deallocate(void* ptr)
 {
-    auto page = find_page_for_ptr(ptr);
-    if(!page)
-        return;
+    if (!ptr) return;
 
-    ptrdiff_t index = ((char*)ptr - page->_data)/m_allocation_size;
-    page->_bitmask.set(index, false);
+    page* tmp = m_page_head;
+    while (tmp != nullptr) {
+        if ((char*)ptr >= tmp->data && (char*)ptr < (tmp->data + m_page_size)) {
+            ptrdiff_t offset = (char*)ptr - tmp->data;
+            ptrdiff_t index = offset / m_allocation_size;
+
+            bitmask_set(tmp->bitmask, index, false);
+            return;
+        }
+        tmp = tmp->next;
+    }
 }
 
 
@@ -489,129 +504,7 @@ void buddy_allocator::deallocate(void* ptr)
 
 
 
-
-offset_allocator::offset_allocator(size_t size, size_t min_size)
-:m_buffer_size(size)
-{
-    size_t block_count = size/ (min_size*4);
-    m_min_size = align_up(min_size, sizeof(void*));
-    m_free_blocks.reserve(64);
-    m_free_blocks.emplace_back(0, size);
-    m_allocated_blocks.reserve(64);
-}
-
-
-ptrdiff_t offset_allocator::allocate(size_t size, size_t alignment)
-{
-    if (size == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0) {
-        return -1;
-    }
-
-    size = align_up(size, m_min_size);
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    for (auto it = m_free_blocks.begin(); it != m_free_blocks.end(); ++it) {
-        size_t block_offset = it->offset;
-        size_t block_size = it->size;
-        size_t aligned_offset = align_up(block_offset, alignment);
-        size_t padding = aligned_offset - block_offset;
-
-        if (block_size >= size + padding) {
-
-            m_allocated_blocks.emplace_back(aligned_offset, size);
-
-            if (block_size == size + padding)
-            {
-                m_free_blocks.erase(it);
-            }
-            else 
-            {
-                if (padding > 0) 
-                {
-                    it->size = padding;
-                    if (size < block_size - padding) 
-                    {
-                        m_free_blocks.emplace_back(aligned_offset + size, block_size - size - padding);
-                    }
-                }
-                else 
-                {
-                    it->offset = aligned_offset + size;
-                    it->size = block_size - size;
-                }
-            }
-        
-            std::sort(m_free_blocks.begin(), m_free_blocks.end(),
-                [](const Block& a, const Block& b) { return a.offset < b.offset; });
-
-            return static_cast<ptrdiff_t>(aligned_offset);
-        }
-    }
-
-    return -1;
-}
-
-void offset_allocator::deallocate(size_t offset)
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    for (auto it = m_allocated_blocks.begin(); it != m_allocated_blocks.end(); ++it) {
-        if (it->offset == offset) {
-            m_free_blocks.emplace_back(it->offset, it->size);
-            m_allocated_blocks.erase(it);
-
-            merge_free_blocks();
-            return;
-        }
-    }
-}
-
-void offset_allocator::merge_free_blocks() 
-{
-    if (m_free_blocks.empty())
-        return;
-
-    std::sort(m_free_blocks.begin(), m_free_blocks.end(),
-        [](const Block& a, const Block& b) { return a.offset < b.offset; });
-
-    size_t write_idx = 0;
-    for (size_t read_idx = 1; read_idx < m_free_blocks.size(); ++read_idx) {
-        auto& last = m_free_blocks[write_idx];
-        auto& current = m_free_blocks[read_idx];
-
-        if (last.offset + last.size == current.offset) {
-            last.size += current.size;
-        }
-        else {
-            ++write_idx;
-            m_free_blocks[write_idx] = current;
-        }
-    }
-    m_free_blocks.resize(write_idx + 1);
-/*
-    std::vector<Block> merged;
-    merged.push_back(m_free_blocks[0]);
-
-    for (size_t i = 1; i < m_free_blocks.size(); ++i) {
-        Block& last = merged.back();
-        const Block& current = m_free_blocks[i];
-
-        if (last.offset + last.size >= current.offset) {
-            last.size = std::max(last.size, (current.offset + current.size) - last.offset);
-        }
-        else {
-            merged.push_back(current);
-        }
-    }
-
-    m_free_blocks = std::move(merged);*/
-}
-
-
 #if 0
-
-
 
 static memory_stats_t   mem_total_allocs = { 0, 0x0fffffff, 0, 0 };
 static memory_stats_t   mem_frame_allocs;
