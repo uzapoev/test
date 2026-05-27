@@ -159,7 +159,19 @@ typedef struct uuid_t {
         };
         char     str[32] = "";
     };
+    bool operator==(const uuid_t& other) const {
+        return hi == other.hi && lo == other.lo;
+    }
 } uuid_t;
+
+typedef uuid_t guid_t;
+
+struct guid_hasher {
+    std::size_t operator()(const guid_t& g) const noexcept {
+        return std::hash<uint64_t>{}(g.hi) ^ (std::hash<uint64_t>{}(g.lo) << 1);
+    }
+};
+
 
 
 class uuid

@@ -14,6 +14,8 @@
 #include "render_system.h"
 #include "components.h"
 
+#include "ecs.h"
+
 #ifndef MAKEFOURCC
 #define MAKEFOURCC(ch0, ch1, ch2, ch3) ((uint32_t)(ch0) | ((uint32_t)(ch1) << 8) | ((uint32_t)(ch2) << 16) | ((uint32_t)(ch3) << 24 ))
 #endif
@@ -21,6 +23,8 @@
 constexpr uint32_t const_hash(char const* input) {
     return *input ? static_cast<uint32_t>(*input) + 33 * const_hash(input + 1) : 5381;
 }
+
+
 
 
 // https://github.com/suVrik/acceleration_structure_benchmark
@@ -100,19 +104,88 @@ private:
 
 
 
-struct tinynode
-{
-    interned_string         guid;
-    interned_string         name;
-    interned_string         tag;
-    uint64_t                flags; // static, enabled
 
-    uint64_t                id; 
 
-    struct transform *       m_transform = nullptr;
-    struct hierarchy *       m_hierarchy = nullptr;
-    struct componentlist *   m_components = nullptr;
+
+class entity_factory {
+public:
+    static entity_factory& instance() {
+        static entity_factory inst;
+        return inst;
+    }
+
+    entity_factory() {
+        auto memory_resource = new aligned_allocator("entity_factory");
+        m_node_allocator = new paged_pool_allocator(memory_resource, sizeof(tinynode), 1024 * 16);
+    }
+
+    tinynode* create_entity()
+    {
+        uint32_t assigned_id = 0;
+
+        // Check if we can recycle an old ID to keep the pools dense
+        if (!m_free_runtime_ids.empty()) {
+            assigned_id = m_free_runtime_ids.front();
+            m_free_runtime_ids.pop();
+        }
+        else {
+            assigned_id = m_next_runtime_id++;
+        }
+        tinynode* tnode         = m_node_allocator->allocate<tinynode>();
+        tnode->guid             = generate_random_guid();
+        tnode->runtime_id       = assigned_id;
+        tnode->component_mask   = 0;
+
+        m_guid_to_node_map[tnode->guid] = tnode;
+
+        return tnode;
+    }
+
+    tinynode* create_entity(guid_t persistent_guid) {
+        uint32_t assigned_id = 0;
+        if (!m_free_runtime_ids.empty()) {
+            assigned_id = m_free_runtime_ids.front();
+            m_free_runtime_ids.pop();
+        }
+        else {
+            assigned_id = m_next_runtime_id++;
+        }
+
+        tinynode* tnode = create_entity();
+        m_guid_to_node_map.erase(tnode->guid);
+        tnode->guid = persistent_guid;
+        m_guid_to_node_map[persistent_guid] = tnode;
+
+        return tnode;
+    }
+
+    void destroy_entity(tinynode* node) {
+        if (!node) return;
+        m_free_runtime_ids.push(node->runtime_id);
+        m_guid_to_node_map.erase(node->guid);
+        node->~tinynode();
+        m_node_allocator->deallocate(node);
+    }
+
+    // Quick runtime translation (useful for scripts working with asset references)
+    tinynode* get_runtime_id(const guid_t& guid) const {
+        auto it = m_guid_to_node_map.find(guid);
+        return (it != m_guid_to_node_map.end()) ? it->second : nullptr;
+    }
+
+private:
+    guid_t generate_random_guid() {
+        // Your runtime GUID generation logic (e.g., MurmurHash from string or rand())
+        return guid_t{ 0, 0 };
+    }
+
+private:
+    paged_pool_allocator*                               m_node_allocator = nullptr;
+    uint32_t                                            m_next_runtime_id = 0;
+    std::queue<uint32_t>                                m_free_runtime_ids;
+    std::unordered_map<guid_t, tinynode*, guid_hasher>  m_guid_to_node_map;
 };
+
 
 class scene
 {
@@ -193,15 +266,18 @@ public:
     std::vector<node*>                      m_nodes_flat_list;
     std::vector<node*>                      m_allocated_nodes;
 
+
+  //  entity_query<renderer_t>                m_render_query1;
+    entity_query<transform, renderer>       m_render_query;
+    std::vector<tinynode*>                  m_tiny_nodes;
+    
+
     //scene resources
     std::unordered_set<interned_string>     m_meshes;
     std::unordered_set<interned_string>     m_materials;
 
     class world *                           m_world = nullptr;
-
-    struct paged_pool_allocator *           m_node_allocator = nullptr;
-    struct paged_pool_allocator *           m_transform_allocator = nullptr;
-    struct paged_pool_allocator *           m_hierarchy_allocator = nullptr;
+    paged_pool_allocator *                  m_node_allocator = nullptr;
 };
 
 #endif

@@ -59,6 +59,16 @@ scene scene::create_from_json_file(const std::string_view& path)
         return result;
     }
 
+    component_manager::instance().add_component_by_type_index(nullptr, 10, nullptr);
+    
+    for (auto [node0, trans0, rend0] : result.m_render_query)
+    {
+        auto mesh = resource_manager::shared()->load_mesh(rend0->mesh_guid.c_str());
+
+        auto renderer_r = node0->add_component<renderer_t>();
+        printf("");
+    }
+
     int current_vb_size = 0;
     int current_ib_size = 0;
     int compressed_vb_size = 0;
@@ -173,13 +183,13 @@ scene scene::create_from_json_file(const std::string_view& path)
 
 void scene::load(const std::string_view& path)
 {
-    if(m_node_allocator == nullptr){
-        auto allocator = new aligned_allocator("scene node");
+    component_manager::instance().register_query(&m_render_query);
+  //  component_manager::instance().register_query(&m_render_query);
 
+    if(m_node_allocator == nullptr){
         m_world = new world();
+        auto allocator = new aligned_allocator("scene node");
         m_node_allocator = new paged_pool_allocator(allocator, sizeof(node), 1024*16);
-        m_transform_allocator = new paged_pool_allocator(allocator, sizeof(transform), 1024*16);
-        m_hierarchy_allocator = new paged_pool_allocator(allocator, sizeof(hierarchy), 1024*16);
     }
 
     PROFILE_SAMPLE("scene::load")
@@ -191,45 +201,51 @@ void scene::load(const std::string_view& path)
     m_nodes.resize(header.node_count);// = allocator->alloc<node>(nodes_count);
 
     scene_chunk_info_t info = {};
+    component_manager::instance().pause_notifications();
     while(stream->read(sizeof(scene_chunk_info_t), &info) != 0)
     {
         if(info.type == component_node)        
         {
+            m_tiny_nodes.push_back(entity_factory::instance().create_entity());
+
             auto node = m_world->load_node(this, stream);
             m_nodes_flat_list.emplace_back(node);
         } 
         else if(info.type == component_transform) 
         {
-            auto component = m_world->deserialize<transform>(this, stream);
+            auto component = component_manager::instance().add_component<transform>(m_tiny_nodes.back());
+                component->position = stream->read<vec3>();
+                component->rotation = stream->read<quat>();
+                component->scale    = stream->read<vec3>();
+                component->update_transform();
             m_nodes_flat_list.back()->transform = *component;
         } 
         else if(info.type == component_renderer) 
         {
-            auto component = m_world->deserialize<renderer>(this, stream);
+            auto component = component_manager::instance().add_component<renderer>(m_tiny_nodes.back());
+                component->mesh_guid        = stream->read<interned_string>();;
+                component->material_guid    = stream->read<interned_string>();
+                component->lightmap_guid    = stream->read<interned_string>();
+                component->lightmap_scale_offset = stream->read<vec4>();
             m_nodes_flat_list.back()->renderer = *component;
-
-            m_meshes.insert(component->mesh_guid.c_str());
-        }/**/
+        }
         else 
         {
             stream->seek(info.size, 1);
         }
     }
+    component_manager::instance().resume_notifications(m_tiny_nodes);
+    //component_manager::instance().post_frame_cleanup();
 }
 
 
 node* scene::create_node(interned_string name, interned_string guid)
 {
-    node * result = m_node_allocator->allocate<node>();
+    node * result = new node();
     result->name = name;
     result->guid = guid;
     m_allocated_nodes.push_back(result);
     return result;
-}
-
-transform * scene::create_transform()
-{
-    return m_transform_allocator->allocate<transform>();
 }
 
 
