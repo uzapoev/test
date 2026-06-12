@@ -36,9 +36,16 @@ struct hasher
 {
     static uint32_t     murmur32(const void* data, uint32_t size, uint32_t seed = 5381);
     static uint64_t     murmur64(const void *data, uint32_t size, uint32_t seed = 5381);
+    static uint64_t     xxhash64(const void* input, size_t length, uint64_t seed);
     static size_t       bernstein_ci(const void* data, uint32_t size, uint32_t seed = 5381);
 };
 
+struct path
+{
+    static int copy_file(const char* src_path, const char* dest_path);
+    static int ensure_directory_exists(char* canonical_dir_path);
+    static uint32_t canonicalize_resource_path(const char* src_path, char* out_canonical, uint32_t max_size);
+};
 
 struct debug
 {
@@ -64,19 +71,46 @@ struct utf8
 };
 
 
+typedef struct guid_t {
+    uint64_t    high;
+    uint64_t    low;
+} guid_t;
+
+
+struct uuid
+{
+    static guid_t       generate_from_seed(size_t seed);
+    static guid_t       generate_uuid_v4();
+
+    static uint64_t     runtime_guid(guid_t _guid);
+
+    static bool         is_guid_str(const char* buff);
+    static guid_t       str_to_guid(const char * str);
+    static char*        guid_to_str(guid_t g, char * buff);
+};
+
+inline bool operator==(const guid_t& a, const guid_t& b) { return a.high == b.high && a.low == b.low; }
+
+struct guid_hasher {
+    std::size_t operator()(const guid_t& g) const noexcept {
+        return std::hash<uint64_t>{}(g.high) ^ (std::hash<uint64_t>{}(g.low) << 1);
+    }
+};
+
+
 struct interned_string
 {
 public:
-    interned_string()                                       { clear(); }
-    interned_string(const char * str)                       { m_str = make_intern(str); }
-    interned_string(const std::string & str)                { m_str = make_intern(str.data()); }
-    interned_string(const std::string_view & str)           { m_str = make_intern(str.data()); }
+    interned_string() { clear(); }
+    interned_string(const char* str) { m_str = make_intern(str); }
+    interned_string(const std::string& str) { m_str = make_intern(str.data()); }
+    interned_string(const std::string_view& str) { m_str = make_intern(str.data()); }
 
-    void                clear()                             { m_str = ""; }
-    inline size_t       length() const                      { return m_str.length(); }
-    inline const char * data()   const                      { return m_str.data(); }
-    inline const char * c_str()  const                      { return m_str.data(); }
-    inline bool         empty()  const                      { return m_str.length() == 0; }
+    void                clear() { m_str = ""; }
+    inline size_t       length() const { return m_str.length(); }
+    inline const char*  data()   const { return m_str.data(); }
+    inline const char*  c_str()  const { return m_str.data(); }
+    inline bool         empty()  const { return m_str.length() == 0; }
 
     inline friend bool operator == (const interned_string& b1, const interned_string& b2) { return b1.m_str == b2.m_str; }
     inline friend bool operator <  (const interned_string& b1, const interned_string& b2) { return b1.m_str < b2.m_str; }
@@ -100,14 +134,36 @@ private:
 };
 
 
-template <> struct std::hash<interned_string> 
-{ 
-    inline std::size_t operator() (const interned_string& s) const 
-    { 
+template <> struct std::hash<interned_string>
+{
+    inline std::size_t operator() (const interned_string& s) const
+    {
         return std::hash<const char*> {} (s.c_str());
     }
 };
 
+struct binary_writer {
+    uint32_t    size() const { return current_size;    }
+    const void* data() const { return buffer;    }
+
+    void    write(uint32_t size, const void* data) {
+        if (current_size + size > 512) {
+            debug::log_error("Error: buffer overflow");
+            return;
+        }
+
+        memcpy(buffer + current_size, data, size);
+        current_size += size;
+    }
+
+    template<class T> void write(const T& v) {
+        write(sizeof(T), &v);
+    }
+
+private:
+    char buffer[512] = { 0 };
+    uint32_t current_size = 0;
+};
 
 struct filestream
 {
@@ -123,21 +179,21 @@ struct filestream
     virtual void                seek(uint32_t offset, int whence);
     virtual uint32_t            tell();
     virtual void                flush();
-   
-    template<class T>
-    inline T            read()      { T res = {}; read(sizeof(T), &res); return res; }
 
     template<class T>
-    inline void         write(T v)  { write(sizeof(T), &v); }
+    inline T            read() { T res = {}; read(sizeof(T), &res); return res; }
 
-    template<>  
-    inline void write(interned_string str) { 
+    template<class T>
+    inline void         write(T v) { write(sizeof(T), &v); }
+
+    template<>
+    inline void write(interned_string str) {
         write((uint16_t)str.length());
         write((uint32_t)str.length(), str.data());
     }
 
     template<>
-    inline interned_string  read() { 
+    inline interned_string  read() {
         char buffer[2048] = "";
         uint16_t len = read<uint16_t>();
         assert(len < sizeof(buffer));
@@ -149,64 +205,6 @@ private:
     filestream(struct stream_impl*);
     struct stream_impl* m_impl;
 };
-
-
-typedef struct uuid_t {
-    union {
-        struct  {
-            uint64_t hi;
-            uint64_t lo; 
-        };
-        char     str[32] = "";
-    };
-    bool operator==(const uuid_t& other) const {
-        return hi == other.hi && lo == other.lo;
-    }
-} uuid_t;
-
-typedef uuid_t guid_t;
-
-struct guid_hasher {
-    std::size_t operator()(const guid_t& g) const noexcept {
-        return std::hash<uint64_t>{}(g.hi) ^ (std::hash<uint64_t>{}(g.lo) << 1);
-    }
-};
-
-
-
-class uuid
-{
-public:
-    uuid(void);
-    uuid(const char * uuid);
-    uuid(const uuid& uuid);
-public:
-    static uuid             generate_from_seed(size_t seed);
-    static void             generate(char *buff, size_t size);
-    static bool             validate(const char *buff);
-public:
-    void                    set(const char * uuid);
-    inline const char   *   c_str(void) const           { return m_uuid; }
-    inline size_t           size() const                { return sizeof(m_uuid); }
-
-    inline bool             operator == (const uuid& other) const { return m_low == other.m_low && m_high == other.m_high; }
-    inline bool             operator != (const uuid& other) const { return m_low != other.m_low && m_high != other.m_high; }
-    inline bool             operator <  (const uuid& other) const { 
-        if (m_high < other.m_high) return true;
-        if (m_high > other.m_high) return false;
-        return m_low < other.m_low;
-    }
-protected:
-    union
-    {
-        struct { uint64_t m_low, m_high; };
-        char     m_uuid[32];// 32 sign + '\0'
-    };
-
-};
-static_assert(sizeof(uuid) == 32);
-
-
 
 class measure
 {
@@ -221,7 +219,7 @@ public:
     {
         intend--;
         m_end = std::chrono::high_resolution_clock::now();
-        auto diff = std::chrono::duration_cast<std::chrono::microseconds>(m_end - m_start);
+        auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(m_end - m_start);
         float ms = (float)(((double)diff.count())/1000.0);
 
        // printf(R"("%*s%s: %lldms)", intend*4, " ", m_msg, (long long)diff.count());

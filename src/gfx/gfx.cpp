@@ -226,7 +226,7 @@ uint32_t gfx_utils_hash(const void* data, uint32_t size, uint32_t seed)
 }
 
 
-static uint32_t gfx_block_count(uint32_t s, uint32_t b) { return ((s + b - 1) / b); }
+static uint32_t block_count(uint32_t s, uint32_t b) { return ((s + b - 1) / b); }
 
 uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format)
 {
@@ -252,12 +252,12 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
         case gfx_pixel_format_bc6h:             return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
         case gfx_pixel_format_bc7:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 16;
 
-        case gfx_pixel_format_astc4x4:          return gfx_block_count(w, 4) * gfx_block_count(h, 4) * gfx_block_count(d, 4) * 16;
-        case gfx_pixel_format_astc5x5:          return gfx_block_count(w, 5) * gfx_block_count(h, 5) * gfx_block_count(d, 5) * 16;
-        case gfx_pixel_format_astc6x6:          return gfx_block_count(w, 6) * gfx_block_count(h, 6) * gfx_block_count(d, 6) * 16;
-        case gfx_pixel_format_astc8x8:          return gfx_block_count(w, 8) * gfx_block_count(h, 8) * gfx_block_count(d, 8) * 16;
-        case gfx_pixel_format_astc10x10:        return gfx_block_count(w, 10) * gfx_block_count(h, 10) * gfx_block_count(d, 10) * 16;
-        case gfx_pixel_format_astc12x12:        return gfx_block_count(w, 12) * gfx_block_count(h, 12) * gfx_block_count(d, 12) * 16;
+        case gfx_pixel_format_astc4x4:          return block_count(w, 4) * block_count(h, 4) * block_count(d, 4) * 16;
+        case gfx_pixel_format_astc5x5:          return block_count(w, 5) * block_count(h, 5) * block_count(d, 5) * 16;
+        case gfx_pixel_format_astc6x6:          return block_count(w, 6) * block_count(h, 6) * block_count(d, 6) * 16;
+        case gfx_pixel_format_astc8x8:          return block_count(w, 8) * block_count(h, 8) * block_count(d, 8) * 16;
+        case gfx_pixel_format_astc10x10:        return block_count(w, 10) * block_count(h, 10) * block_count(d, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return block_count(w, 12) * block_count(h, 12) * block_count(d, 12) * 16;
 
         case gfx_pixel_format_r16f:             return w * h * d * sizeof(uint16_t);
         case gfx_pixel_format_rg16f:            return w * h * d * sizeof(uint16_t) * 2;
@@ -297,12 +297,12 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
         case gfx_pixel_format_bc6h:             return gfx_max(1, width >> 2) * 16;
         case gfx_pixel_format_bc7:              return gfx_max(1, width >> 2) * 16;
 
-        case gfx_pixel_format_astc4x4:          return gfx_block_count(width, 4) * 16;
-        case gfx_pixel_format_astc5x5:          return gfx_block_count(width, 5) * 16;
-        case gfx_pixel_format_astc6x6:          return gfx_block_count(width, 6) * 16;
-        case gfx_pixel_format_astc8x8:          return gfx_block_count(width, 8) * 16;
-        case gfx_pixel_format_astc10x10:        return gfx_block_count(width, 10) * 16;
-        case gfx_pixel_format_astc12x12:        return gfx_block_count(width, 12) * 16;
+        case gfx_pixel_format_astc4x4:          return block_count(width, 4) * 16;
+        case gfx_pixel_format_astc5x5:          return block_count(width, 5) * 16;
+        case gfx_pixel_format_astc6x6:          return block_count(width, 6) * 16;
+        case gfx_pixel_format_astc8x8:          return block_count(width, 8) * 16;
+        case gfx_pixel_format_astc10x10:        return block_count(width, 10) * 16;
+        case gfx_pixel_format_astc12x12:        return block_count(width, 12) * 16;
 
         case gfx_pixel_format_r16f:             return width * sizeof(uint16_t);
         case gfx_pixel_format_rg16f:            return width * sizeof(uint16_t) * 2;
@@ -1205,7 +1205,50 @@ void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures
     g_tbl->pfn_cmd_texture_barrier(cmd, textures, count, src, dst);
 }
 
+gfx_acceleration_structure_t gfx_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc)
+{
+    gfx_acceleration_structure_t *as = nullptr;
+    g_tbl->pfn_acceleration_structure_create(ctx, desc, &as);
+    return *as;
+}
 
+
+void gfx_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t acceleration_structure)
+{
+    g_tbl->pfn_acceleration_structure_destroy(ctx, &acceleration_structure);
+}
+
+
+gfx_sbt_t gfx_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc)
+{
+    gfx_sbt_t *sbt = nullptr;
+    g_tbl->pfn_sbt_create(ctx, desc, &sbt);
+    return *sbt;
+}
+
+
+void gfx_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t sbt)
+{
+    g_tbl->pfn_sbt_destroy(ctx, &sbt);
+}
+
+
+void gfx_cmd_build_acceleration_structure(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t dst, gfx_acceleration_structure_t src)
+{
+    g_tbl->pfn_cmd_build_acceleration_structure(cmd, &dst, &src);
+}
+
+
+void gfx_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth)
+{
+    g_tbl->pfn_cmd_trace_rays(cmd, pipeline, sbt, width, height, depth);
+}
+
+
+void gfx_cmd_trace_ray_query(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t tlas, uint32_t width, uint32_t height, uint32_t depth)
+{
+    g_tbl->pfn_cmd_trace_ray_query(cmd, tlas, width, height, depth);
+}
 
 
 #ifdef VULKAN_AVAILABLE

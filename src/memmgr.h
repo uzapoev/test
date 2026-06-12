@@ -79,6 +79,10 @@ struct paged_pool_allocator : iallocator
 
     virtual void        deallocate(void* ptr);
 
+    bool                contains_address(const void* ptr);
+
+    void *              data_by_index(uint32_t index);
+
 private:
     struct page {
         page* next = nullptr;
@@ -89,9 +93,9 @@ private:
 
     page *       allocate_page();
 
-    page *       find_page_with_free_blocs();
+    page *       find_page_with_free_block();
 
-    page *       find_page_for_ptr(void * ptr);
+    page *       find_page_for_ptr(const void * ptr);
 
 private:
 
@@ -111,7 +115,42 @@ private:
 //
 //
 //
-class buddy_allocator  : public iallocator
+class staging_allocator : public iallocator
+{
+public:
+    staging_allocator(iallocator* memory_resource, size_t allocation_size, bool stretch);
+    virtual ~staging_allocator();
+
+    virtual void*   allocate(size_t size, size_t alignment) override;
+    virtual void    deallocate(void* memory) override;
+    
+    void            trim_to_initial_size();    // Forces buffer shrinking back to initial size if it is empty
+    bool            empty();                // Checks if all allocated blocks have been freed
+
+private:
+    bool            reallocate_buffer(size_t new_size);
+
+    struct BlockHeader {
+        uint32_t size;
+        uint32_t padding;
+    };
+
+    iallocator* m_allocator;
+    size_t      m_initial_size; // Store initial size to shrink back to it later
+    size_t      m_size;
+    uint8_t* m_data = nullptr;
+
+    uint32_t    m_head = 0;
+    uint32_t    m_tail = 0;
+    uint32_t    m_end = 0;
+    bool        m_stretch = false;
+    std::mutex  m_mutex;
+};
+
+//
+//
+//
+class buddy_allocator : public iallocator
 {
 public:
     buddy_allocator(void* buffer, size_t totalSize, size_t minBlockSize = 64);

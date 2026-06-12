@@ -282,7 +282,7 @@ paged_pool_allocator::page* paged_pool_allocator::allocate_page()
     return p;
 }
 
-paged_pool_allocator::page* paged_pool_allocator::find_page_with_free_blocs()
+paged_pool_allocator::page* paged_pool_allocator::find_page_with_free_block()
 {   
     page * tmp = m_page_head;
     while (tmp != nullptr)    {
@@ -296,7 +296,7 @@ paged_pool_allocator::page* paged_pool_allocator::find_page_with_free_blocs()
     return nullptr;
 }
 
-paged_pool_allocator::page* paged_pool_allocator::find_page_for_ptr(void* ptr)
+paged_pool_allocator::page* paged_pool_allocator::find_page_for_ptr(const void* ptr)
 {
     page* tmp = m_page_head;
     while (tmp != nullptr) {
@@ -311,6 +311,8 @@ paged_pool_allocator::page* paged_pool_allocator::find_page_for_ptr(void* ptr)
 
 void* paged_pool_allocator::allocate(size_t size, size_t alignment)
 {
+    assert(size == m_allocation_size);
+
     page* target_page = m_page_head;
     int free_index = -1;
 
@@ -342,16 +344,205 @@ void paged_pool_allocator::deallocate(void* ptr)
 {
     if (!ptr) return;
 
+    
+
     page* tmp = m_page_head;
     while (tmp != nullptr) {
         if ((char*)ptr >= tmp->data && (char*)ptr < (tmp->data + m_page_size)) {
             ptrdiff_t offset = (char*)ptr - tmp->data;
             ptrdiff_t index = offset / m_allocation_size;
 
+            assert(bitmask_value(tmp->bitmask, index)); //prevent double free 
             bitmask_set(tmp->bitmask, index, false);
             return;
         }
         tmp = tmp->next;
+    }
+}
+
+
+bool paged_pool_allocator::contains_address(const void* ptr)
+{
+    return find_page_for_ptr(ptr) != nullptr;
+}
+
+void* paged_pool_allocator::data_by_index(uint32_t index)
+{
+    uint32_t page_num = index / m_allocations_per_page;
+    uint32_t local_index = index % m_allocations_per_page;
+
+    page* current = m_page_head;
+    for (uint32_t i = 0; i < page_num; ++i) {
+        if (!current) {
+            return nullptr;
+        }
+        current = current->next;
+    }
+    if (!current || local_index >= m_allocations_per_page) {
+        return nullptr;
+    }
+
+   // uint32_t mask_idx = local_index / 64;
+    uint32_t bit_pos = local_index % 64;
+    if(!bitmask_value(current->bitmask, bit_pos))
+        return nullptr;
+
+    return current->data + (m_allocation_size * local_index);
+}
+
+
+
+staging_allocator::staging_allocator(iallocator* memory_resource, size_t allocation_size, bool stretch)
+    : m_allocator(memory_resource), m_initial_size(allocation_size), m_size(allocation_size), m_end(allocation_size), m_stretch(stretch)
+{
+    if (m_allocator && m_size > 0) {
+        m_data = (uint8_t*)m_allocator->allocate(m_size, 16);
+    }
+}
+
+staging_allocator::~staging_allocator()
+{
+    if (m_data && m_allocator) {
+        m_allocator->deallocate(m_data);
+    }
+}
+
+bool staging_allocator::empty()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // In a clean FIFO ring buffer, if head meets tail, the buffer is empty
+    return m_head == m_tail;
+}
+
+bool staging_allocator::reallocate_buffer(size_t new_size)
+{
+    // MUST be called under lock and ONLY when m_head == m_tail (empty buffer)
+    if (!m_allocator) return false;
+
+    void* new_data = m_allocator->allocate(new_size, 16);
+    if (!new_data) return false; // Allocation failed, keep old buffer
+
+    if (m_data) {
+        m_allocator->deallocate(m_data);
+    }
+
+    m_data = (uint8_t*)new_data;
+    m_size = new_size;
+    m_head = 0;
+    m_tail = 0;
+    m_end = (uint32_t)new_size;
+
+    return true;
+}
+
+void staging_allocator::trim_to_initial_size()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // Low-memory notification handler: shrink only if empty and currently bloated
+    if (m_head == m_tail && m_size > m_initial_size) {
+        reallocate_buffer(m_initial_size);
+    }
+}
+
+void* staging_allocator::allocate(size_t size, size_t alignment)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_data) return nullptr;
+
+    size_t header_size = sizeof(BlockHeader);
+    size_t alignment_mask = alignment - 1;
+
+    uint32_t potential_tail = m_tail;
+    uintptr_t raw_user_ptr = (uintptr_t)(m_data + potential_tail + header_size);
+    uintptr_t aligned_user_ptr = (raw_user_ptr + alignment_mask) & ~alignment_mask;
+
+    uint32_t padding = (uint32_t)(aligned_user_ptr - (uintptr_t)(m_data + potential_tail));
+    uint32_t total_required_size = (uint32_t)(header_size + padding + size);
+    total_required_size = (total_required_size + 15) & ~15;
+
+    // Loop for handling potential reallocation inside the same call
+    while (true) {
+        // Case 1: Linear layout
+        if (m_tail >= m_head) {
+            if (m_tail + total_required_size <= m_size) {
+                BlockHeader* header = (BlockHeader*)(m_data + m_tail);
+                header->size = total_required_size;
+                header->padding = padding;
+
+                m_tail += total_required_size;
+                m_end = m_tail;
+                return (void*)aligned_user_ptr;
+            }
+
+            if (total_required_size < m_head) {
+                m_end = m_tail;
+                m_tail = 0;
+
+                raw_user_ptr = (uintptr_t)(m_data + m_tail + header_size);
+                aligned_user_ptr = (raw_user_ptr + alignment_mask) & ~alignment_mask;
+                padding = (uint32_t)(aligned_user_ptr - (uintptr_t)(m_data + m_tail));
+
+                BlockHeader* header = (BlockHeader*)(m_data + m_tail);
+                header->size = total_required_size;
+                header->padding = padding;
+
+                m_tail += total_required_size;
+                return (void*)aligned_user_ptr;
+            }
+        }
+        // Case 2: Wrapped layout
+        else {
+            if (m_tail + total_required_size < m_head) {
+                BlockHeader* header = (BlockHeader*)(m_data + m_tail);
+                header->size = total_required_size;
+                header->padding = padding;
+
+                m_tail += total_required_size;
+                return (void*)aligned_user_ptr;
+            }
+        }
+
+        // If we reach here, there is not enough space. 
+        // If stretching is allowed AND the buffer is currently empty (but just too small),
+        // we can instantly resize it right now.
+        if (m_stretch && m_head == m_tail) {
+            size_t target_size = std::max(m_size * 2, (size_t)total_required_size * 2);
+            if (reallocate_buffer(target_size)) {
+                // Recalculate pointers for the fresh buffer layout and retry loop
+                potential_tail = m_tail;
+                raw_user_ptr = (uintptr_t)(m_data + potential_tail + header_size);
+                aligned_user_ptr = (raw_user_ptr + alignment_mask) & ~alignment_mask;
+                padding = (uint32_t)(aligned_user_ptr - (uintptr_t)(m_data + potential_tail));
+                total_required_size = (uint32_t)(header_size + padding + size);
+                total_required_size = (total_required_size + 15) & ~15;
+                continue;
+            }
+        }
+
+        break; // Cannot allocate or resize at this moment
+    }
+
+    return nullptr;
+}
+
+void staging_allocator::deallocate(void* memory)
+{
+    if (!memory) return;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (m_head == m_end && m_tail < m_head) {
+        m_head = 0;
+        m_end = (uint32_t)m_size;
+    }
+
+    BlockHeader* header = (BlockHeader*)(m_data + m_head);
+    m_head += header->size;
+
+    if (m_head == m_end && m_tail < m_head) {
+        m_head = 0;
+        m_end = (uint32_t)m_size;
     }
 }
 

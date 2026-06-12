@@ -5,6 +5,7 @@
 #include <stdint.h>  // int8_t
 #include <math.h>
 
+
 #if defined(__SSE2__) || defined(_M_IX86_FP) && (_M_IX86_FP >= 2) || defined(_M_X64)
     #define MATHLIB_SSE
     #include <emmintrin.h>
@@ -17,62 +18,57 @@
 #endif
 
 
-
-//#include <float.h>
-
 #define MATH_INLINE inline
 
 typedef struct vec2     { float x = 0.0f, y = 0.0f;                     } vec2;
 typedef struct vec3     { float x = 0.0f, y = 0.0f, z = 0.0f;           } vec3;
 typedef struct vec4     { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; } vec4;
 
-typedef struct alignas(16) float2   { float x = 0.0f, y = 0.0f;                     } float2;
-typedef struct alignas(16) float3   { float x = 0.0f, y = 0.0f, z = 0.0f;           } float3;
+typedef struct alignas(8)  float2   { float x = 0.0f, y = 0.0f;             } float2;
 typedef struct alignas(16) float4   { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; } float4;
-typedef struct alignas(16) float4x4 { float4 c0, c1, c2, c3;                        } float4x4;
+typedef struct alignas(16) float4x4 { float4 c0, c1, c2, c3;                } float4x4;
 
-typedef struct short4   { int16_t  x = 0, y = 0, z = 0, w = 0;          } short4;
-typedef struct ushort4  { uint16_t x = 0, y = 0, z = 0, w = 0;          } ushort4;
-typedef struct int4     { int32_t  x = 0, y = 0, z = 0, w = 0;          } int4;
-typedef struct uint4    { uint32_t x = 0, y = 0, z = 0, w = 0;          } uint4;
-
-typedef struct half4    { uint16_t x = 0, y = 0, z = 0, w = 0;          } half4;
+typedef struct alignas(8)  short4   { int16_t  x = 0, y = 0, z = 0, w = 0; } short4;
+typedef struct alignas(8)  ushort4  { uint16_t x = 0, y = 0, z = 0, w = 0; } ushort4;
+typedef struct alignas(8)  half4    { uint16_t x = 0, y = 0, z = 0, w = 0; } half4;
+typedef struct alignas(16) int4     { int32_t  x = 0, y = 0, z = 0, w = 0; } int4;
+typedef struct alignas(16) uint4    { uint32_t x = 0, y = 0, z = 0, w = 0; } uint4;
 
 static_assert(sizeof(uint64_t) == sizeof(half4));
 
-
-#define DECL_VPTR       float * v_ptr = (float*)&v.x;
-#define DECL_VBPTR      float * v_ptr = (float*)&v.x; float* b_ptr = (float *)&b.x;
-#define DECL_D_PTR(T)   T dst; float* dst_ptr = (float*)&dst.x; float* v_ptr = (float *)&v.x;
-#define DECL_D_ABPTR(T) T dst; float* dst_ptr = (float*)&dst.x; float* a_ptr = (float *)&a.x; float* b_ptr = (float*)&b.x; 
-
-#define DECLARE_OPERATORS(T, COUNT) \
-    MATH_INLINE T operator + (const T& a, const T& b)   { DECL_D_ABPTR(T) for (int i = 0; i < COUNT; ++i) dst_ptr[i] = a_ptr[i] + b_ptr[i]; return dst;}  \
-    MATH_INLINE T operator - (const T& a, const T& b)   { DECL_D_ABPTR(T) for (int i = 0; i < COUNT; ++i) dst_ptr[i] = a_ptr[i] - b_ptr[i]; return dst;}  \
-    MATH_INLINE T operator * (const T& v, float f)      { DECL_D_PTR(T)   for (int i = 0; i < COUNT; ++i) dst_ptr[i] = v_ptr[i] * f; return dst;}         \
-    MATH_INLINE T operator / (const T& v, float f)      { DECL_D_PTR(T)   for (int i = 0; i < COUNT; ++i) dst_ptr[i] = v_ptr[i] / f; return dst;}         \
-    MATH_INLINE T operator * (float f, const T& v)      { DECL_D_PTR(T)   for (int i = 0; i < COUNT; ++i) dst_ptr[i] = v_ptr[i] * f; return dst;}         \
-    MATH_INLINE T operator / (float f, const T& v)      { DECL_D_PTR(T)   for (int i = 0; i < COUNT; ++i) dst_ptr[i] = v_ptr[i] / f; return dst;}         \
-    MATH_INLINE void operator *= (T& v, float f)        { DECL_VPTR     for (int i = 0; i < COUNT; ++i) v_ptr[i] *= f; }        \
-    MATH_INLINE void operator /= (T& v, float f)        { DECL_VPTR     for (int i = 0; i < COUNT; ++i) v_ptr[i] /= f; }        \
-    MATH_INLINE void operator += (T& v, const T& b)     { DECL_VBPTR    for (int i = 0; i < COUNT; ++i) v_ptr[i] += b_ptr[i]; } \
-    MATH_INLINE void operator -= (T& v, const T& b)     { DECL_VBPTR    for (int i = 0; i < COUNT; ++i) v_ptr[i] -= b_ptr[i]; } \
-
-DECLARE_OPERATORS(vec2, 2)
-DECLARE_OPERATORS(vec3, 3)
-DECLARE_OPERATORS(vec4, 4)
-
 namespace math { bool fcmp(float, float); };
+
+MATH_INLINE vec2 operator+(const vec2& a, const vec2& b)    { return { a.x + b.x, a.y + b.y }; }
+MATH_INLINE vec2 operator-(const vec2& a, const vec2& b)    { return { a.x - b.x, a.y - b.y }; }
+MATH_INLINE vec2 operator*(const vec2& v, float f)          { return { v.x * f, v.y * f }; }
+MATH_INLINE vec2 operator*(float f, const vec2& v)          { return { v.x * f, v.y * f }; }
+MATH_INLINE void operator+=(vec2& v, const vec2& b)         { v.x += b.x; v.y += b.y; }
+MATH_INLINE void operator*=(vec2& v, float f)               { v.x *= f; v.y *= f; }
+
+MATH_INLINE vec3 operator+(const vec3& a, const vec3& b)    { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
+MATH_INLINE vec3 operator-(const vec3& a, const vec3& b)    { return { a.x - b.x, a.y - b.y, a.z - b.z }; }
+MATH_INLINE vec3 operator*(const vec3& v, float f)          { return { v.x * f, v.y * f, v.z * f }; }
+MATH_INLINE vec3 operator*(float f, const vec3& v)          { return { v.x * f, v.y * f, v.z * f }; }
+MATH_INLINE void operator+=(vec3& v, const vec3& b)         { v.x += b.x; v.y += b.y; v.z += b.z; }
+MATH_INLINE void operator*=(vec3& v, float f)               { v.x *= f; v.y *= f; v.z *= f; }
+
+MATH_INLINE vec4 operator+(const vec4& a, const vec4& b)    { return { a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w }; }
+MATH_INLINE vec4 operator-(const vec4& a, const vec4& b)    { return { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w }; }
+MATH_INLINE vec4 operator*(const vec4& v, float f)          { return { v.x * f, v.y * f, v.z * f, v.w * f }; }
+MATH_INLINE vec4 operator*(float f, const vec4& v)          { return { v.x * f, v.y * f, v.z * f, v.w * f }; }
+MATH_INLINE void operator+=(vec4& v, const vec4& b)         { v.x += b.x; v.y += b.y; v.z += b.z; v.w += b.w; }
+MATH_INLINE void operator*=(vec4& v, float f)               { v.x *= f; v.y *= f; v.z *= f; v.w *= f; }
 
 MATH_INLINE bool operator == (const vec2& a, const vec2& b) { return math::fcmp(a.x, b.x) && math::fcmp(a.y, b.y); }
 MATH_INLINE bool operator == (const vec3& a, const vec3& b) { return math::fcmp(a.x, b.x) && math::fcmp(a.y, b.y) && math::fcmp(a.z, b.z); }
 MATH_INLINE bool operator == (const vec4& a, const vec4& b) { return math::fcmp(a.x, b.x) && math::fcmp(a.y, b.y) && math::fcmp(a.z, b.z) && math::fcmp(a.w, b.w); }
 
-//MATH_INLINE float4 operator = (const vec4& a) {return { a.x, a.y, a.z, a.w};}
+MATH_INLINE vec2 operator - (const vec2& v)                 { return { -v.x, -v.y }; }
+MATH_INLINE vec3 operator - (const vec3& v)                 { return { -v.x, -v.y, -v.z }; }
+MATH_INLINE vec4 operator - (const vec4& v)                 { return { -v.x, -v.y, -v.z, -v.w }; }
 
-MATH_INLINE vec3 operator - (const vec3& v) { return { -v.x, -v.y, -v.z }; }
 
-static bool g_is_right_hand = true;
+inline bool g_is_right_hand = true;
 
 static bool is_right_hand()         { return g_is_right_hand;   }
 static void set_right_hand(bool rh) { g_is_right_hand = rh;     }
@@ -117,7 +113,7 @@ namespace math
 
     MATH_INLINE vec3 make_vec3(float x, float y, float z)           { return {x,y,z}; }
     MATH_INLINE vec3 make_vec3(const vec4& a)                       { return {a.x, a.y, a.z}; }
-    MATH_INLINE vec3 make_vec3(const float3& a)                     { return {a.x, a.y, a.z}; }
+    MATH_INLINE vec3 make_vec3(const vec3& a)                       { return {a.x, a.y, a.z}; }
     MATH_INLINE vec3 make_vec3(const float4& a)                     { return {a.x, a.y, a.z}; }
     MATH_INLINE vec4 make_vec4(const vec3 &a)                       { return { a.x, a.y, a.z, 1.0f}; }
     MATH_INLINE vec4 make_vec4(float x, float y, float z, float w)  { return { x, y, z, w}; }
@@ -287,7 +283,7 @@ namespace math
         }
 
         // encode each float in 10 bit
-        static uint32_t encode_float3_snorm(float3 v)
+        static uint32_t encode_float3_snorm(vec3 v)
         {
             int x = (int)(v.x + 1.0f) * 512;
             int y = (int)(v.y + 1.0f) * 512;
@@ -295,7 +291,7 @@ namespace math
             return (x & 0x3FF) | ((y & 0x3FF) << 10) | ((z & 0x3FF) << 20);
         }
 
-        static float3   decode_float3_snorm(uint32_t v)
+        static vec3 decode_float3_snorm(uint32_t v)
         {
             float x = ((v >> 0) & 0x3FF) / 1024.0f;
             float y = ((v >> 10) & 0x3FF) / 1024.0f;

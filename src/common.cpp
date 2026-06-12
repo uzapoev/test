@@ -1,6 +1,6 @@
 #include "common.h"
 #include <stdarg.h>
-
+#include <filesystem>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -8,7 +8,14 @@
     #pragma comment(lib, "dbghelp.lib")
     #define snprintf _snprintf
 
+    #include <direct.h>
+    #define sys_mkdir(path) _mkdir(path)
+
     #pragma warning( disable: 26819)
+#else
+    #include <unistd.h>
+    /* S_IRWXU: read, write, execute permissions for owner on POSIX systems */
+    #define sys_mkdir(path) mkdir(path, S_IRWXU)
 #endif
 
 std::unordered_set <std::string>interned_string::s_interned;
@@ -193,6 +200,184 @@ size_t hasher::bernstein_ci(const void* data_in, uint32_t size, uint32_t seed)
         h = ((h << 5) + h) ^ (unsigned)tolower(data[size]);
     }
     return h;
+}
+
+static inline unsigned long long rotl64(unsigned long long x, int r) {
+    return (x << r) | (x >> (64 - r));
+}
+
+uint64_t hasher::xxhash64(const void* input, size_t length, uint64_t seed)
+{
+    const uint64_t PRIME64_1 = 11400714785074694791ULL;
+    const uint64_t PRIME64_2 = 14029467366897019727ULL;
+    const uint64_t PRIME64_3 = 8545103131759506653ULL;
+    const uint64_t PRIME64_4 = 5973393777823847427ULL;
+    const uint64_t PRIME64_5 = 2870177450012600261ULL;
+
+    const unsigned char* p = (const unsigned char*)input;
+    const unsigned char* const end = p + length;
+    uint64_t h64;
+
+    if (length >= 32) {
+        const unsigned char* const limit = end - 32;
+        uint64_t v1 = seed + PRIME64_1 + PRIME64_2;
+        uint64_t v2 = seed + PRIME64_2;
+        uint64_t v3 = seed + 0;
+        uint64_t v4 = seed - PRIME64_1;
+
+        do {
+            uint64_t k1, k2, k3, k4;
+            memcpy(&k1, p, 8);      v1 += k1 * PRIME64_2; v1 = rotl64(v1, 31); v1 *= PRIME64_1; p += 8;
+            memcpy(&k2, p, 8);      v2 += k2 * PRIME64_2; v2 = rotl64(v2, 31); v2 *= PRIME64_1; p += 8;
+            memcpy(&k3, p, 8);      v3 += k3 * PRIME64_2; v3 = rotl64(v3, 31); v3 *= PRIME64_1; p += 8;
+            memcpy(&k4, p, 8);      v4 += k4 * PRIME64_2; v4 = rotl64(v4, 31); v4 *= PRIME64_1; p += 8;
+        } while (p <= limit);
+
+        h64 = rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18);
+
+        v1 *= PRIME64_2; v1 = rotl64(v1, 31); v1 *= PRIME64_1; h64 ^= v1; h64 = h64 * PRIME64_1 + PRIME64_4;
+        v2 *= PRIME64_2; v2 = rotl64(v2, 31); v2 *= PRIME64_1; h64 ^= v2; h64 = h64 * PRIME64_1 + PRIME64_4;
+        v3 *= PRIME64_2; v3 = rotl64(v3, 31); v3 *= PRIME64_1; h64 ^= v3; h64 = h64 * PRIME64_1 + PRIME64_4;
+        v4 *= PRIME64_2; v4 = rotl64(v4, 31); v4 *= PRIME64_1; h64 ^= v4; h64 = h64 * PRIME64_1 + PRIME64_4;
+    }
+    else {
+
+        h64 = seed + PRIME64_5;
+    }
+
+    h64 += (uint64_t)length;
+
+    while (p + 8 <= end) {
+        uint64_t k1;
+        memcpy(&k1, p, 8);
+        k1 *= PRIME64_2; k1 = rotl64(k1, 31); k1 *= PRIME64_1;
+        h64 ^= k1;
+        h64 = rotl64(h64, 27) * PRIME64_1 + PRIME64_4;
+        p += 8;
+    }
+
+    if (p + 4 <= end) {
+        unsigned int k1;
+        memcpy(&k1, p, 4);
+        h64 ^= (uint64_t)k1 * PRIME64_1;
+        h64 = rotl64(h64, 23) * PRIME64_2 + PRIME64_3;
+        p += 4;
+    }
+
+    while (p < end) {
+        h64 ^= (uint64_t)(*p) * PRIME64_5;
+        h64 = rotl64(h64, 11) * PRIME64_1;
+        p++;
+    }
+
+    h64 ^= h64 >> 33;
+    h64 *= PRIME64_2;
+    h64 ^= h64 >> 29;
+    h64 *= PRIME64_3;
+    h64 ^= h64 >> 32;
+
+    return h64;
+
+}
+
+int path::ensure_directory_exists(char* canonical_dir_path) {
+
+    std::filesystem::create_directories(canonical_dir_path);
+    return 1;
+}
+
+
+int path::copy_file(const char* src_path, const char* dest_path)
+{
+    if (!src_path || !dest_path) return 0;
+
+    char parent_buff[1024];
+    const char* last_slash = strrchr(dest_path, '/');
+    if (last_slash) {
+        size_t len = last_slash - dest_path;
+        if (len >= sizeof(parent_buff)) {
+            fprintf(stderr, "Error: Destination path is too long\n");
+            return 0;
+        }
+
+        if (len == 0) {
+            strcpy(parent_buff, "/");
+        }
+        else {
+            strncpy(parent_buff, dest_path, len);
+            parent_buff[len] = '\0';
+        }
+
+        if (!ensure_directory_exists(parent_buff)) {
+            fprintf(stderr, "Error: Could not prepare directory structure for: %s\n", dest_path);
+            return 0;
+        }
+    }
+
+    /* Open the source file in binary read mode */
+    FILE* src = fopen(src_path, "rb");
+    if (!src) {
+        perror("Error opening source file");
+        return 0;
+    }
+
+    /* Open the destination file in binary write mode */
+    FILE* dest = fopen(dest_path, "wb");
+    if (!dest) {
+        perror("Error creating destination file");
+        fclose(src);
+        return 0;
+    }
+
+    char * buffer = (char*)calloc(1, 65536);
+    size_t bytes_read;
+    int success = 1;
+
+    /* Read and write data block by block */
+    while ((bytes_read = fread(buffer, 1, 65536, src)) > 0) {
+        size_t bytes_written = fwrite(buffer, 1, bytes_read, dest);
+
+        /* If bytes written mismatch bytes read, an I/O error occurred */
+        if (bytes_written < bytes_read) {
+            perror("Error writing to destination file");
+            success = 0;
+            break;
+        }
+    }
+
+    free(buffer);
+    
+    fclose(src);
+    fclose(dest);
+    return success;
+}
+
+uint32_t path::canonicalize_resource_path(const char* src_path, char* out_canonical, uint32_t max_size)
+{
+    if (!src_path || src_path[0] == '\0') {
+        out_canonical[0] = '\0';
+        return 0;
+    }
+    
+    uint32_t dst_idx = 0;   
+    uint32_t src_idx = 0;
+    while (src_path[src_idx] != '\0' && dst_idx < max_size - 1) {
+        char c = src_path[src_idx];
+    
+        if (c == '\\') {
+            c = '/';
+        }
+        else if (c >= 'A' && c <= 'Z') {
+            c = c + ('a' - 'A');
+        }
+    
+        out_canonical[dst_idx] = c;
+        dst_idx++;
+        src_idx++;
+    }
+    
+    out_canonical[dst_idx] = '\0';
+    return dst_idx;
 }
 
 
@@ -441,30 +626,48 @@ struct stream_impl
         return bytes_written;
     }
 
-    size_t seek(size_t offset, int whence)
+    size_t seek(int64_t offset, int whence)
     {
-        flush(); // Flush the write buffer before seeking
-        if(m_read_buffer_size > m_file_size) {
-            m_read_pos = offset;
-            return 0;
+        int64_t target_pos = 0;
+        int64_t current_virtual_pos = static_cast<int64_t>(tell());
+
+        if (whence == SEEK_SET) {
+            target_pos = offset;
+        }
+        else if (whence == SEEK_CUR) {
+            target_pos = current_virtual_pos + offset;
+        }
+        else if (whence == SEEK_END) {
+            flush();
+            if (fseek(m_file, offset, SEEK_END) != 0) return static_cast<size_t>(-1);
+            m_read_pos = 0;
+            m_read_buffer_size = 0;
+            return tell();
         }
 
-        bool refil = (offset > m_file_pos) ||
-                     (offset < m_file_pos - m_read_buffer_size);
-        if (refil) {
-            size_t chunk = offset / m_read_buffer_size;
-            size_t pos = offset % m_read_buffer_size;
-            fseek(m_file, (long)(chunk * m_read_buffer_size), whence);
-            refill_buffer();
+        if (target_pos < 0) return static_cast<size_t>(-1);
+
+        if (m_read_buffer_size > 0) {
+            long sys_pos = ftell(m_file);
+
+            int64_t buffer_start_pos = sys_pos - m_read_buffer_size;
+            int64_t buffer_end_pos = sys_pos;
+
+            if (target_pos >= buffer_start_pos && target_pos <= buffer_end_pos) {
+
+                m_read_pos = static_cast<size_t>(target_pos - buffer_start_pos);
+                return static_cast<size_t>(target_pos);
+            }
         }
 
-        switch(whence)
-        {
-            case SEEK_SET: m_read_pos = offset % m_read_buffer_size; break;
-            case SEEK_CUR: m_read_pos += offset; break;
+        flush();
+        if (fseek(m_file, target_pos, SEEK_SET) != 0) {
+            return static_cast<size_t>(-1);
         }
+        m_read_pos = 0;
+        m_read_buffer_size = 0;
 
-        return 0;
+        return static_cast<size_t>(target_pos);
     }
 
     uint32_t tell()
@@ -576,61 +779,81 @@ uint32_t filestream::tell()
     return m_impl->tell();
 }
 
+
 static const char _guid_digits[] = "0123456789abcdef";
 
-uuid uuid::generate_from_seed(size_t seed)
+static inline uint8_t hex_char_to_val(char ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return 0;
+}
+
+guid_t uuid::generate_from_seed(size_t seed)
 {
-    uuid result;
+    char buf[33] = "";
     srand((unsigned int)seed);
-    char* ptr = result.m_uuid;
-    for (size_t i = 0; i < (sizeof(result.m_uuid) >> 1); i++)
+    char* ptr = buf;
+    for (size_t i = 0; i < 16; i++)
     {
         *ptr++ = _guid_digits[(rand() % 255 >> 4) & 0xf];
         *ptr++ = _guid_digits[(rand() % 255 >> 0) & 0xf];
     }
-    return result;
+    return str_to_guid(buf);
 }
 
-void uuid::generate(char *buff, size_t size)
-{
-    time_t seed = time(NULL);
-    generate_from_seed(seed);
-}
 
-bool uuid::validate(const char *buff)
+bool uuid::is_guid_str(const char *buf)
 {
-    size_t len = buff ? strlen(buff) : 0;
+    size_t len = buf ? strlen(buf) : 0;
     for (size_t i = 0; i < len; ++i) {
-        if (!strchr(_guid_digits, buff[i]))
+        if (!strchr(_guid_digits, buf[i]))
             return false;
     }
     return len ? true : false;
 }
 
-
-uuid::uuid(void)
+guid_t uuid::generate_uuid_v4()
 {
-    memset(m_uuid, 0, sizeof(m_uuid));
+    static std::atomic<uint32_t> g_counter;
+    g_counter.fetch_add(1, std::memory_order_relaxed);
+    return generate_from_seed(clock() + g_counter);
 }
 
-uuid::uuid(const char * uuid)
+guid_t uuid::str_to_guid(const char* str)
 {
-    if (!uuid)
-        generate(m_uuid, sizeof(m_uuid));
-    else
-        memcpy(m_uuid, uuid, sizeof(m_uuid));
+    guid_t result = {};
+
+    for (int i = 0; i < 16; ++i) {
+        result.high = (result.high << 4) | hex_char_to_val(str[i]);
+    }
+
+    for (int i = 16; i < 32; ++i) {
+        result.low = (result.low << 4) | hex_char_to_val(str[i]);
+    }
+
+    return result;
 }
 
-uuid::uuid(const uuid& uuid)
+char* uuid::guid_to_str(guid_t g, char* buff)
 {
-    memcpy(m_uuid, uuid.m_uuid, sizeof(m_uuid));
+    for (int i = 15; i >= 0; --i) {
+        buff[i] = _guid_digits[g.high & 0x0F];
+        g.high >>= 4;
+    }
+
+    for (int i = 31; i >= 16; --i) {
+        buff[i] = _guid_digits[g.low & 0x0F];
+        g.low >>= 4;
+    }
+    return buff;
 }
 
-void uuid::set(const char * uuid)
+
+uint64_t uuid::runtime_guid(guid_t _guid)
 {
-    assert(uuid);
-    assert(strlen(uuid) <= sizeof(m_uuid));
-    memcpy(m_uuid, uuid, sizeof(m_uuid));
+    if(_guid.high == 0 && _guid.low == 0) return 0;
+    return hasher::xxhash64(&_guid, sizeof(guid_t), 0 );
 }
 
 

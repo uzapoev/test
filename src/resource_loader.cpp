@@ -1,6 +1,6 @@
 #include "resource_loader.h"
 #include "common.h"
-
+#include "resource_manager.h"
 #include "gfx/gfx_reflection.h"
 #include "gfx/gfx_shader_compiler.h"
 
@@ -86,16 +86,16 @@ mesh.a59f1c021a3d7e942ad5eeddb30a16c7.fbx
 struct mesh_header_t
 {
     uint32_t   magick;
-    uint32_t   submesh_count;
-
-    int32_t    vertex_stride;
-    int32_t    index_stride;
 
     int32_t    vertex_count;
-    int32_t    index_count;
+    int32_t    vertex_stride;
 
- //   float      bbox_max[4];
- //   float      bbox_min[4];
+    int32_t    index_count;
+    int32_t    index_stride;
+
+    uint32_t   submesh_count;
+    vec3       bbox_min;
+    vec3       bbox_max;
 };
 #pragma pack(pop)
 
@@ -153,13 +153,16 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
     mesh_header_t* header = (mesh_header_t*)curent_ptr;
     curent_ptr += sizeof(mesh_header_t);
 
+    submesh_t * submeshes = (submesh_t*)curent_ptr;
+    curent_ptr += sizeof(submesh_t) * header->submesh_count;
+
     char* vertex_data_ptr = curent_ptr;
     curent_ptr += header->vertex_stride * header->vertex_count;
 
     char* index_data_ptr = curent_ptr;
     curent_ptr += header->index_stride * header->index_count;
 
-    int* submeshes = (int*)curent_ptr;
+    //int* submeshes = (int*)curent_ptr;
 
     int32_t vertex_buffer_size = gfx_utils_align_up(header->vertex_stride * header->vertex_count, 32);
     int32_t index_buffer_size = gfx_utils_align_up(header->index_stride * header->index_count, 32);
@@ -220,13 +223,13 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
     out_mesh->vertex_count  = header->vertex_count;
     out_mesh->index_count   = header->index_count;
 
-    for(uint32_t i = 0; i < out_mesh->vertex_count; ++i)
-    {
-        out_mesh->bounds.extend(*(vec3*)(vertex_data_ptr + header->vertex_stride * i));
-    }
+    out_mesh->bounds.extend(header->bbox_max);
+    out_mesh->bounds.extend(header->bbox_min);
 
-    for (uint32_t i = 0; i < header->submesh_count; ++i)
-        out_mesh->submeshes[i] = submeshes[i];
+    for (uint32_t i = 0; i < header->submesh_count; ++i){
+        out_mesh->submeshes[i].index_start = submeshes[i].index_start;
+        out_mesh->submeshes[i].index_count = submeshes[i].index_count;
+    }
 }
 
 
@@ -631,7 +634,7 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
     *out_shader = gfx_shader_create(ctx, &shader_desc);
 }
 
-void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct gfx_material_instance_t** material)
+void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_instance_t** material)
 {
     char* data = nullptr;
 
@@ -643,7 +646,7 @@ void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct g
     free(data);
 }
 
-void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct gfx_material_instance_t** insance)
+void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_instance_t** insance)
 {
   //  std::string jstr(data, size);
   //  json::from_json<gfx_material_instance_t>(jstr);

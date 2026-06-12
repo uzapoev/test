@@ -2,27 +2,11 @@
 #define __resource_loader_h__
 
 #include "gfx/gfx.h"
-//#include "gfx/gfx_memory.h"
-
-
-#include "mathlib.h"
-
-#include "resources.h"
-
+//#include "resource_manager.h"
 #include "mesh.h"
 
-typedef enum texture_option {
-    texture_option_none,
-    texture_option_limit_dimension,
-    texture_option_limit_size,
-    texture_option_limit_mip
-} texture_option;
-
-typedef struct texture_load_option_t {
-    texture_option  option  = texture_option_none;
-    uint32_t        value   = 0; // 
-} texture_load_option_t;
-
+struct render_mesh_t;
+struct mesh_pool_t;
 
 extern uint32_t read_file_data(const char* path, char** data);
 
@@ -37,7 +21,7 @@ extern void     load_texture_from_file_data(gfx_context_t* ctx, const char* name
 extern void     load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader_t** out_shader);
 extern void     load_shader_from_file_data(gfx_context_t* ctx, const char* name, char* data, uint32_t size, gfx_shader_t** out_shader);
 
-extern void     load_material_from_file_path(gfx_context_t* ctx, const char* path, struct gfx_material_instance_t** insance);
-extern void     load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct gfx_material_instance_t** insance);
+extern void     load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_instance_t** insance);
+extern void     load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_instance_t** insance);
 
 #endif 
