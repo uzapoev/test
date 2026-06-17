@@ -1,18 +1,86 @@
 #include "resource_manager.h"
-
-//#include <algorithm>
-//#include <set>
-
-#include "scene/render_system.h"
+#include "resource_loader.h"
 #include "json_serializer.h"
 
+struct jmeta
+{
+    std::string guid;
+    ReflectObject(jmeta, ReflectObjectField(guid));
+};
 
-#include "resource_loader.h"
-//#define STB_IMAGE_IMPLEMENTATION
-//#include "stb/stb_image.h"
+static const char * platform_string(platform_type type)
+{
+    switch(type) {
+        case platform_type_pc:      return "pc";
+        case platform_type_mobile:  return "mobile";
+        case platform_type_web:     return "web";
+        default :                   return "common";
+    }
+    return "common";
+}
+
+static bool is_meta_file(const char* file)
+{
+    const char* ext = file ? strrchr(file, '.') : "";
+    if (ext && !strcmp(ext, ".meta"))  return true;
+    if (ext && !strcmp(ext, ".jmeta")) return true;
+
+    return false;
+}
+
+static asset_type deduce_asset_type(const char* file)
+{
+    const char* ext = file ? strrchr(file, '.') : "";
+    if (ext != nullptr) {
+        if (!strcmp(ext, ".scene") || !strcmp(ext, ".json"))
+            return asset_type_scene;
+        if (!strcmp(ext, ".mesh") || !strcmp(ext, ".fbx") || !strcmp(ext, ".obj") || !strcmp(ext, ".usd"))
+            return asset_type_mesh;
+        if (!strcmp(ext, ".dds") || !strcmp(ext, ".ktx") || !strcmp(ext, ".png") || !strcmp(ext, ".tga") || !strcmp(ext, ".exr"))
+            return asset_type_texture;
+        if (!strcmp(ext, ".mat") || !strcmp(ext, ".material") || !strcmp(ext, ".mtl"))
+            return asset_type_material;
+        if (!strcmp(ext, ".shader") || !strcmp(ext, ".hlsl"))
+            return asset_type_shader;
+    }
+    return asset_type_raw_data;
+}
+
+static const char* compiled_asset_extension(asset_type type/*, platform_type type*/)
+{
+    switch (type) {
+        case asset_type_scene:      return ".bscene";
+        case asset_type_mesh:       return ".mesh";
+        case asset_type_texture:    return ".dds";
+        case asset_type_material:   return ".mat";
+        case asset_type_shader:     return ".shader";
+        default: return nullptr;
+    }
+    return nullptr;
+}
+
+static void make_cooked_filename_buf(const char* path, guid_t guid, asset_type type, const char* ext, char* cooked_filename, size_t buffer_size)
+{
+    assert(path && ext);
+    char guid_str[33] = "";
+    char canonical_path[256] = "";
+    path::canonicalize_resource_path(path, canonical_path, sizeof(canonical_path));
+    snprintf(cooked_filename, buffer_size, "%s.%s.%d%s", canonical_path, uuid::guid_to_str(guid, guid_str), type, ext);
+}
 
 
-static const std::filesystem::path mesh_extension(".mesh");
+static void for_each_file_recursive(const std::filesystem::path & path, std::function<void(const std::filesystem::path&)> callback)
+{
+    if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path) ) {
+        return;
+    }
+
+    for (const auto& it : std::filesystem::recursive_directory_iterator(path)) {
+        if(!std::filesystem::is_directory(it))
+            callback(it.path());
+    }
+}
+
 
 static size_t filesize(FILE* file)
 {
@@ -22,160 +90,81 @@ static size_t filesize(FILE* file)
     return size;
 }
 
-
-texture::texture(gfx_texture_t* tex, interned_string guid, interned_string name)
-    : resource(guid, name)
-    , m_texture(tex)
-{   
-}
-
-rendermesh::rendermesh(interned_string guid, interned_string name, render_mesh_t mesh)
-    : resource(guid, name)
-    , m_mesh(mesh)
-{
-}
-
-
 /*
+bool parse_guid(const char* guid_str, guid_t* out_guid) {
+    if (!guid_str || std::strlen(guid_str) != 32) return false;
 
-size_t filedata2(const char* path, char** buff)
-{
-    static void* g_ptr = nullptr;
-    static size_t g_size = 0;
+    char high_part[17] = { 0 };
+    char low_part[17] = { 0 };
 
-    size_t size = 0;
-    FILE* file = fopen(path, "rb");
-    if (file != NULL)
-    {
-        size = filesize(file);
+    std::memcpy(high_part, guid_str, 16);
+    std::memcpy(low_part, guid_str + 16, 16);
 
-        if (size > g_size)
-            g_ptr = realloc(g_ptr, size + 1);
-        g_size = size + 1;
+    char* endptr;
+    out_guid->high = std::strtoull(high_part, &endptr, 16);
+    if (*endptr != '\0') return false;
 
-        if (g_ptr != nullptr)
-            fread(g_ptr, 1, size, file);
-        fclose(file);
-    }
-    *buff = (char*)g_ptr;
-    return size;
+    out_guid->low = std::strtoull(low_part, &endptr, 16);
+    if (*endptr != '\0') return false;
+
+    return true;
 }*/
 
-texture_manager_prototype::texture_manager_prototype(gfx_context_t * ctx, class resource_manager* rm)
-:m_ctx(ctx), m_filesystem(rm)
-{
-}
 
-texture * texture_manager_prototype::load(const char* guid, bool async, texture_load_desc_t* desc)
-{
-    if(guid == nullptr) {
-        debug::log_error("texture guid or path is null");
-        return m_default_texture;
+bool parse_name_with_guid_hand(const char* filename, char* out_name, guid_t* out_guid, uint16_t* out_flag){
+    if (!filename || !out_name || !out_guid || !out_flag) return false;
+
+    char guid_buf[64] = { 0 };
+    char flag_or_ext[64] = { 0 };
+    char ext_buf[64] = { 0 };
+    char extra[8] = { 0 };
+    int scanned = sscanf(filename, "%255[^.].%32[^.].%63[^.].%s", out_name, guid_buf, flag_or_ext, ext_buf);
+
+    if(strlen(guid_buf) == 32 && uuid::is_guid_str(guid_buf)) {
+        *out_guid = uuid::str_to_guid(guid_buf);
+        return true;
+    }else {
+        return false;
     }
-
-    auto it = m_textures.find(guid);
-    if(it != m_textures.end()) {
-        return it->second;
-    }
-
-    auto path = m_filesystem->find(guid);
-    if(path.empty()) {
-        debug::log_error("texture_manager::load(%s) - file not find", guid);
-        return m_default_texture;
-    }
-
-    texture* result = new texture(nullptr, guid, path);
-    m_textures.emplace(guid, result);
-
-    auto load_func = [&, result] {
-        gfx_texture_t* handle = nullptr;
-        load_texture_from_file_path(m_ctx, path.c_str(), &handle);
-        result->update_handle(handle);
-    };
-    load_func();
-
- /*   if(!async)
-        load_func();
-    else
-        //thread_pool->dispatch(load_func).on_finish(call_thread, []{upload()});*/
-    return result;
-}
-
-void texture_manager_prototype::set_memory_limit(uint32_t target_memory)
-{
-}
-
-void texture_manager_prototype::clear()
-{
-    m_mutex.lock();
-    m_erase_list.clear();
-    m_load_queue.clear();
-    for(auto it = m_textures.begin(); it != m_textures.end(); ++it)
-    {
-        texture * tex = it->second;
-        if(tex->refcount() > 0)
-        {
-            debug::log_error("texture_manager::clear() try to unload used texture %s  %s", tex->name().data(), tex->guid().data());
-        }
-        gfx_texture_destroy(m_ctx, tex->texture_handle());
-        delete tex;
-    }
-    m_textures.clear();
-    m_mutex.unlock();
-}
-
-void texture_manager_prototype::purge()
-{
-    m_erase_list.clear();
-    for(auto it = m_textures.begin(); it != m_textures.end(); ++it)
-    {
-        if(it->second->refcount() <= 0)
-            m_erase_list.push_back(it->second);
-    }
-
-    for(auto it = m_erase_list.begin(); it != m_erase_list.end(); ++it)
-    {
-        m_erase_list.erase(it);
-    }
+    return false;
 }
 
 
 resource_manager * resource_manager::s_shared = nullptr;
 
-void resource_manager::create_and_make_shared(gfx_context_t* ctx)
+resource_manager* resource_manager::create_and_make_shared(gfx_context_t* ctx)
 {
     if (s_shared == nullptr) 
     {
         s_shared = new resource_manager(ctx);
-        s_shared->init();
+        s_shared->init(platform_type_pc);
     }
-}
-
-static bool has_guid_in_name(const std::filesystem::path & filename, std::string * out_guid)
-{
-    if (filename.native().find('.') != std::wstring::npos)
-    {
-        auto guid = filename.extension().u8string();
-        guid.erase(0, 1);
-        if (!guid.empty() && guid.length() == 32)
-            out_guid->assign(guid);
-    }
-    return !out_guid->empty();
+    return s_shared;
 }
 
 
-void resource_manager::init()
+void resource_manager::init(platform_type type, const char* cash_path)
 {
+    const char * platform_name = platform_string(type);
+
+    cash_path = cash_path? cash_path : "cash";
+    char cahs_dir[256] = "";
+    sprintf(cahs_dir, "%s/%s/", cash_path, platform_name);
+    m_cash_path.assign(cahs_dir);
+
+    m_allocator = new aligned_allocator("resource_manager");
+    m_staging_allocator = new staging_allocator(m_allocator, 4*1024*1024, true);
+
     load_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
 
   //  create_mesh_pool(m_ctx, (64)*1024*1024, (8)*1024*1024, &m_mesh_pool);
     create_mesh_pool(m_ctx, 380*1024*1024, 32*1024*1024, &m_mesh_pool);
 
     gfx_vertex_attribute attributes[] = {
-        { 0, 0, gfx_vertex_format_float4,   0                   },
-        { 3, 0, gfx_vertex_format_float4,   sizeof(vec4) * 1    },  // uv
-        { 2, 0, gfx_vertex_format_float4,   sizeof(vec4) * 2    },  // normal
-        { 1, 0, gfx_vertex_format_float4,   sizeof(vec4) * 3    },  // color
+        { 0, 0, gfx_format_float4,   0                   },
+        { 3, 0, gfx_format_float4,   sizeof(vec4) * 1    },  // uv
+        { 2, 0, gfx_format_float4,   sizeof(vec4) * 2    },  // normal
+        { 1, 0, gfx_format_float4,   sizeof(vec4) * 3    },  // color
     };
 
     gfx_vertex_slot_t slots[] = {
@@ -196,45 +185,82 @@ void resource_manager::init()
         piplene_desc.render_states.blend.color_dst  = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
     m_default_pipeline = gfx_pipeline_create(m_ctx, &piplene_desc);
 
-    m_meshes.reserve(1024);
-    m_textures.reserve(1024);
+    //m_meshes.reserve(1024);
+    //m_textures.reserve(1024);
+
+   // m_texture_allocator = new paged_pool_allocator(m_allocator, sizeof())
 }
 
-void resource_manager::mount(const std::string & dir)
+void resource_manager::set_assets_path(const std::string & dir)
 {
-    if(!std::filesystem::exists(dir))
+    if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir) || (m_dirs.find(dir) != m_dirs.end()) ) {
         return;
-    
-    if(m_dirs.find(dir) != m_dirs.end())
-        return;
-
-    std::filesystem::recursive_directory_iterator  it(dir);
-    for(; it != std::filesystem::end(it); it++)
-    {
-        auto &path = it->path();
-        auto &native = path.native();
-        auto wstr = path.generic_wstring();
-        auto u8str = path.generic_u8string();
-
-        if(!utf8::is_ascii(native.data(), native.length()))
-        {
-            debug::log_error("none ascii symbols: %s", u8str.c_str());
-        }
-
-        if(std::filesystem::is_directory(path))
-        {
-            m_dirs.insert(u8str);
-            continue;
-        }
-        
-        auto filename = path.stem();
-
-        std::string guid;
-        if (has_guid_in_name(filename, &guid))
-        {
-            m_guid_2_path.emplace(&guid[0], wstr);
-        }
     }
+
+    m_dirs.emplace(dir);
+
+    for_each_file_recursive(dir, [&](const std::filesystem::path & path){
+        auto u8path = path.string();
+        if(is_meta_file(u8path.c_str()) )
+            return;
+
+        if (!utf8::is_ascii(u8path.data(), u8path.length())) {
+            debug::log_error("none ascii symbols: %s", u8path.c_str());
+            return;
+        }
+
+        auto meta_path = u8path + ".jmeta";
+       
+        guid_t asset_guid = get_or_create_guid(u8path.c_str(), meta_path.c_str());
+        asset_type type = deduce_asset_type(u8path.c_str());
+
+        auto stem = path.stem().string();
+        auto ext = path.extension().string();
+        auto parent_path = path.parent_path().string();
+        auto relative_parent = std::filesystem::relative(path.parent_path(), dir).string();
+
+        if (relative_parent == ".")
+            relative_parent = "";
+
+        char cooked_filename[256] = "";
+        const char * extension = compiled_asset_extension(type);
+        extension = extension ? extension : ext.c_str();
+        make_cooked_filename_buf(stem.c_str(), asset_guid, type, extension, cooked_filename, sizeof(cooked_filename));
+
+        char cooked_filepath[256] = "";
+        snprintf(cooked_filepath, sizeof(cooked_filepath), "%s/%s/%s",
+            m_cash_path.c_str(), relative_parent.c_str(), cooked_filename);
+
+        path::canonicalize_resource_path(cooked_filepath, cooked_filepath, sizeof(cooked_filename)); // replace '\\' to '/' and make strlwr
+        
+        if(need_recompile(u8path.c_str(), cooked_filepath, meta_path.c_str()))
+        {
+            auto asset_compiler = m_compilers[type];
+            if(asset_compiler != nullptr){
+                asset_compiler(u8path.c_str(), cooked_filepath, meta_path.c_str(), m_platform_type, this);
+            } else {
+                debug::log_error("no compiler for resource: %s", u8path.c_str());
+            }
+        }
+
+        if(!std::filesystem::exists(cooked_filepath)){
+            debug::log_error("filed cooking file: %s", u8path.c_str());
+            return;
+        }
+
+        char guid_str[33] = "";
+        m_path_to_guid.emplace(u8path.c_str(), asset_guid);
+        m_guid_2_path.emplace(asset_guid, std::filesystem::path(cooked_filepath));
+        m_guid_to_guid.emplace(uuid::guid_to_str(asset_guid, guid_str), asset_guid);
+
+        file_info_t info        = {};
+        info.type               = type;
+        info.guid               = uuid::runtime_guid(asset_guid);
+        info.size               = std::filesystem::file_size(cooked_filepath);
+        info.compressed_size    = info.size;
+        info.path               = interned_string(cooked_filepath).c_str();
+        m_file_infos.emplace(info.guid, info);
+    });
 }
 
 std::string resource_manager::find(const std::string & name)
@@ -244,21 +270,19 @@ std::string resource_manager::find(const std::string & name)
     
     static std::string empty;
 
-    auto it2 = m_guid_2_path.find(name);
-    if (it2 != m_guid_2_path.end())
+    if(uuid::is_guid_str(name.c_str()))
     {
-        return it2->second.u8string();
+        guid_t guid = uuid::str_to_guid(name.c_str());
+        auto it2 = m_guid_2_path.find(guid);
+        if (it2 != m_guid_2_path.end())
+        {
+            return it2->second.u8string();
+        }
     }
     
     return empty;
 }
 
-
-/*
-void resource_manager::set_defaults(gfx_shader_t* shader, gfx_texture_t* texture)
-{
-    m_default_shader = shader;
-}*/
 
 std::vector<char> resource_manager::file_data(const std::string_view & path)
 {
@@ -281,13 +305,13 @@ std::vector<char> resource_manager::file_data(const std::string_view & path)
 }
 
 
-std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * name, gfx_shader_t* shader)
+std::shared_ptr<material_t> resource_manager::load_material(const char * name, gfx_shader_t* shader)
 {
     auto instance = load_material_instance(name);
     if(instance == nullptr)
         return nullptr;
 
-    auto material = std::make_shared<gfx_material_t>();
+    auto material = std::make_shared<material_t>();
     material->instance = instance;
     material->descriptor_set = gfx_descriptor_set_create(m_ctx, instance->shader, 0);
     
@@ -310,71 +334,19 @@ std::shared_ptr<gfx_material_t> resource_manager::load_material(const char * nam
     return material;
 }
 
+
+/*
 texture* resource_manager::load_texture(const char* name)
 {
     return m_texture_manager.load(name, false, nullptr);
-}
+}*/
 
-rendermesh* resource_manager::load_mesh(const char* name)
+
+
+material_instance_t* resource_manager::load_material_instance(const std::string_view& guid)
 {
-    if(name == nullptr)
-        return nullptr;
-
-    auto it = m_meshes.find(name);
-    if (it != m_meshes.end())
-    {
-        return it->second;
-    }
-
-    auto path = find(name);
-    if (!path.empty())
-    {
-        render_mesh_t handle = {};
-       ///!!! if(strstr(path.data(), "65c335c13e918b9e113be724ce664b82"))
-       ///!!!     debug::breakpoint();
-
-        if (!load_mesh_from_file_path(m_ctx, &m_mesh_pool, path.data(), &handle))
-            return nullptr;
-
-        rendermesh * mesh = new rendermesh(name, path, handle);
-        m_meshes.emplace(name, mesh);
-        return mesh;
-    }
     return nullptr;
-}
-
-
-void resource_manager::load_shader(const char* path)
-{
-}
-
-struct material_descriptor
-{
-    interned_string                             shader;
-    std::vector< shader_slot<interned_string>>  textures;
-    std::vector< shader_slot<vec4>  >           vectors;
-    std::vector< shader_slot<float> >           scalars;
-    
-    JsonSerialize(material_descriptor,
-        SerializeFieldWithKey("shader", shader),
-        SerializeFieldWithKey("textures", textures),
-        SerializeFieldWithKey("vectors", vectors),
-        SerializeFieldWithKey("scalars", scalars)
-    );
-};
-
-JsonSerializeExternal(shader_slot<vec4>, SerializeFieldWithKey("key", key), SerializeFieldWithKey("value", value));
-JsonSerializeExternal(shader_slot<float>, SerializeFieldWithKey("key", key), SerializeFieldWithKey("value", value));
-
-JsonSerializeExternal(shader_slot<interned_string>,
-    SerializeFieldWithKey("name", key),
-    SerializeFieldWithKey("guid", value)
-    //SerializeFieldWithKey("scaleOffset", value)
-);
-
-
-gfx_material_instance_t* resource_manager::load_material_instance(const std::string_view& guid)
-{
+/*
     auto it = m_material_instances.find(guid);
     if (it != m_material_instances.end())
         return it->second.get();
@@ -386,10 +358,10 @@ gfx_material_instance_t* resource_manager::load_material_instance(const std::str
 
     char *data = nullptr;
     size_t size = read_file_data(path.c_str(), &data);
-    auto descriptor = json::from_json_string<material_descriptor>(data, size);
+    auto descriptor = json::from_json_string<material_descriptor>(size, data);
     free(data);
 
-    auto material = std::make_shared<gfx_material_instance_t>();
+    auto material = std::make_shared<material_instance_t>();
 
     if(descriptor.shader.empty())
     {
@@ -399,11 +371,11 @@ gfx_material_instance_t* resource_manager::load_material_instance(const std::str
 
     for(size_t i = 0; i < descriptor.textures.size(); ++i)
     {
-        auto tex = load_texture(descriptor.textures[i].value.c_str());
-        material->textures[i].key = descriptor.textures[i].key;
-        material->textures[i].guid = descriptor.textures[i].value;
-        material->textures[i].value = tex  ? tex->texture_handle() : nullptr;
-    }/**/
+       // auto tex = load_texture(descriptor.textures[i].value.c_str());
+       // material->textures[i].key = descriptor.textures[i].key;
+      //  material->textures[i].guid = descriptor.textures[i].value;
+      //  material->textures[i].value = tex  ? tex->texture_handle() : nullptr;
+    }
 
     for (size_t i = 0; i < descriptor.vectors.size(); ++i)
     {
@@ -418,629 +390,250 @@ gfx_material_instance_t* resource_manager::load_material_instance(const std::str
     }
 
     m_material_instances.emplace(interned_string(guid), material);
-    return material.get();
+    return material.get();/**/
 }
 
 void resource_manager::directory_changed(std::filesystem::path &path)
 {
 }
 
-#if 0
-/*
-texture.b5a0953624bca8644be523fa1c4cada7.png
-mesh.a59f1c021a3d7e942ad5eeddb30a16c7.fbx
-*/
 
-/*
-#pragma pack(push, 1)
-struct mesh_header_t
+guid_t resource_manager::get_or_create_guid(const char* path, const char * meta_path)
 {
-    uint32_t   magick;
-    uint32_t   submesh_count;
+    if (path == nullptr) return {};
+    if (strlen(path) < 5) return {};
 
-    int32_t    vertex_stride;
-    int32_t    index_stride;
-
-    int32_t    vertex_count;
-    int32_t    index_count;
-
- //   float      bbox_max[4];
- //   float      bbox_min[4];
-};
-#pragma pack(pop)
-
-
-size_t read_file_data2(const char* path, char** data_out)
-{
-    static char * s_ptr = nullptr;
-    static size_t s_size = 0;
-
-    FILE* file = fopen(path, "rb");
-    if (file == nullptr)
-        return 0;
-
-    fseek(file, 0, SEEK_END);
-    size_t size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    if(s_size < size)
+    if(meta_path && std::filesystem::exists(meta_path))
     {
-        s_ptr = (char*)realloc(s_ptr, size);
-        s_size = size;
+        char* data = nullptr;
+        size_t size = read_file_data(meta_path, &data);
+        auto meta = json::from_json_string<jmeta>(size, data);
+        if(data) free(data);
+        if(uuid::is_guid_str(meta.guid.c_str()))
+            return uuid::str_to_guid(meta.guid.c_str());
+        else
+            debug::log_error("failed to read guid form meta file(%s)", meta_path);
     }
 
-    fread(s_ptr, size, sizeof(char), file);
-    fclose(file);
-
-    *data_out = s_ptr;
-
-    return (uint32_t)size;
-}
-
-
-size_t read_file_data(const char* path, char** data_out)
-{
-    FILE* file = fopen(path, "rb");
-    if (file == nullptr)
-        return 0;
-
-    fseek(file, 0, SEEK_END);
-    size_t size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    *data_out = (char*)calloc(1, size);
-    fread(*data_out, size, sizeof(char), file);
-    fclose(file);
-
-    return (uint32_t)size;
-}
-
-void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, gfx_mesh_pool_t* pool)
-{
-    //   pool->vertex_allocator = offset_alocator_create(vertex_buffer_size);
-    //   pool->index_allocator = offset_alocator_create(index_buffer_size);
-    gfx_buffer_desc_t vb = {};
-        vb.data     = nullptr;
-        vb.mapped   = false;
-        vb.size     = vertex_buffer_size;
-        vb.usage    = gfx_buffer_usage_vertex;
-    pool->vertex_buffer = gfx_create_buffer2(ctx, &vb);
-    pool->vertex_buffer_size = vertex_buffer_size;
-
-    gfx_buffer_desc_t ib = {};
-        ib.data     = nullptr;
-        ib.mapped   = false;
-        ib.size     = index_buffer_size;
-        ib.usage    = gfx_buffer_usage_index;
-    pool->index_buffer = gfx_create_buffer2(ctx, &ib);
-    pool->index_buffer_size = index_buffer_size;
-}
-
-bool create_mesh_from_file_path(gfx_context_t* ctx, gfx_mesh_pool_t * pool, const char * path, gfx_mesh_t* out_mesh)
-{
-    char* data = nullptr;
-    size_t size = read_file_data2(path, &data);
-    if(size != 0)
-    {
-        create_mesh_from_file_data(ctx, pool, strrchr(path, '/'), data, size, out_mesh);
+    uint32_t path_len = strlen(path);
+    if (path_len > 512) {
+        debug::log_error("abnormal file path: %d", path);
+        return {};
     }
-    else
-    {
-        printf("\nNo file at path or file is empty: %s", path);
-        return false;
+
+    if (path_len == 32 && uuid::is_guid_str(path)) {
+        return uuid::str_to_guid(path);
     }
-    
-    //free(data);
-    return true;
+
+    uint32_t path_hash = hasher::murmur32(path, strlen(path));
+    return uuid::generate_from_seed(path_hash);
 }
 
-void create_mesh_from_file_data(gfx_context_t * ctx, gfx_mesh_pool_t* pool, const char *name, char * data, size_t size, gfx_mesh_t*out_mesh)
+bool resource_manager::need_recompile(const char* src, const char* compiled, const char* meta)
 {
-    char* curent_ptr = data;
+    if(!std::filesystem::exists(compiled)) return true;
+    if(!std::filesystem::exists(meta)) return true;
 
-    mesh_header_t* header = (mesh_header_t*)curent_ptr;
-    curent_ptr += sizeof(mesh_header_t);
+    auto src_time = std::filesystem::last_write_time(src);
+    auto meta_time = std::filesystem::last_write_time(meta);
+    auto cooked_time = std::filesystem::last_write_time(compiled);
+    return src_time > cooked_time || meta_time > cooked_time;
+}
 
-    char* vertex_data_ptr = curent_ptr;
-    curent_ptr += header->vertex_stride * header->vertex_count;
+void resource_manager::set_compiler(asset_type type, asset_compile_func_t func)
+{
+    m_compilers[type] = func;
+}
 
-    char* index_data_ptr = curent_ptr;
-    curent_ptr += header->index_stride * header->index_count;
+asset_handle_t resource_manager::load(const char* path, load_params_t* params)
+{
+    if (path == nullptr) return { 0 };
 
-    int* submeshes = (int*)curent_ptr;
+    guid_t guid = get_or_create_guid(path, nullptr);
 
-    int32_t vertex_buffer_size = header->vertex_stride * header->vertex_count;
-    int32_t index_buffer_size = header->index_stride * header->index_count;
+    return load(guid, params);
+}
 
-    gfx_buffer_t* vertex_buffer = nullptr;
-    gfx_buffer_t* index_buffer = nullptr;
+asset_handle_t resource_manager::load(guid_t guid, load_params_t* param)
+{
+    uint64_t fileid = uuid::runtime_guid(guid);
 
-    bool ispooled = false;
-    if(pool != nullptr)
-    {
-        int32_t vertex_left = pool->vertex_buffer_size - pool->vertex_buffer_offset;
-        int32_t index_left = pool->index_buffer_size - pool->index_buffer_offset;
+    if (fileid == 0) {
+        //  debug::log_error("no file at path: %d", path);
+        return INVALID_ASSET_HANDLE;
+    }
 
-        if (vertex_left > vertex_buffer_size && index_left > index_buffer_size)
+    if(asset_slot_t* slot = get_slot(fileid)) {
+        slot->ref_count++;
+        return slot->handle;
+    }
+
+    if(file_info_t* file = get_file_info(fileid)) {
+        asset_slot_t slot = {};
+
+        const char * dbg_name = strrchr(file->path, '/');
+        slot.guid = fileid;
+        slot.state = asset_state::loading;
+        slot.type = file->type;
+
+        slot.handle.generation++;
+        slot.handle.slot_index = (uint32_t)m_slots.size();
+
+        auto blob = read_asset_blob(file);
+
+        if(slot.type == asset_type_mesh) 
         {
-            vertex_buffer = pool->vertex_buffer;
-            index_buffer = pool->index_buffer;
+            render_mesh_t mesh = {};
+            load_mesh_from_file_data(m_ctx, &m_mesh_pool, dbg_name, (char*)blob.cpu_data, blob.data_size, &mesh);
+            //load_mesh_from_file_path(m_ctx, &m_mesh_pool, file->debug_path, &mesh);
+            slot.state = asset_state::ready;
 
-            gfx_update_buffer_data(ctx, vertex_buffer, vertex_data_ptr, vertex_buffer_size, pool->vertex_buffer_offset);
-            gfx_update_buffer_data(ctx, index_buffer, index_data_ptr, index_buffer_size, pool->index_buffer_offset);
-
-            out_mesh->vertex_buffer_offset = pool->vertex_buffer_offset;
-            out_mesh->index_buffer_offset = pool->index_buffer_offset;
-
-            pool->vertex_buffer_offset += vertex_buffer_size;
-            pool->index_buffer_offset += index_buffer_size;
+            m_render_meshes.emplace_back(mesh);
+            slot.index_in_pool = (uint32_t)m_render_meshes.size() - 1;
         }
-    }
-
-    if(vertex_buffer == nullptr)
-    {
-        gfx_buffer_desc_t vb_desc = {};
-            vb_desc.label = name;
-            vb_desc.usage = gfx_buffer_usage_vertex;
-            vb_desc.data = (uint8_t*)vertex_data_ptr;
-            vb_desc.size = header->vertex_stride * header->vertex_count;
-        vertex_buffer = gfx_create_buffer2(ctx, &vb_desc);
-    }
-
-    if(index_buffer == nullptr)
-    {
-        gfx_buffer_desc_t ib_desc = {};
-            ib_desc.label = name;
-            ib_desc.usage = gfx_buffer_usage_index;
-            ib_desc.data = (uint8_t*)index_data_ptr;
-            ib_desc.size = header->index_stride * header->index_count;
-        index_buffer = gfx_create_buffer2(ctx, &ib_desc);
-    }
-
-    out_mesh->index_format = header->index_stride == 2 ? gfx_index_format_16 : gfx_index_format_32;
-    out_mesh->submesh_count = header->submesh_count;
-    out_mesh->index_buffer  = index_buffer;
-    out_mesh->vertex_buffer = vertex_buffer;
-    out_mesh->vertex_count  = header->vertex_count;
-    out_mesh->index_count   = header->index_count;
-
-    for(uint32_t i = 0; i < out_mesh->vertex_count; ++i)
-    {
-        out_mesh->bounds.extend(*(vec3*)(vertex_data_ptr + header->vertex_stride * i));
-    }
-
-    for (uint32_t i = 0; i < header->submesh_count; ++i)
-        out_mesh->submeshes[i] = submeshes[i];
-}
-
-
-
-#ifndef MAKEFOURCC
-#define MAKEFOURCC(ch0, ch1, ch2, ch3) ((uint32_t)(ch0) | ((uint32_t)(ch1) << 8) | ((uint32_t)(ch2) << 16) | ((uint32_t)(ch3) << 24 ))
-#endif
-
-static const uint32_t dds_magic  = 542327876;   // MAKEFOURCC('D', 'D', 'S', ' ');
-static const uint32_t astc_magic = 0x5CA1AB13;
-static const uint32_t ktx_magic  = 0x58544BAB;
-static const uint32_t pvr_magic  = 0x03525650;  // v3, legacy(0x21525650)
-
-
-#pragma pack(push, 1)
-typedef struct dds_header_t
-{
-    uint32_t magic;
-    uint32_t size;
-    uint32_t flags;
-    uint32_t height;
-    uint32_t width;
-    uint32_t pitch_or_linear_size;
-    uint32_t depth;
-    uint32_t mipmap_count;
-    uint32_t reserved1[11];
-    struct {
-        uint32_t size;
-        uint32_t flags;
-        uint32_t fourCC;
-        uint32_t RGBBitCount;
-        uint32_t r_mask;
-        uint32_t g_mask;
-        uint32_t b_mask;
-        uint32_t a_mask;
-    } dds_pixel_format; 
-    uint32_t caps1;
-    uint32_t caps2;
-    uint32_t reserved2[3];
-} dds_header_t;
-
-typedef struct dds_header_dx10_t {
-    uint32_t    dxgiFormat;
-    uint32_t    resourceDimension;
-    uint32_t    miscFlag;
-    uint32_t    arraySize;
-    uint32_t    miscFlags2;
-} dds_header_dx10_t;
-
-typedef struct pvr_header_t
-{
-    uint32_t    magick;             // Version of the file header, used to identify it.
-    uint32_t    flags;              // Various format flags.
-    uint64_t    pixel_format;       // The pixel format, 8cc value storing the 4 channel identifiers and their respective sizes.
-    uint32_t    colour_space;       // The Colour Space of the texture, currently either linear RGB or sRGB.
-    uint32_t    channel_type;       // Variable type that the channel is stored in. Supports signed/unsigned int/short/byte or float for now.
-    uint32_t    height;             // Height of the texture.
-    uint32_t    width;              // Width of the texture.
-    uint32_t    depth;              // Depth of the texture. (Z-slices)
-    uint32_t    num_surfaces;       // Number of members in a Texture Array.
-    uint32_t    num_faces;          // Number of faces in a Cube Map. Maybe be a value other than 6.
-    uint32_t    mipmap_count;       // Number of MIP Maps in the texture - NB: Includes top level.
-    uint32_t    meta_data_size;    // Size of the accompanying meta data.
-} pvr_header_t;
-
-typedef struct astc_header_t
-{
-    uint32_t    magic;
-    uint8_t     blockdimX;
-    uint8_t     blockdimY;
-    uint8_t     blockdimZ;
-    uint8_t     xsize[3];
-    uint8_t     ysize[3];
-    uint8_t     zsize[3];
-} astc_header_t;
-
-typedef struct ktx_header_t
-{
-    uint8_t     identifier[12];
-    uint32_t    endianness;
-    uint32_t    glType;
-    uint32_t    glTypeSize;
-    uint32_t    glFormat;
-    uint32_t    glInternalFormat;
-    uint32_t    glBaseInternalFormat;
-    uint32_t    width;
-    uint32_t    height;
-    uint32_t    depth;
-    uint32_t    array_element_count;
-    uint32_t    face_count;
-    uint32_t    mipmap_count;
-    uint32_t    keyValueDataLength;
-} ktx_header_t;
-#pragma pack(pop)
-
-void create_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_texture_t** out_texture)
-{
-    char* data = nullptr;
-
-    size_t size = read_file_data(path, &data);
-
-    if (size != 0)
-        load_texture_from_file_data(ctx, data, size, out_texture);
-
-    free(data);
-
-    if (*out_texture == nullptr)
-        printf("\nfailed to create: %s texture", path);
-}
-
-void create_texture_from_file_data(gfx_context_t * ctx, char * data, size_t size, gfx_texture_t **out_texture)
-{
-    uint32_t magik = *(uint32_t*)data;
-
-    bool free_stbi_buffer = false;
-    gfx_texture_desc_t desc = {};
-    switch (magik)
-    {
-        case astc_magic: {
-            astc_header_t* header = (astc_header_t*)(data);
-            desc.width  = (header->xsize[2] << 16) + (header->xsize[1] << 8) + header->xsize[0];
-            desc.height = (header->ysize[2] << 16) + (header->ysize[1] << 8) + header->ysize[0];
-            desc.depth  = (header->zsize[2] << 16) + (header->zsize[1] << 8) + header->zsize[0];
-            if((header->blockdimX == header->blockdimY) && header->blockdimX == 4){
-                desc.format = gfx_pixel_format_astc4x4;
-            }else if((header->blockdimX == header->blockdimY) && header->blockdimX == 5){
-                desc.format = gfx_pixel_format_astc5x5;
-            }else if((header->blockdimX == header->blockdimY) && header->blockdimX == 6){
-                desc.format = gfx_pixel_format_astc6x6;
-            }else if((header->blockdimX == header->blockdimY) && header->blockdimX == 8){
-                desc.format = gfx_pixel_format_astc8x8;
-            }else if((header->blockdimX == header->blockdimY) && header->blockdimX == 10){
-                desc.format = gfx_pixel_format_astc10x10;
-            }else if((header->blockdimX == header->blockdimY) && header->blockdimX == 12){
-                desc.format = gfx_pixel_format_astc12x12;
-            }
-            desc.mip_levels = 1;//log2(desc.width) + 1;
-            desc.data = (data + sizeof(astc_header_t));
-        } break;
-
-        case dds_magic: {
-            dds_header_t* header = (dds_header_t*)(data);
-
-            //bool iscube = header->caps2 & 0x00000200;
-            desc.data = (data + sizeof(dds_magic) + header->size);
-            switch (header->dds_pixel_format.fourCC)
-            {
-                case MAKEFOURCC('D', 'X', 'T', '1'): desc.format = gfx_pixel_format_bc1; break;
-                case MAKEFOURCC('D', 'X', 'T', '3'): desc.format = gfx_pixel_format_bc2; break;
-                case MAKEFOURCC('D', 'X', 'T', '5'): desc.format = gfx_pixel_format_bc3; break;
-                case MAKEFOURCC('D', 'X', '1', '0'): desc.format = gfx_pixel_format_bc7; break;
-                default: debug::breakpoint(); break;
-            };
-
-            if(desc.format == gfx_pixel_format_bc7)
-            {
-                dds_header_dx10_t* header10 = (dds_header_dx10_t*)desc.data;
-                desc.data = (data + sizeof(dds_magic) + header->size + sizeof(dds_header_dx10_t));
-                if(header10->dxgiFormat == 95)
-                    desc.format = gfx_pixel_format_bc6;
-                if(header10->dxgiFormat == 98)
-                    desc.format = gfx_pixel_format_bc7;
-            }
-            desc.width      = header->width;
-            desc.height     = header->height;
-            desc.depth      = header->depth == 0? 1: header->depth;
-            desc.mip_levels = header->mipmap_count;
-        } break;
-
-        case pvr_magic: {
-            pvr_header_t* header = (pvr_header_t*)(data);
-            desc.data = (data + sizeof(pvr_header_t) + header->meta_data_size);
-            switch (header->pixel_format)
-            {
-                case 0: desc.format = gfx_pixel_format_pvrtc_rgb_2bpp;   break;
-                case 1: desc.format = gfx_pixel_format_pvrtc_rgba_2bpp;  break;
-                case 2: desc.format = gfx_pixel_format_pvrtc_rgb_4bpp;   break;
-                case 3: desc.format = gfx_pixel_format_pvrtc_rgba_4bpp;  break;
-                case 23:desc.format = gfx_pixel_format_etc2_rgba8;       break;
-            };
-            desc.width       = header->width;
-            desc.height      = header->height;
-            desc.depth       = header->depth;
-            desc.mip_levels  = header->mipmap_count;
-        } break;
-
-        case ktx_magic: {
-            ktx_header_t * header = (ktx_header_t*) (data);
-            desc.data = (data + sizeof(ktx_header_t) + header->keyValueDataLength);
-            bool srgb = false;
-            //https://registry.khronos.org/OpenGL/extensions/KHR/KHR_texture_compression_astc_hdr.txt
-            switch (header->glInternalFormat)
-            {
-                case 0x93D0: srgb = true; [[fallthrough]];
-                case 0x93B0: desc.format = gfx_pixel_format_astc4x4;        break;  //COMPRESSED_RGBA_ASTC_4x4_KH
-                    
-                case 0x93D2: srgb = true; [[fallthrough]];
-                case 0x93B2: desc.format = gfx_pixel_format_astc5x5;        break;  //COMPRESSED_RGBA_ASTC_4x4_KH
-                    
-                case 0x93D4: srgb = true; [[fallthrough]];
-                case 0x93B4: desc.format = gfx_pixel_format_astc6x6;        break;  //COMPRESSED_RGBA_ASTC_6x6_KHR
-                    
-                case 0x93D7: srgb = true; [[fallthrough]];
-                case 0x93B7: desc.format = gfx_pixel_format_astc8x8;        break;  //COMPRESSED_RGBA_ASTC_8x8_KHR
-                    
-                case 0x93DB: srgb = true; [[fallthrough]];
-                case 0x93BB: desc.format = gfx_pixel_format_astc10x10;      break;  //COMPRESSED_RGBA_ASTC_10x10_KHR
-                    
-                case 0x93DD: srgb = true; [[fallthrough]];
-                case 0x93BD: desc.format = gfx_pixel_format_astc12x12;      break;  //COMPRESSED_RGBA_ASTC_12x12_KHR
-
-                case 0x9274: desc.format = gfx_pixel_format_etc1;           break;
-                case 0x9276: desc.format = gfx_pixel_format_etc2_rgb8a1;    break;
-                case 0x9278: desc.format = gfx_pixel_format_etc2_rgba8;     break; // GL_COMPRESSED_RGBA8_ETC2_EAC
-                default: return;
-            }
-            
-            uint32_t offset = 4;
-            uint8_t * layer_ptr = (uint8_t*)desc.data;
-            
-            for(uint32_t i = 0; i < header->mipmap_count; ++i)
-            {
-                uint32_t layersize = ((uint32_t*)(layer_ptr))[i];
-                auto data_ptr = (uint8_t*)desc.data + offset;
-                memmove(layer_ptr, data_ptr, layersize);
-                layer_ptr += layersize;
-                offset += layersize + 4;
-            } 
-
-            desc.width      = header->width;
-            desc.height     = header->height;
-            desc.depth      = header->depth == 0?1:header->depth;
-            desc.mip_levels = header->mipmap_count;
-        } break;
-
-        default: {
-            int channels_in_file = 0;
-            desc.depth       = 1;
-            desc.mip_levels  = 1;
-            desc.format      = gfx_pixel_format_rgba8;
-            desc.data        = stbi_load_from_memory((stbi_uc*)data, (int)size, (int*)&desc.width, (int*)&desc.height, &channels_in_file, 4);
-            free_stbi_buffer = desc.data != nullptr;
-        };
-    }
-
-    if(desc.data != nullptr && desc.mip_levels > 1)
-    {
-        int target_width = 256;
-        int offset = 0;
-        while (desc.width > target_width)
+        if(slot.type == asset_type_texture)
         {
-            offset += gfx_utils_image_layer_size(desc.width, desc.height, desc.depth, desc.format);
-            desc.width = desc.width >> 1;
-            desc.height = desc.height >> 1;
-            desc.mip_levels--;
+            gfx_texture_t * texture_handlde = nullptr;
+            load_texture_from_file_data(m_ctx, dbg_name, (char*)blob.cpu_data, blob.data_size, &texture_handlde);
+
+            slot.state = asset_state::ready;
+
+            texture_t texture = { texture_handlde };
+            m_textures_new.emplace_back(texture);
+            slot.index_in_pool = (uint32_t)m_textures_new.size();
         }
-        desc.data = (char*)desc.data + offset;
 
-        desc.type = gfx_texture2d;
-        gfx_texture_t* texture = gfx_create_texture2(ctx, &desc);
-        *out_texture = texture;
+        free_asset_blob(&blob);
+        // job_system_push_io_request(slot->guid, handle.id, desired_mip);
+
+        m_guid_to_loaded_asset_slots.emplace(fileid, slot);
+        m_slots.emplace_back(slot);
+
+        return slot.handle;
     }
 
-    if(free_stbi_buffer)
-        stbi_image_free(desc.data);
+    return {0};
 }
 
 
-// Shader
-#if __has_include("assets/asset_shader.h")
-#include "assets/asset_shader.h"
-#endif
 
-static const char * shader_cash_path = "./cash/shaders/";
-
-
-static void create_cash_path(const char * path)
+void resource_manager::set_cash_path(const char* path)
 {
-    if(std::filesystem::exists(path))
-        return;
+    char tmp[512] = "";
+    path::canonicalize_resource_path(path, tmp, sizeof(tmp));
 
-    std::error_code error;
-    bool result = std::filesystem::create_directories(path, error);
-};
-
-
-typedef struct shader_blob_t {
-    const char* vsdata; size_t vssize;
-    const char* psdata; size_t pssize;
-    const char* csdata; size_t cssize;
-} shader_blob_t;
-
-
-typedef struct shader_blob2_t {
-    shader_blob_t src;
-    shader_blob_t spirv;    // vulkan dx12
-    shader_blob_t msl;      // metal
-    shader_blob_t wlsl;     // webgpu
-} shader_blob2_t;
-
-static void read_shader_cash(const char* filename, shader_blob_t * blob)
-{
-}
-
-static void write_shader_cash(const char * filename, shader_blob_t * blob)
-{
-    //write 
-
-}
-
-
-void create_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader_t** out_shader)
-{
-    char* data = nullptr;
-
-    size_t size = read_file_data(path, &data);
-
-    std::hash<char*> _hash;
-
-    size_t hash = _hash(data);
-
-    const char* name = strrchr(path, '/');
-    create_shader_from_file_data(ctx, name ? &name[1] : nullptr, data, size, out_shader);
-
-    free(data);
-
-    if (*out_shader == nullptr)
-        debug::log_error("failed to create: %s shader", path);
-}
-
-const char* vs = R"( 
-        struct VertexInput {
-            @location(0) position : vec4<f32>,
-            @location(1) uv : vec2<f32>,
-        };
-
-        @vertex fn main( vertex : VertexInput, @builtin(vertex_index) VertexIndex : u32 ) -> @builtin(position) vec4<f32> {
-            return vec4<f32>(vertex.position.x, vertex.position.y, 0.0, 0.0);
-        })";
-
-const char* fs = R"( 
-        @group(0) @binding(0) var mySampler: sampler;
-        @group(0) @binding(1) var myTexture: texture_2d<f32>;
-
-        @fragment fn main( @builtin(position) position: vec4<f32>, ) -> @location(0) vec4<f32> {
-            return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-           // let color = textureSample(myTexture, mySampler, position.xy/1024);
-           // return /*vec4<f32>(1.0, 1.0, 1.0, 1.0) */ color;
-        })";
-
-
-#include "gfx/gfx_reflection.h"
-void create_shader_from_file_data(gfx_context_t* ctx, const char * name, char* data, size_t size, gfx_shader_t** out_shader)
-{
-    std::string vs_blob, vs_error,
-                ps_blob, ps_error,
-                cs_blob, cs_error;
-
-    #ifdef __asset_shader_h__
-    char entry_point[64] = "";
-    if(AssetShader::find_pragma_entry(data, "compute", entry_point, sizeof(entry_point)))
-    {
-        if (!AssetShader::compile_shader_form_data(data, size, L"../data/shaders/", AssetShader::Compute, entry_point, &cs_blob, &cs_error))
-            printf("%s", cs_error.c_str());
+    uint32_t len = (uint32_t)strlen(tmp);
+    if (tmp[len - 1] != '/') {
+        tmp[len++] = '/'; 
+        tmp[len++] = '\0';
     }
 
-    if (AssetShader::find_pragma_entry(data, "vertex", entry_point, sizeof(entry_point)))
-    {
-        if (!AssetShader::compile_shader_form_data(data, size, L"../data/shaders/", AssetShader::Vertex, entry_point, &vs_blob, &vs_error))
-            printf("%s", vs_error.c_str());
-    }
+    strcat(tmp, platform_string(m_platform_type));
 
-    if (AssetShader::find_pragma_entry(data, "fragment", entry_point, sizeof(entry_point)))
-    {
-        if (!AssetShader::compile_shader_form_data(data, size, L"../data/shaders/", AssetShader::Fragment, entry_point, &ps_blob, &ps_error))
-            printf("%s", ps_error.c_str());
-    }
-    #endif
+    if(!std::filesystem::exists(tmp))
+        std::filesystem::create_directories(tmp);
 
-
-    shader_blob_t blob = {
-         vs_blob.data(), vs_blob.size(),
-         ps_blob.data(), ps_blob.size(),
-         cs_blob.data(), cs_blob.size()
-    };
-    write_shader_cash(name, &blob);
-
-    /**/
-    uint32_t uniform_count = 0;
-    gfx_uniform_t uniforms[64] = {};
-
-    gfx_shader_reflection(vs_blob.c_str(), (uint32_t)vs_blob.size(), uniforms, &uniform_count);
-    gfx_shader_reflection(ps_blob.c_str(), (uint32_t)ps_blob.size(), &uniforms[uniform_count], &uniform_count);
-    gfx_shader_reflection(cs_blob.c_str(), (uint32_t)cs_blob.size(), &uniforms[uniform_count], &uniform_count);
-
-
-    uniform_count = gfx_merge_uniforms(uniforms, uniform_count);
-   // vs_blob = vs;
-   // ps_blob = fs;
-
-    gfx_shader_data sdata[] = {
-        {gfx_shader_vertex,   (uint32_t*)vs_blob.c_str(), (uint32_t)vs_blob.size()},
-        {gfx_shader_fragment, (uint32_t*)ps_blob.c_str(), (uint32_t)ps_blob.size()},
-    };
-
-    gfx_shader_desc_t shader_desc = {};
-        shader_desc.label = name? name: "name";
-        shader_desc.stages = sdata;
-        shader_desc.stages_count = _countof(sdata);
-
-        shader_desc.uniforms = uniforms;
-        shader_desc.uniform_count = uniform_count;
-
-    *out_shader = gfx_create_shader2(ctx, &shader_desc);
+    m_cash_path = tmp;
 }
 
-void create_material_from_file_path(gfx_context_t* ctx, const char* path, struct gfx_material_instance_t** material)
+void resource_manager::set_dlc_path(const char* path)
 {
-    char* data = nullptr;
-
-    size_t size = read_file_data(path, &data);
-
-    if (size != 0)
-        create_material_from_file_data(ctx, data, size, material);
-
-    free(data);
 }
 
-void create_material_from_file_data(gfx_context_t* ctx, char* data, size_t size, struct gfx_material_instance_t** insance)
+asset_slot_t* resource_manager::get_slot(uint64_t runtime_guid)
 {
-  //  std::string jstr(data, size);
-  //  json::from_json<gfx_material_instance_t>(jstr);
+    auto it = m_guid_to_loaded_asset_slots.find(runtime_guid);
+    return it != m_guid_to_loaded_asset_slots.end() ? &it->second : nullptr;
 }
 
-#endif
+file_info_t* resource_manager::get_file_info(uint64_t runtime_guid)
+{
+    auto it = m_file_infos.find(runtime_guid);
+    return it != m_file_infos.end() ? &it->second : nullptr;
+}
+
+asset_io_blob_t resource_manager::read_asset_blob(file_info_t* info)
+{
+    asset_io_blob_t blob = {};
+    blob.cpu_data = m_staging_allocator->allocate(info->size, 16);
+    blob.data_size = info->size;
+
+    // TODO: replace to virtual fs(android)
+    FILE* file = fopen(info->path, "r");
+    if (file) {
+        fread(blob.cpu_data, blob.data_size, 1, file);
+        fclose(file);
+    }
+    return blob;
+}
+
+void resource_manager::free_asset_blob(asset_io_blob_t* blob)
+{
+    if (blob && blob->cpu_data) {
+        m_staging_allocator->deallocate(blob->cpu_data);
+        memset(blob, 0, sizeof(asset_io_blob_t));
+    }
+}
+
+
+void resource_manager::perform_resource_uploading()
+{
+    size_t bytes_uploaded_this_frame = 0;
+
+    asset_io_blob_t blob = {};
+
+    uint32_t m_max_upload_budget_per_frame = 50;
+    // We fetch ready data from I/O workers while it's still in the queue.
+    // And while we haven't hit the frame limit (f.e. 50 MB)
+    while (bytes_uploaded_this_frame < m_max_upload_budget_per_frame) {
+         break;
+     /*   // We try to retrieve the result of the background thread's work
+        // If the queue is empty, we exit the loop; there's nothing else to do.
+        if (!lock_free_queue_pop(&m_workers_results_queue, &blob)) {
+            break;
+        }
+
+        // Protection: check if the slot index is valid
+        if (blob.slot_index >= m_max_slots) {
+            // Someone returned a broken index - free up the worker's staging memory and move on
+            m_staging_allocator->deallocate(blob.cpu_data);
+            continue;
+        }
+
+        asset_slot_t* slot = &m_slots[blob.slot_index];
+
+        if (slot->type == asset_type::texture) {
+            texture_t* tex = &slot->as.texture;
+
+            gfx_texture_t* new_texture = gfx_create_texture_from_ram(m_gfx_ctx, &tex->desc, blob.cpu_data, blob.requested_mip);
+
+            if (new_texture) {
+             
+                gfx_texture_t* old_texture = tex->gfx_handle;
+
+                tex->gfx_handle = new_texture;
+                tex->current_mip = blob.requested_mip;
+
+                slot->state = asset_state_t::ready;
+
+                // If there was an old texture, we safely destroy it on the GPU.
+                if (old_texture && old_texture != m_fallback_texture) {
+                    gfx_texture_destroy(m_gfx_ctx, old_texture);
+                }
+
+                bytes_uploaded_this_frame += blob.data_size;
+            }
+            else {
+                // If gfx couldn't create a texture, mark the asset as broken
+                slot->state = asset_state_t::failed;
+            }
+        }
+
+        else if (slot->type == asset_type::asset_type_mesh) {
+            // slot->as.mesh = gfx_create_mesh_buffers(m_gfx_ctx, blob.cpu_data);
+            // slot->state = asset_state_t::ready;
+            // bytes_uploaded_this_frame += blob.data_size;
+        }
+        m_staging_allocator->deallocate(blob.cpu_data);*/
+    }
+}

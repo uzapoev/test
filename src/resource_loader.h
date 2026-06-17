@@ -2,7 +2,6 @@
 #define __resource_loader_h__
 
 #include "gfx/gfx.h"
-//#include "resource_manager.h"
 #include "mesh.h"
 
 struct render_mesh_t;

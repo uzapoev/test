@@ -60,29 +60,29 @@ VkFormat gfx_pixel_format_2_vk(gfx_pixel_format format)
     return VK_FORMAT_UNDEFINED;
 }
 
-VkFormat gfx_vertex_format_2_vk(gfx_vertex_format fromat)
+VkFormat gfx_vertex_format_2_vk(gfx_format fromat)
 {
     switch (fromat) {
-        case gfx_vertex_format_float1:      return VK_FORMAT_R32_SFLOAT;
-        case gfx_vertex_format_float2:      return VK_FORMAT_R32G32_SFLOAT;
-        case gfx_vertex_format_float4:      return VK_FORMAT_R32G32B32A32_SFLOAT;
+        case gfx_format_float1:      return VK_FORMAT_R32_SFLOAT;
+        case gfx_format_float2:      return VK_FORMAT_R32G32_SFLOAT;
+        case gfx_format_float4:      return VK_FORMAT_R32G32B32A32_SFLOAT;
 
-        case gfx_vertex_format_int2:        return VK_FORMAT_R32G32_SINT;
-        case gfx_vertex_format_int4:        return VK_FORMAT_R32G32B32A32_SINT;
+        case gfx_format_int2:        return VK_FORMAT_R32G32_SINT;
+        case gfx_format_int4:        return VK_FORMAT_R32G32B32A32_SINT;
 
-        case gfx_vertex_format_uint2:       return VK_FORMAT_R32G32_UINT;
-        case gfx_vertex_format_uint4:       return VK_FORMAT_R32G32B32A32_UINT;
+        case gfx_format_uint2:       return VK_FORMAT_R32G32_UINT;
+        case gfx_format_uint4:       return VK_FORMAT_R32G32B32A32_UINT;
 
-        case gfx_vertex_format_half2:       return VK_FORMAT_R16G16_SFLOAT;
-        case gfx_vertex_format_half4:       return VK_FORMAT_R16G16B16A16_SFLOAT;
+        case gfx_format_half2:       return VK_FORMAT_R16G16_SFLOAT;
+        case gfx_format_half4:       return VK_FORMAT_R16G16B16A16_SFLOAT;
 
-        case gfx_vertex_format_short2:      return VK_FORMAT_R16G16_SINT;
-        case gfx_vertex_format_short4:      return VK_FORMAT_R16G16B16A16_SINT;
+        case gfx_format_short2:      return VK_FORMAT_R16G16_SINT;
+        case gfx_format_short4:      return VK_FORMAT_R16G16B16A16_SINT;
 
-        case gfx_vertex_format_ushort2:     return VK_FORMAT_R16G16_UINT;
-        case gfx_vertex_format_ushort4:     return VK_FORMAT_R16G16B16A16_UINT;
+        case gfx_format_ushort2:     return VK_FORMAT_R16G16_UINT;
+        case gfx_format_ushort4:     return VK_FORMAT_R16G16B16A16_UINT;
 
-        case gfx_vertex_format_byte4:       return VK_FORMAT_B8G8R8A8_UNORM;
+        case gfx_format_byte4:       return VK_FORMAT_B8G8R8A8_UNORM;
     }
     return VK_FORMAT_UNDEFINED;
 }
@@ -792,7 +792,7 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     uint32_t extension_count = 0;
     const char* device_extensions[32] = {};
     device_extensions[extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-
+    
     // Enable bindless 
     if (bindless_features.shaderSampledImageArrayNonUniformIndexing &&
         bindless_features.descriptorBindingSampledImageUpdateAfterBind &&
@@ -839,13 +839,13 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     }
 
     // ray tracing core
-    if (rt_as.accelerationStructure ) {
+  /*  if (rt_as.accelerationStructure ) {
         device_extensions[extension_count++] = VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME;
         device_extensions[extension_count++] = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
         device_extensions[extension_count++] = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME;
     }
 
-    // ray tracind
+    // ray tracing
     if (rt_pipeline.rayTracingPipeline && rt_as.accelerationStructure) {
         device_extensions[extension_count++] = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
     }
@@ -854,7 +854,7 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     if ( rt_query.rayQuery && rt_as.accelerationStructure) {
         device_extensions[extension_count++] = VK_KHR_RAY_QUERY_EXTENSION_NAME;
     }
-
+    */
     *pnext_chain_tail = NULL;
 
     VkDevice device = nullptr;
@@ -2493,7 +2493,7 @@ void vk_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t* descrip
     VkImageView image_view = default_texture->view;
 
     // todo: write utility function for reset descriptor set bindingds to default values
-    // that mathot can be used in create_descriptor_pool
+    // that method can be used in create_descriptor_pool
     for (uint32_t i = 0; i < pool->set_layout_binding_count; ++i) {
       //  gfx_descriptor_set_write_texture(descriptor, 0, nullptr);
       //  gfx_descriptor_set_write_sampler(descriptor, 0, nullptr);
@@ -3165,7 +3165,6 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
 
 void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline)
 {
-    assert(ctx);
     vk_context_t* vctx = (vk_context_t*)ctx;
     vk_shader_t* vkshader = (vk_shader_t*)desc->shader;
 
@@ -3255,10 +3254,12 @@ void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_
 
 void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* desc)
 {
+    vk_context_t* vctx = from_ctx(ctx);
 }
 
 void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline)
 {
+    vk_context_t* vctx = from_ctx(ctx);
 }
 
 // --- COMMAND BUFFER ---

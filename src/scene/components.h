@@ -3,12 +3,23 @@
 
 #include "../mathlib.h"
 #include "../common.h"
-
+#include "../resource_manager.h"
 
 
 struct icomponent 
 {
-    class node * owner = nullptr;
+    void* operator new(size_t) = delete;
+    void* operator new[](size_t) = delete;
+    void  operator delete(void*) = delete;
+    void  operator delete[](void*) = delete;
+
+   // class node * owner = nullptr;
+   // friend class component_pool<icomponent>;
+
+   // Explicitly allow placement new for our paged allocator.
+    // This is the EXACT overload your component_pool uses under the hood!
+    void* operator new(size_t, void* ptr) noexcept { return ptr; }
+  //  void operator delete(void*, void*) noexcept {}
 };
 
 
@@ -29,9 +40,12 @@ struct transform : icomponent
 
 struct hierarchy : icomponent
 { 
-    class node *        parent = nullptr;
-    class node **       childs = nullptr;
-    uint32_t            count = 0;
+    uint64_t            parent_node_id;
+    int16_t             child_count;
+
+    uint64_t            next_sibling_node_id;
+    uint64_t            prev_sibling_node_id;
+
     /*
     node *  parent() const { return parent; }
     void    add_child(node * n) {
@@ -40,25 +54,52 @@ struct hierarchy : icomponent
 
 struct renderer : icomponent
 {
-    interned_string     mesh_guid;          // mesh guid
-    interned_string     material_guid;      // material guid
-    interned_string     lightmap_guid;      // lightmap guid
-    vec4                lightmap_scale_offset;
-    uint32_t            flags;              // is_in_lodgroup, etc
+    interned_string         mesh_guid;          // mesh guid
+    interned_string         material_guid;      // material guid
+    interned_string         lightmap_guid;      // lightmap guid
+    vec4                    lightmap_scale_offset;
+    uint32_t                flags;              // is_in_lodgroup, etc
 
-    class render_mesh * mesh = nullptr;
-    class material *    material = nullptr;
-    friend class        render_system;
-    friend class        resource_system;
+    render_mesh_t*          mesh = nullptr;
+    material_t*             material = nullptr;
+    lightmap_t              lightmap;
+
+    asset_handle_t          mesh_handle;
+
+    uint32_t                material_count;
+    guid_t*                 material_guids;
+
+    mat4                    transform;      // global trransform
+    aabbox                  local_bound;    // local aa bbox
+    bbox                    world_bound;    // world aabbox
+    vec4                    sphere_bound;   // world aphere bounds
+
+   //SerializeObject(renderer,  SerializeObjectFieldWithKey("mesh", mesh_guid),
+   //                           SerializeObjectFieldWithKey("mat_count", material_count),
+   //                           SerializeObjectFieldWithKey("material",  materials),
+   //                           SerializeObjectFieldWithKey("lightmap",  lightmap)
+   // );
+    //void set_material_param(const char * name, )
 };
 
+
+struct tiny_renderer
+{
+    asset_handle_t      mesh_handle;
+
+    uint32_t            material_count;
+    asset_handle_t*     material_handles;
+
+    uint32_t            lightmap_idx;
+    uint32_t            transform_idx;
+};
 
 
 
 struct occluder : icomponent
 {
-    interned_string     guid;
-    class render_mesh * mesh;
+    interned_string         guid;
+    class render_mesh_t *   mesh;
 };
 
 struct lodgroup : icomponent
@@ -94,26 +135,5 @@ struct animator : icomponent    { };
 struct cinematic: icomponent    { };
 struct script:    icomponent    { };
 
-
-
-struct audio_object: icomponent
-{
-    void set_rtcp(int id, int value);
-};
-
-struct audio_listener: icomponent{};
-struct audio_room: icomponent{};
-struct audio_portal: icomponent{};
-struct audio_ambient: icomponent{};
-struct audio_bank;
-
-class audio_system
-{
-    audio_listener * create_listener();
-    audio_room *    create_room();
-    audio_portal *  create_portal();
-    audio_ambient * create_ambient();
-    audio_bank *    load_bank();
-};
 
 #endif

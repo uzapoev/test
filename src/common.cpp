@@ -639,7 +639,7 @@ struct stream_impl
         }
         else if (whence == SEEK_END) {
             flush();
-            if (fseek(m_file, offset, SEEK_END) != 0) return static_cast<size_t>(-1);
+            if (fseek(m_file, (long)offset, SEEK_END) != 0) return static_cast<size_t>(-1);
             m_read_pos = 0;
             m_read_buffer_size = 0;
             return tell();
@@ -661,7 +661,7 @@ struct stream_impl
         }
 
         flush();
-        if (fseek(m_file, target_pos, SEEK_SET) != 0) {
+        if (fseek(m_file, (long)target_pos, SEEK_SET) != 0) {
             return static_cast<size_t>(-1);
         }
         m_read_pos = 0;
@@ -672,7 +672,7 @@ struct stream_impl
 
     uint32_t tell()
     {
-        return m_read_virtual_pos + m_read_pos;
+        return (uint32_t)(m_read_virtual_pos + m_read_pos);
     }
 
     void flush()

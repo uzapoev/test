@@ -94,29 +94,29 @@ static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format, bool
     return WGPUTextureFormat_Undefined;
 }
 
-static WGPUVertexFormat gfx_vertex_format_2_webgpu(gfx_vertex_format format)
+static WGPUVertexFormat gfx_vertex_format_2_webgpu(gfx_format format)
 {
     switch (format)
     {
-        case gfx_vertex_format_float1:  return WGPUVertexFormat_Float32;
-        case gfx_vertex_format_float2:  return WGPUVertexFormat_Float32x2;
-        case gfx_vertex_format_float4:  return WGPUVertexFormat_Float32x4;
+        case gfx_format_float1:  return WGPUVertexFormat_Float32;
+        case gfx_format_float2:  return WGPUVertexFormat_Float32x2;
+        case gfx_format_float4:  return WGPUVertexFormat_Float32x4;
 
-        case gfx_vertex_format_int2:    return WGPUVertexFormat_Sint32x2;
-        case gfx_vertex_format_int4:    return WGPUVertexFormat_Sint32x4;
-        case gfx_vertex_format_uint2:   return WGPUVertexFormat_Uint32x2;
-        case gfx_vertex_format_uint4:   return WGPUVertexFormat_Uint32x4;
+        case gfx_format_int2:    return WGPUVertexFormat_Sint32x2;
+        case gfx_format_int4:    return WGPUVertexFormat_Sint32x4;
+        case gfx_format_uint2:   return WGPUVertexFormat_Uint32x2;
+        case gfx_format_uint4:   return WGPUVertexFormat_Uint32x4;
 
-        case gfx_vertex_format_half2:   return WGPUVertexFormat_Float16x2;
-        case gfx_vertex_format_half4:   return WGPUVertexFormat_Float16x4;
+        case gfx_format_half2:   return WGPUVertexFormat_Float16x2;
+        case gfx_format_half4:   return WGPUVertexFormat_Float16x4;
 
-        case gfx_vertex_format_short2:  return WGPUVertexFormat_Sint16x2;
-        case gfx_vertex_format_short4:  return WGPUVertexFormat_Sint16x4;
+        case gfx_format_short2:  return WGPUVertexFormat_Sint16x2;
+        case gfx_format_short4:  return WGPUVertexFormat_Sint16x4;
 
-        case gfx_vertex_format_ushort2: return WGPUVertexFormat_Uint16x2;
-        case gfx_vertex_format_ushort4: return WGPUVertexFormat_Uint16x4;
+        case gfx_format_ushort2: return WGPUVertexFormat_Uint16x2;
+        case gfx_format_ushort4: return WGPUVertexFormat_Uint16x4;
 
-        case gfx_vertex_format_byte4:   return WGPUVertexFormat_Sint8x4;
+        case gfx_format_byte4:   return WGPUVertexFormat_Sint8x4;
     };
     return WGPUVertexFormat_Float32x4;
 }

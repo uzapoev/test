@@ -25,8 +25,6 @@ constexpr uint32_t const_hash(char const* input) {
 }
 
 
-
-
 // https://github.com/suVrik/acceleration_structure_benchmark
 struct itree
 {   
@@ -90,111 +88,17 @@ struct node
     transform               transform;
     renderer                renderer;
 
-  //  std::vector<components::icomponent*> m_components;
     std::vector<node>       childs;
-
-private:
-    hierarchy *             m_hierarchy = nullptr;
-    //componentlist         m_components = nullptr;
-
-    int                     parent = 0;
-    int                     child_count = 0;
-    int*                    child_indexes = nullptr;
-};
-
-
-
-
-
-
-class entity_factory {
-public:
-    static entity_factory& instance() {
-        static entity_factory inst;
-        return inst;
-    }
-
-    entity_factory() {
-        auto memory_resource = new aligned_allocator("entity_factory");
-        m_node_allocator = new paged_pool_allocator(memory_resource, sizeof(tinynode), 1024 * 16);
-    }
-
-    tinynode* create_entity()
-    {
-        uint32_t assigned_id = 0;
-
-        // Check if we can recycle an old ID to keep the pools dense
-        if (!m_free_runtime_ids.empty()) {
-            assigned_id = m_free_runtime_ids.front();
-            m_free_runtime_ids.pop();
-        }
-        else {
-            assigned_id = m_next_runtime_id++;
-        }
-        tinynode* tnode         = m_node_allocator->allocate<tinynode>();
-        tnode->guid             = generate_random_guid();
-        tnode->runtime_id       = assigned_id;
-        tnode->component_mask   = 0;
-
-        m_guid_to_node_map[tnode->guid] = tnode;
-
-        return tnode;
-    }
-
-    tinynode* create_entity(guid_t persistent_guid) {
-        uint32_t assigned_id = 0;
-        if (!m_free_runtime_ids.empty()) {
-            assigned_id = m_free_runtime_ids.front();
-            m_free_runtime_ids.pop();
-        }
-        else {
-            assigned_id = m_next_runtime_id++;
-        }
-
-        tinynode* tnode = create_entity();
-        m_guid_to_node_map.erase(tnode->guid);
-        tnode->guid = persistent_guid;
-        m_guid_to_node_map[persistent_guid] = tnode;
-
-        return tnode;
-    }
-
-    void destroy_entity(tinynode* node) {
-        if (!node) return;
-        m_free_runtime_ids.push(node->runtime_id);
-        m_guid_to_node_map.erase(node->guid);
-        node->~tinynode();
-        m_node_allocator->deallocate(node);
-    }
-
-    // Quick runtime translation (useful for scripts working with asset references)
-    tinynode* get_runtime_id(const guid_t& guid) const {
-        auto it = m_guid_to_node_map.find(guid);
-        return (it != m_guid_to_node_map.end()) ? it->second : nullptr;
-    }
-
-private:
-    guid_t generate_random_guid() {
-        // Your runtime GUID generation logic (e.g., MurmurHash from string or rand())
-        return guid_t{ 0, 0 };
-    }
-
-private:
-    paged_pool_allocator*                               m_node_allocator = nullptr;
-    uint32_t                                            m_next_runtime_id = 0;
-    std::queue<uint32_t>                                m_free_runtime_ids;
-    std::unordered_map<guid_t, tinynode*, guid_hasher>  m_guid_to_node_map;
 };
 
 
 class scene
 {
 public:
-
-    enum component_type : uint32_t    {
+    enum component_type : uint32_t {
         scene_meta_data             = const_hash("meta"),
 
-        component_node              /*= const_hash("node")*/,           // name, guid, tag, flags
+        component_node              /*= const_hash("node")*/,       // name, guid, tag, flags
         component_hierarchy         = const_hash("hierarhy"),       // parnet, childs;
         component_transform         = const_hash("transform"),      // 
 
@@ -225,6 +129,7 @@ public:
         component_audio_ambient     = const_hash("audio_ambient"),  // 
         component_audio_room        = const_hash("audio_room"),     // 
         component_audio_portal      = const_hash("audio_portal"),   // 
+        component_audio_reflector   = const_hash("audio_reflector"),   // 
 
         component_canvas            = const_hash("canvas"),
         component_script            = const_hash("script"),         // scripts(backends: lua/c#/native)
@@ -244,29 +149,26 @@ public:
     void                                    update();
     void                                    draw(gfx_command_buffer_t* cmd, camera & cam);
 
-    const std::vector<renderer_t> &         visible() const {return m_renderers;}
+    //const std::vector<renderer_t> &         visible() const {return m_renderers;}
 
  public:
    node *       create_node(interned_string name = "", interned_string guid = "");
-   transform *  create_transform();
 
 public:
     void                                    traverse(node &root, std::function<void(node&)> &cb);
 
-    const std::vector<renderer_t*> &        cull(const camera& camera);
+  //  const std::vector<renderer_t*> &        cull(const camera& camera);
 public:
     friend struct scene_reader_json;
     friend struct scene_reader_xml;
 
-    itree *                                 m_tree = nullptr;
-    std::vector<renderer_t>                 m_renderers;
-    std::vector<renderer_t*>                m_visibles;
+   // std::vector<renderer_t>                 m_renderers;
+   // std::vector<renderer_t*>                m_visibles;
 
     std::vector<node>                       m_nodes;
     std::vector<node*>                      m_nodes_flat_list;
     std::vector<node*>                      m_allocated_nodes;
-
-
+     
   //  entity_query<renderer_t>                m_render_query1;
     entity_query<transform, renderer>       m_render_query;
     std::vector<tinynode*>                  m_tiny_nodes;

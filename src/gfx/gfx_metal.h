@@ -221,28 +221,28 @@ static uint32_t metal_data_type_stride(MTLDataType type)
     return 0;
 }
 
-static MTLVertexFormat gfx_vertex_format_2_metal_type(gfx_vertex_format format)
+static MTLVertexFormat gfx_vertex_format_2_metal_type(gfx_format format)
 {
     switch (format)
     {
-        case gfx_vertex_format_float1:  return MTLVertexFormatFloat;
-        case gfx_vertex_format_float2:  return MTLVertexFormatFloat2;
-        case gfx_vertex_format_float4:  return MTLVertexFormatFloat4;
+        case gfx_format_float1:  return MTLVertexFormatFloat;
+        case gfx_format_float2:  return MTLVertexFormatFloat2;
+        case gfx_format_float4:  return MTLVertexFormatFloat4;
 
-        case gfx_vertex_format_int2:    return MTLVertexFormatInt2;
-        case gfx_vertex_format_int4:    return MTLVertexFormatInt4;
-        case gfx_vertex_format_uint2:   return MTLVertexFormatUInt2;
-        case gfx_vertex_format_uint4:   return MTLVertexFormatUInt4;
+        case gfx_format_int2:    return MTLVertexFormatInt2;
+        case gfx_format_int4:    return MTLVertexFormatInt4;
+        case gfx_format_uint2:   return MTLVertexFormatUInt2;
+        case gfx_format_uint4:   return MTLVertexFormatUInt4;
 
-        case gfx_vertex_format_half2:   return MTLVertexFormatHalf2;
-        case gfx_vertex_format_half4:   return MTLVertexFormatHalf4;
+        case gfx_format_half2:   return MTLVertexFormatHalf2;
+        case gfx_format_half4:   return MTLVertexFormatHalf4;
 
-        case gfx_vertex_format_short2:  return MTLVertexFormatShort2;
-        case gfx_vertex_format_short4:  return MTLVertexFormatShort4;
-        case gfx_vertex_format_ushort2:  return MTLVertexFormatUShort2;
-        case gfx_vertex_format_ushort4:  return MTLVertexFormatUShort4;
+        case gfx_format_short2:  return MTLVertexFormatShort2;
+        case gfx_format_short4:  return MTLVertexFormatShort4;
+        case gfx_format_ushort2:  return MTLVertexFormatUShort2;
+        case gfx_format_ushort4:  return MTLVertexFormatUShort4;
 
-        case gfx_vertex_format_byte4:    return MTLVertexFormatUChar4;
+        case gfx_format_byte4:    return MTLVertexFormatUChar4;
     }
 }
 

@@ -105,12 +105,24 @@ private:
     struct page*        m_page_head = nullptr;
     struct page*        m_page_current = nullptr;
 
-    size_t              m_allocation_size;
-    size_t              m_allocations_per_page;
-    size_t              m_page_size;
-    size_t              m_bitset_word_count;
+    uint32_t            m_allocation_size;
+    uint32_t            m_allocations_per_page;
+    uint32_t            m_page_size;
+    uint32_t            m_bitset_word_count;
 };
 
+
+template<class T>
+struct paged_pool_allocator_t
+{
+    paged_pool_allocator_t(iallocator* memory_resource, uint32_t allocation_per_page)
+    :m_allocator(memory_resource, sizeof(T), allocation_per_page) { }
+
+    inline T*      allocate()           { return m_allocator.allocate(sizeof(T), alignof(T)); }
+    inline void    deallocate(T* ptr)   { m_allocator.deallocate(ptr);}
+private:
+    paged_pool_allocator m_allocator;
+};
 
 //
 //

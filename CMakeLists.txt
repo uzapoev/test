@@ -78,9 +78,17 @@ endif(EMSCRIPTEN)
 
 #add_definitions("-std=c++17")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(MSVC)
+    add_compile_options(/W4 /O2 /Oi /GR- /EHa-) # disable RTTI and exceptions
+else()
+    add_compile_options(-Wall -Wextra -O3 -fno-rtti -fno-exceptions)
+endif()
 
 #set(CMAKE_C_COMPILER "emcc") 
 
@@ -119,17 +127,19 @@ set(SOURCES
     src/gfx/gfx_webgpu.h
     src/scene/scene.cpp
     src/scene/scene.h
+    src/scene/ecs.h
+    src/scene/world.h
     src/scene/render_system.cpp
     src/scene/render_system.h
-    src/gason.cpp
-    src/gason.h
     src/json_serializer.h
     src/resource_loader.cpp
     src/resource_loader.h
     src/resource_manager.cpp
     src/resource_manager.h
+    src/resources.h
     src/common.cpp
     src/common.h
+    src/mathlib.h
     src/memmgr.cpp
     src/memmgr.h
 )

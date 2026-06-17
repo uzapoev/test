@@ -22,20 +22,20 @@ typedef enum shader_compile_option {
 } shader_compile_option;
 
 
-typedef struct compiled_stage_blob_t {
-    gfx_shader_stage    stage;
-    char                stage_entry_point_name[64];
-    uint32_t            stage_data_size;
-    char*               stage_data;
-} compiled_stage_blob_t;
+typedef struct compiled_stage_t {
+    gfx_shader_stage        stage;
+    char                    stage_entry_point_name[64];
+    uint32_t                stage_data_size;
+    char*                   stage_data;
+} compiled_stage_t;
 
 
 typedef struct compiled_shader_program_t {
-    uint32_t                    keyword_count;
-    char*                       keywords[64];
+    uint32_t                keyword_count;
+    char*                   keywords[64];
 
-    uint32_t                    blob_count;
-    compiled_stage_blob_t*      blobs;
+    uint32_t                blob_count;
+    compiled_stage_t*       blobs;
 } compiled_shader_program_t;
 
 
@@ -50,8 +50,8 @@ typedef struct gfx_shader_compiler_request_desc_t {
     uint32_t                define_count;
     const char**            defines;
 
-    uint32_t                search_path_count;
-    const char**            search_paths;
+    uint32_t                search_include_path_count;
+    const char**            search_include_paths;
 } gfx_shader_compiler_request_desc_t;
 
 struct gfx_shader_compiler_context_t;
@@ -286,7 +286,7 @@ static int  gfx_compile_shader(gfx_shader_compiler_context_t * context, const ch
     }
 
     program->blob_count = slang_entry_point_index_count;
-    program->blobs = (compiled_stage_blob_t*)calloc(slang_entry_point_index_count, sizeof(compiled_stage_blob_t));
+    program->blobs = (compiled_stage_t*)calloc(slang_entry_point_index_count, sizeof(compiled_stage_t));
 
     for (size_t i = 0; i < slang_entry_point_index_count; i++)
     {

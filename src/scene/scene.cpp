@@ -7,13 +7,19 @@
 struct scene_chunk_info_t {
     uint32_t type = 0;
     uint32_t size = 0;
-  //  uint32_t id   = 0;
 };
 
 struct scene_header_t {
     uint32_t magick = MAKEFOURCC('S', 'C', 'N', '0');
     uint32_t version;
+
     uint32_t node_count;
+
+    uint32_t textures_count;
+    uint32_t lightmaps_count;
+    uint32_t shaders_count;
+    uint32_t materials_count;
+    uint32_t meshes_count;
 };
 
 void camera::update()
@@ -22,7 +28,7 @@ void camera::update()
     _rot = quat::from_euler(_axis.y, _axis.x, 0.0f);
 
     vec3 dir = math::normalize(_pos - _target);
-    vec3 target = quat::mul(_rot, dir) + _pos;
+    vec3 target = math::mul(_rot, dir) + _pos;
 
     bool right_hand = false;
     mat4 proj = math::perspective_matrix(math::deg2rad(m_fov), m_aspect, m_near, m_far, right_hand);
@@ -44,29 +50,28 @@ scene scene::create_from_json_file(const std::string_view& path)
 {
     measure ms("\nscene loading");
 
-    scene result;
-    std::string bin_path = path.data();
-    bin_path.append(".bin");
-    if(std::filesystem::exists(bin_path)) {
-        result.load(bin_path);
+    if(std::filesystem::exists(path)) {
+        scene result = scene_reader_json::create_from_file(path);
         result.init();
-    } else if(std::filesystem::exists(path)) {
-        result = scene_reader_json::create_form_file(path);
-        result.init();
-        result.save(bin_path);
+        return result;
     } else {
         debug::log_error("no file at path %s", path.data());
-        return result;
+        return {};
     }
-
-    component_manager::instance().add_component_by_type_index(nullptr, 10, nullptr);
-    
+    /*
     for (auto [node0, trans0, rend0] : result.m_render_query)
     {
         auto mesh = resource_manager::shared()->load_mesh(rend0->mesh_guid.c_str());
+        auto mesh_handle = resource_manager::shared()->load(rend0->mesh_guid.c_str(), nullptr);
 
-        auto renderer_r = node0->add_component<renderer_t>();
-        printf("");
+        if (strstr(node0->name.c_str(), "LOD1"))   continue;
+        if (strstr(node0->name.c_str(), "LOD2"))   continue;
+        if (strstr(node0->name.c_str(), "LOD3"))   continue;
+        if (strstr(node0->name.c_str(), "Imposter"))  continue;
+        if (strstr(node0->name.c_str(), "Impostor"))  continue;
+        if (strstr(node0->name.c_str(), "mpostor"))   continue;
+
+        rend0->transform = trans0->global_transform;
     }
 
     int current_vb_size = 0;
@@ -83,8 +88,8 @@ scene scene::create_from_json_file(const std::string_view& path)
                 current_vb_size += mesh->mesh()->vertex_count * sizeof(vertex);
                 compressed_vb_size += mesh->mesh()->vertex_count * sizeof(vertex_packed);
             }
-            else
-                debug::log_error("failed load mesh %s", m.c_str());
+           // else
+           //     debug::log_error("failed load mesh %s", m.c_str());
         }
     }
     float fi = (float)(current_ib_size) / (1024.0f * 1024.0f);
@@ -94,7 +99,7 @@ scene scene::create_from_json_file(const std::string_view& path)
      
     for (size_t i = 0; i < result.m_nodes_flat_list.size(); ++i)
     {
-        renderer_t renderer = {};
+      //  renderer_t renderer = {};
         auto node = result.m_nodes_flat_list[i];
         renderer.transform = mat4::trs( node->transform.position,
                                         node->transform.rotation,
@@ -140,9 +145,9 @@ scene scene::create_from_json_file(const std::string_view& path)
 
         if(renderer.material != nullptr && renderer.mesh != nullptr)
             result.m_renderers.emplace_back(renderer);
-    }
+    }*/
 
-    auto ctx = resource_manager::shared()->ctx();
+/*    auto ctx = resource_manager::shared()->ctx();
     gfx_sampler_desc_t desc = {};
         desc.mode = gfx_address_mode_repeat;
         desc.minmag = gfx_filter_linear;
@@ -176,6 +181,16 @@ scene scene::create_from_json_file(const std::string_view& path)
             gfx_descriptor_set_write_sampler(set, sampler_location, sampler);
     }
     
+    return result;*/
+}
+
+
+node* scene::create_node(interned_string name, interned_string guid)
+{
+    node* result = new node();
+    result->name = name;
+    result->guid = guid;
+    m_allocated_nodes.push_back(result);
     return result;
 }
 
@@ -184,7 +199,6 @@ scene scene::create_from_json_file(const std::string_view& path)
 void scene::load(const std::string_view& path)
 {
     component_manager::instance().register_query(&m_render_query);
-  //  component_manager::instance().register_query(&m_render_query);
 
     if(m_node_allocator == nullptr){
         m_world = new world();
@@ -192,11 +206,23 @@ void scene::load(const std::string_view& path)
         m_node_allocator = new paged_pool_allocator(allocator, sizeof(node), 1024*16);
     }
 
-    PROFILE_SAMPLE("scene::load")
+    PROFILE_SAMPLE("scene::load::bin")
     filestream * stream = filestream::open_rb(path.data());
 
     //scene_header_t header = stream->read<scene_header_t>();
     auto header = stream->read<scene_header_t>();
+
+    std::vector<guid_t> mesh_guids;
+    std::vector<guid_t> lightmap_guids;
+    std::vector<guid_t> shaders_guids;
+    std::vector<guid_t> materials_guids;
+    std::vector<guid_t> meshes_guids;
+
+    if(header.version == 2){
+        auto mesh_count = stream->read<uint32_t>();
+        mesh_guids.resize(mesh_count);
+        stream->read(sizeof(guid_t) * mesh_guids.size(), mesh_guids.data());
+    }
 
     m_nodes.resize(header.node_count);// = allocator->alloc<node>(nodes_count);
 
@@ -204,50 +230,65 @@ void scene::load(const std::string_view& path)
     component_manager::instance().pause_notifications();
     while(stream->read(sizeof(scene_chunk_info_t), &info) != 0)
     {
-        if(info.type == component_node)        
-        {
-            m_tiny_nodes.push_back(entity_factory::instance().create_entity());
+        auto chunk_start = stream->tell();
+        switch(info.type) {
+            case component_node: {
+                auto node = m_world->load_node(this, stream);
+                auto tnode = world::create_node(uuid::str_to_guid(node->guid.c_str()), this);
+                tnode->name = node->name;
+                node->guid = node->guid;
 
-            auto node = m_world->load_node(this, stream);
-            m_nodes_flat_list.emplace_back(node);
-        } 
-        else if(info.type == component_transform) 
-        {
-            auto component = component_manager::instance().add_component<transform>(m_tiny_nodes.back());
+                m_tiny_nodes.push_back(tnode);
+            } break;
+
+            case component_transform: {
+                uint32_t  index = stream->read<uint32_t>();
+                tinynode* node  = m_tiny_nodes[index];
+                auto component  = node->add_component<transform>();
+
                 component->position = stream->read<vec3>();
                 component->rotation = stream->read<quat>();
                 component->scale    = stream->read<vec3>();
                 component->update_transform();
-            m_nodes_flat_list.back()->transform = *component;
-        } 
-        else if(info.type == component_renderer) 
-        {
-            auto component = component_manager::instance().add_component<renderer>(m_tiny_nodes.back());
-                component->mesh_guid        = stream->read<interned_string>();;
-                component->material_guid    = stream->read<interned_string>();
-                component->lightmap_guid    = stream->read<interned_string>();
-                component->lightmap_scale_offset = stream->read<vec4>();
-            m_nodes_flat_list.back()->renderer = *component;
-        }
-        else 
-        {
-            stream->seek(info.size, 1);
-        }
+            } break;
+
+            case component_hierarchy: {
+                uint32_t  index = stream->read<uint32_t>();
+                tinynode* node  = m_tiny_nodes[index];
+                auto component  = node->add_component<hierarchy>();
+            } break;
+
+            case component_light: {
+                uint32_t  index = stream->read<uint32_t>();
+                tinynode* node  = m_tiny_nodes[index];
+                //auto component  = node->add_component<light>();
+            }break;
+
+            case component_renderer: {
+                uint32_t  index = stream->read<uint32_t>();
+                tinynode* node  = m_tiny_nodes[index];
+                auto component  = node->add_component<renderer>();
+
+                guid_t material_guids[32] = {};
+                guid_t mesh_guid    = stream->read<guid_t>();
+                uint32_t mat_count  = stream->read<uint32_t>();
+                stream->read(sizeof(guid_t) * mat_count, &material_guids[0]);
+
+                guid_t lm_guid = stream->read<guid_t>(); // lightmap texture guid
+                float4 lm_scale_offset = stream->read<float4>(); // lightmap scale offset
+
+                component->mesh_handle = resource_manager::shared()->load(mesh_guid, nullptr);
+            } break;
+
+            default: 
+                //stream->seek(info.size, 1);
+            break;
+        };
+
+        stream->seek(chunk_start + info.size, 0);
     }
     component_manager::instance().resume_notifications(m_tiny_nodes);
-    //component_manager::instance().post_frame_cleanup();
 }
-
-
-node* scene::create_node(interned_string name, interned_string guid)
-{
-    node * result = new node();
-    result->name = name;
-    result->guid = guid;
-    m_allocated_nodes.push_back(result);
-    return result;
-}
-
 
 
 void scene::save(const std::string_view& path)
@@ -271,9 +312,10 @@ void scene::save(const std::string_view& path)
     for (uint32_t i = 0; i < m_nodes_flat_list.size(); i++)
     {
         auto& node = m_nodes_flat_list[i];
-        m_world->serialize<transform>(&node->transform, stream);
+        m_world->serialize<transform>(node, &node->transform, stream);
+
         if (!node->renderer.mesh_guid.empty())
-            m_world->serialize<renderer>(&node->renderer, stream);
+            m_world->serialize<renderer>(node, &node->renderer, stream);
      }
 
     stream->flush();
@@ -284,13 +326,7 @@ void scene::init()
 {
     std::function<void(node&)> cb = [this](node& n) {
         m_nodes_flat_list.push_back(&n);
-
-        if (!n.renderer.mesh_guid.empty())
-            m_meshes.insert(n.renderer.mesh_guid);
-
-        if (!n.renderer.material_guid.empty())
-            m_materials.insert(n.renderer.material_guid);
-        };
+    };
    
     m_meshes.reserve(1024 * 8);
     m_nodes_flat_list.reserve(1024 * 8);
@@ -300,14 +336,12 @@ void scene::init()
         cb(m_nodes[i]);
         traverse(m_nodes[i], cb);
     }
-
-    m_visibles.reserve(m_meshes.size());
 }
 
 void scene::clear()
 {
-    m_renderers.clear();
-    m_visibles.clear();
+    //m_renderers.clear();
+   // m_visibles.clear();
 
     m_nodes.clear();
     m_nodes_flat_list.clear();
@@ -350,7 +384,7 @@ void scene_draw_indirect(gfx_command_buffer_t* cmd, camera& camera)
 void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
 {
     gfx_cmd_push_marker(cmd, "scene::draw");
-    mat4 vp = camera.view_proj();
+   /* mat4 vp = camera.view_proj();
     auto visible_renderers = cull(camera); // culling
 
     uint64_t  mvp_location = 0;
@@ -369,20 +403,6 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
             gfx_descriptor_set_write_buffer_data(renderer->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
         }
     }
-
- /*   gfx_pipeline_t* pipeline = nullptr;
-    for (int i = 0; i < visible_renderers.size(); ++i)
-    {
-        auto & renderer = visible_renderers[i];
-        if(renderer->material->instance->pipeline != pipeline)
-        {
-            pipeline = renderer->material->instance->pipeline;
-            gfx_cmd_bind_pipeline(cmd, pipeline);
-        }
-        draw_renderer(cmd, renderer);
-    }
-*/
-
 
     gfx_pipeline_t* pipeline = nullptr;
     gfx_buffer_t * vertex_buffer = nullptr;
@@ -423,16 +443,17 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
 
         for (size_t sub_idx = 0; sub_idx < mesh->submesh_count; sub_idx++)
         {
-            uint32_t count = mesh->submeshes[sub_idx];
-            gfx_cmd_draw_indexed(cmd, count, index_offset + start_idx, 1, vertex_offset);
-            start_idx += mesh->submeshes[sub_idx];
+            uint32_t start = mesh->submeshes[sub_idx].index_start;
+            uint32_t count = mesh->submeshes[sub_idx].index_count;
+
+            gfx_cmd_draw_indexed(cmd, count, index_offset + start, 1, vertex_offset);
         }
 
         if (mesh->submesh_count == 0)
         {
             gfx_cmd_draw_indexed(cmd, mesh->index_count, index_offset, 1, vertex_offset);
         }
-    }
+    }*/
 
     gfx_cmd_pop_marker(cmd);
 }
@@ -449,7 +470,7 @@ void scene::traverse(node & n, std::function<void(node&)> &cb)
 
 struct renderer_sort
 {
-    bool operator()(renderer_t* a, renderer_t* b) const {
+    bool operator()(renderer* a, renderer* b) const {
         if (a->material->instance->pipeline == b->material->instance->pipeline) {
             if (a->material->instance == b->material->instance) {
                 if (a->mesh == b->mesh) {
@@ -469,7 +490,7 @@ bool DistanceCullSphere(const vec3& camPos, const vec3& sphereCenter, float radi
     float maxDistSq = (maxDistance + radius);// * (maxDistance + radius);
     return distSq > maxDistSq;
 }
-
+#if 0
 const std::vector<renderer_t*>& scene::cull(const camera& camera)
 {
    // measure ms("scene::cull");
@@ -562,3 +583,5 @@ const std::vector<renderer_t*>& scene::cull(const camera& camera)
 
     return m_visibles;
 }
+
+#endif

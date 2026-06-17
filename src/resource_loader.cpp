@@ -102,14 +102,8 @@ struct mesh_header_t
 
 void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t index_buffer_size, mesh_pool_t* pool)
 {
-    gfx_offset_allocator_create( vertex_buffer_size, 1024, &pool->vertex_buffer_allocator);
+    gfx_offset_allocator_create(vertex_buffer_size, 1024, &pool->vertex_buffer_allocator);
     gfx_offset_allocator_create(index_buffer_size, 128, &pool->index_buffer_allocator);
-
-   /* gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
-    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
-    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
-    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);
-    gfx_offset_allocator_allocate(&pool->index_buffer_allocator, 8*1024*1024, 16);*/
 
     gfx_buffer_desc_t vb = {};
         vb.data     = nullptr;
@@ -276,22 +270,6 @@ typedef struct dds_header_dx10_t {
     uint32_t    arraySize;
     uint32_t    miscFlags2;
 } dds_header_dx10_t;
-
-typedef struct pvr_header_t
-{
-    uint32_t    magick;             // Version of the file header, used to identify it.
-    uint32_t    flags;              // Various format flags.
-    uint64_t    pixel_format;       // The pixel format, 8cc value storing the 4 channel identifiers and their respective sizes.
-    uint32_t    colour_space;       // The Colour Space of the texture, currently either linear RGB or sRGB.
-    uint32_t    channel_type;       // Variable type that the channel is stored in. Supports signed/unsigned int/short/byte or float for now.
-    uint32_t    height;             // Height of the texture.
-    uint32_t    width;              // Width of the texture.
-    uint32_t    depth;              // Depth of the texture. (Z-slices)
-    uint32_t    num_surfaces;       // Number of members in a Texture Array.
-    uint32_t    num_faces;          // Number of faces in a Cube Map. Maybe be a value other than 6.
-    uint32_t    mipmap_count;       // Number of MIP Maps in the texture - NB: Includes top level.
-    uint32_t    meta_data_size;    // Size of the accompanying meta data.
-} pvr_header_t;
 
 typedef struct astc_header_t
 {
@@ -516,9 +494,9 @@ void save_shader_program(const char* path, compiled_shader_program_t * program)
     FILE* file = fopen(path, "wb");
     fwrite(&shader_magic, sizeof(uint64_t), 1, file);
     fwrite(&program->blob_count, sizeof(uint32_t), 1, file);
-    for (int i = 0; i < program->blob_count; ++i)
+    for (uint32_t i = 0; i < program->blob_count; ++i)
     {
-        compiled_stage_blob_t * blob = &program->blobs[i];
+        compiled_stage_t * blob = &program->blobs[i];
         fwrite(&blob->stage, sizeof(uint32_t), 1, file);
         fwrite(&blob->stage_data_size, sizeof(uint32_t), 1, file);
         fwrite(blob->stage_data, blob->stage_data_size, 1, file);
@@ -614,9 +592,9 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
         gfx_compile_shader(g_compiler_context, &desc, &compiled_program);
         count = compiled_program.blob_count;
 
-        for (int i = 0; i < compiled_program.blob_count; ++i)
+        for (uint32_t i = 0; i < compiled_program.blob_count; ++i)
         {
-            compiled_stage_blob_t* blob = &compiled_program.blobs[i];
+            compiled_stage_t* blob = &compiled_program.blobs[i];
             gfx_shader_reflection(blob->stage_data, blob->stage_data_size, &uniforms[uniform_count], &uniform_count);
             stage_data[i] = { blob->stage,   (uint32_t*)blob->stage_data[i], (uint32_t)blob->stage_data_size };
         }

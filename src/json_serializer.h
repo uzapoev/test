@@ -1,18 +1,12 @@
 #ifndef __json_serializer_h__
 #define __json_serializer_h__
 
-#include <cstdint>
-#include <cmath>
-#include <cctype>
 #include <string>
 #include <vector>
-
-#include <string>
 #include <charconv>
 
 #include <json/sajson.h>
 #include "common.h"
-
 
 /*  struct UserInfo
     {
@@ -21,10 +15,10 @@
         std::string  image;
         std::string  url;
 
-        JsonSerialize(UserInfo,
-            SerializeFieldWithKey("id",  pid  ),
-            SerializeFieldWithKey("n",   nick ),
-            SerializeFieldWithKey("url", url  )
+        ReflectObject(UserInfo,
+            ReflectObjectFieldWithKey("id",  pid  ),
+            ReflectObjectFieldWithKey("n",   nick ),
+            ReflectObjectFieldWithKey("url", url  )
         );
     };
     auto userinfo = json::from_json<UserInfo>(data);
@@ -35,8 +29,8 @@
         guid*  material_guids;
 
         ReflectObject(RenderMeshComponent,
-            ReflectField("mesh",        mesh_guid ),
-            ReflectField("materials",   material_guids )
+            ReflectObjectField("mesh",        mesh_guid ),
+            ReflectObjectField("materials",   material_guids )
         );
     };
 
@@ -45,9 +39,9 @@
         float x,y,z;
     }
 
-    JsonSerializeExternal(vec3, SerializeField(x), 
-                                SerializeField(y), 
-                                SerializeField(z) );
+    ReflectObjectExternal(vec3, ReflectObjectField(x), 
+                                ReflectObjectField(y), 
+                                ReflectObjectField(z) );
 */
 
 typedef enum field_options {
@@ -60,10 +54,10 @@ typedef enum field_options {
 #define ReflectObjectInherited( CLASS, BASE, ... )  public: static auto reflection_properties() { using Type = CLASS; return std::tuple_cat(std::make_tuple(__VA_ARGS__), BASE::reflection_properties()); }
 #define ReflectObjectExternal( CLASS, ...)          template <> inline auto reflection_properties<CLASS>() { using Type = CLASS;  return std::make_tuple(__VA_ARGS__); }
 
-#define ReflectField(FIELD)                       reflection::make_property(&Type::FIELD, #FIELD)
-#define ReflectFieldWithKey(KEY, FIELD)           reflection::make_property(&Type::FIELD, KEY)
+#define ReflectObjectField(FIELD)                   reflection::make_property(&Type::FIELD, #FIELD)
+#define ReflectObjectFieldWithKey(KEY, FIELD)       reflection::make_property(&Type::FIELD, KEY)
 
-template<class T> inline auto                     reflection_properties() { /*return std::make_tuple();*/ }
+template<class T> inline auto                       reflection_properties() { return std::make_tuple(); }
 
 
 namespace reflection
@@ -246,8 +240,6 @@ namespace json
 
     namespace detail
     {
-
-
         template<class T, typename Enable = void>
         struct is_vector {
             static bool const value = false;

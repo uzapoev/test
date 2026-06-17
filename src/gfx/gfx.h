@@ -207,26 +207,26 @@ typedef enum gfx_pixel_format {
 } gfx_pixel_format;
 
 
-typedef enum gfx_vertex_format {
-    gfx_vertex_format_float1,           /**< Single 32-bit floating-point component scalar */
-    gfx_vertex_format_float2,           /**< Two-dimensional 32-bit float vector (vec2f) */
-    gfx_vertex_format_float4,           /**< Four-dimensional 32-bit float vector (vec4f) */
+typedef enum gfx_format {
+    gfx_format_float1,           /**< Single 32-bit floating-point component scalar */
+    gfx_format_float2,           /**< Two-dimensional 32-bit float vector (vec2f) */
+    gfx_format_float4,           /**< Four-dimensional 32-bit float vector (vec4f) */
     
-    gfx_vertex_format_int2,             /**< Two-dimensional 32-bit signed integer vector */
-    gfx_vertex_format_int4,             /**< Four-dimensional 32-bit signed integer vector */
-    gfx_vertex_format_uint2,            /**< Two-dimensional 32-bit unsigned integer vector */
-    gfx_vertex_format_uint4,            /**< Four-dimensional 32-bit unsigned integer vector */
+    gfx_format_int2,             /**< Two-dimensional 32-bit signed integer vector */
+    gfx_format_int4,             /**< Four-dimensional 32-bit signed integer vector */
+    gfx_format_uint2,            /**< Two-dimensional 32-bit unsigned integer vector */
+    gfx_format_uint4,            /**< Four-dimensional 32-bit unsigned integer vector */
     
-    gfx_vertex_format_half2,            /**< Two 16-bit half-precision floating-point components */
-    gfx_vertex_format_half4,            /**< Four 16-bit half-precision floating-point components */
+    gfx_format_half2,            /**< Two 16-bit half-precision floating-point components */
+    gfx_format_half4,            /**< Four 16-bit half-precision floating-point components */
     
-    gfx_vertex_format_short2,           /**< 2D signed short components normalized to [-1.0, 1.0] range */
-    gfx_vertex_format_short4,           /**< 4D signed short components normalized to [-1.0, 1.0] range */
-    gfx_vertex_format_ushort2,          /**< 2D unsigned short components normalized to [0.0, 1.0] range */
-    gfx_vertex_format_ushort4,          /**< 4D unsigned short components normalized to [0.0, 1.0] range */
+    gfx_format_short2,           /**< 2D signed short components normalized to [-1.0, 1.0] range */
+    gfx_format_short4,           /**< 4D signed short components normalized to [-1.0, 1.0] range */
+    gfx_format_ushort2,          /**< 2D unsigned short components normalized to [0.0, 1.0] range */
+    gfx_format_ushort4,          /**< 4D unsigned short components normalized to [0.0, 1.0] range */
     
-    gfx_vertex_format_byte4,            /**< Four 8-bit unsigned bytes normalized to [0.0, 1.0] (optimal for vertex colors) */
-} gfx_vertex_format;
+    gfx_format_byte4,            /**< Four 8-bit unsigned bytes normalized to [0.0, 1.0] (optimal for vertex colors) */
+} gfx_format;
 
 
 typedef enum gfx_vertex_rate {
@@ -669,7 +669,7 @@ typedef struct gfx_vertex_attribute {
 //  gfx_semantic            semantic;
     uint32_t                location;           /**< Hardware layout shader location registration index slot (layout(location = X)) */
     uint32_t                binding;            /**< Input slot buffer source binding index register alignment link */
-    gfx_vertex_format       format;             /**< Primitive vector component layout size encoding and configuration classification */
+    gfx_format       format;             /**< Primitive vector component layout size encoding and configuration classification */
     uint32_t                offset;             /**< Byte offset starting boundaries address relative to current vertex index row start */
 } gfx_vertex_attribute;
 
@@ -1356,7 +1356,7 @@ typedef struct gfx_rt_geometry_desc_t {
     gfx_buffer_t*               vertex_buffer;          /**< Hardware buffer containing triangle vertex position data */
     uint32_t                    vertex_stride;          /**< Stride spacing in bytes separating vertex data rows */
     uint32_t                    vertex_count;           /**< Total number of vertices in the stream */
-    gfx_vertex_format           vertex_format;          /**< Data layout component encoding format (usually float3 or float4) */
+    gfx_format           vertex_format;          /**< Data layout component encoding format (usually float3 or float4) */
 
     gfx_buffer_t*               index_buffer;           /**< Optional hardware buffer containing geometry indices data */
     uint32_t                    index_count;            /**< Number of indices (set to 0 for non-indexed triangle lists) */
@@ -1389,7 +1389,7 @@ typedef struct gfx_rt_instance_desc_t {
  * @brief Properties required to allocate and generate an Acceleration Structure (TLAS or BLAS).
  */
 typedef struct gfx_acceleration_structure_desc_t {
-    const char* label;                  /**< Optional debug metadata string literal identifier */
+    const char*                 label;                  /**< Optional debug metadata string literal identifier */
     bool                        is_top_level;           /**< True to build a TLAS (instancing), False to build a BLAS (geometry triangles) */
     bool                        allow_update;           /**< Flag enabling fast incremental updates (refitting) instead of full rebuilds */
 
@@ -1617,6 +1617,9 @@ static uint32_t     gfx_make_swizzle_mask(uint8_t r, uint8_t g, uint8_t b, uint8
 * */
 //gfx_api void _gfx_error(ctx, GFX_ERROR_OUT_OF_MEMORY, "Buffer pool exhausted!");
 inline void _gfx_error(gfx_context_t * ctx, uint32_t type, const char * msg, ...) {
+    (void)(ctx);
+    (void)(type);
+    (void)(msg);
     //ctx->vtbl
    // ctx->dbg_callback(, "")
 }

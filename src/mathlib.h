@@ -118,9 +118,19 @@ namespace math
     MATH_INLINE vec4 make_vec4(const vec3 &a)                       { return { a.x, a.y, a.z, 1.0f}; }
     MATH_INLINE vec4 make_vec4(float x, float y, float z, float w)  { return { x, y, z, w}; }
 
-
     MATH_INLINE float4 make_float4(const vec4& a)                       { return { a.x, a.y, a.z, a.w}; }
     MATH_INLINE float4 make_float4(float x, float y, float z, float w)  { return { x, y, z, w}; }
+
+    //MATH_INLINE quat mul(const quat& a, const quat& b);
+    //MATH_INLINE vec3 mul(const quat& a, const vec3& b);
+    //MATH_INLINE vec4 mul(const quat& a, const vec4& b);
+    // 
+    //MATH_INLINE vec3 mul(const mat4 & a, const vec3 & b);
+    //MATH_INLINE vec4 mul(const mat4 & a, const vec4 & b);
+    //MATH_INLINE mat4 mul(const mat4 & a, const mat4 & b);
+    // 
+
+    MATH_INLINE float4x4 mul(const float4x4& a, const float4x4& b);
 
     MATH_INLINE vec3  cross(const vec3& a, const vec3& b)       { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
     MATH_INLINE vec3  cross(const vec4& a, const vec4& b)       { return { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }; }
@@ -144,9 +154,9 @@ namespace math
     MATH_INLINE float distance_sq(const vec3& a, const vec3& b) { return (a.x * b.x) + (a.y * b.y) + (a.z * b.z); }
     MATH_INLINE float distance_sq(const vec4& a, const vec4& b) { return (a.x * b.x) + (a.y * b.y) + (a.z * b.z); }
 
-    MATH_INLINE vec2  normalize(const vec2& a)                  { float l = length(a); return { a.x / l, a.y / l }; }
-    MATH_INLINE vec3  normalize(const vec3& a)                  { float l = length(a); return { a.x / l, a.y / l, a.z / l }; }
-    MATH_INLINE vec4  normalize(const vec4& a)                  { float l = length(a); return { a.x / l, a.y / l, a.z / l, a.w }; }
+    MATH_INLINE vec2 normalize(const vec2& a)                   { float l = length(a); return { a.x / l, a.y / l }; }
+    MATH_INLINE vec3 normalize(const vec3& a)                   { float l = length(a); return { a.x / l, a.y / l, a.z / l }; }
+    MATH_INLINE vec4 normalize(const vec4& a)                   { float l = length(a); return { a.x / l, a.y / l, a.z / l, a.w }; }
 
     MATH_INLINE vec3 reflect(const vec3& v, const vec3& n)      { return v - 2.0f * dot(n, v) * n; }
     MATH_INLINE vec3 project(const vec3& v, const vec3& n)      { return v - (dot(v, n) / magnitude_sq(n)) * n; }
@@ -157,6 +167,18 @@ namespace math
         return k < 0.0f ? math::Zero : eta * v - (eta * nv + sqrtf(k)) * n;
     }
 
+
+    //
+    //MATH_INLINE quat quat_look_at(const vec3& eye, vec3& at);
+    //MATH_INLINE mat4 mat4_look_at(const vec3& eye, vec3& at);
+    // 
+    //MATH_INLINE mat4 inverse(mat4);
+    //MATH_INLINE quat inverse(quat);
+    // 
+    //MATH_INLINE mat4 quat_to_mat(quat);
+    //MATH_INLINE quat mat_to_quat(mat4);
+
+    // 
     // http://probesys.blogspot.com/2011/10/useful-math-functions.html
     namespace ease
     {
@@ -338,30 +360,6 @@ struct quat
             (lt * a.z) + (rt * b.z),
             (lt * a.w) + (rt * b.w)
         );
-    }
-
-    static quat     mul(const quat& a, const quat& b)
-    {
-        float x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
-        float y = a.w * b.y + a.y * b.w + a.z * b.x - a.x * b.z;
-        float z = a.w * b.z + a.z * b.w + a.x * b.y - a.y * b.x;
-        float w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
-
-        return quat(x, y, z, w);
-    }
-
-    static vec3     mul(const quat& q, const vec3& p)
-    {
-        quat tmp = mul(q, quat(p.x, p.y, p.z, 0.0f));
-        quat res = mul(tmp, quat(-q.x, -q.y, -q.z, q.w));
-        return { res.x, res.y, res.z };
-    }
-
-    static vec4     mul(const quat& q, const vec4& p)
-    {
-        quat tmp = mul(q, quat(p.x, p.y, p.z, 0.0f));
-        quat res = mul(tmp, quat(-q.x, -q.y, -q.z, q.w));
-        return { res.x, res.y, res.z, 1.0f };
     }
 
     static quat     from_euler(float roll, float pitch, float yaw)
@@ -892,10 +890,12 @@ namespace math
         return {x, y, z, w};
     }
 
-    MATH_INLINE mat4 mul(const mat4 &a, const mat4& b)
+    MATH_INLINE vec4 mul(const quat& q, const vec4& p)
     {
-        return mat4::mul(a, b);
-    }
+        quat tmp = mul(q, quat(p.x, p.y, p.z, 0.0f));
+        quat res = mul(tmp, quat(-q.x, -q.y, -q.z, q.w));
+        return { res.x, res.y, res.z, 1.0f };
+    } 
 
     MATH_INLINE vec3 mul(const quat &q, const vec3& p)
     {
@@ -903,6 +903,11 @@ namespace math
         quat tmp = mul(q, quat(p.x, p.y, p.z, 0.0f));
         quat res = mul(tmp, conjugate);
         return { res.x, res.y, res.z };
+    }
+
+    MATH_INLINE mat4 mul(const mat4& a, const mat4& b)
+    {
+        return mat4::mul(a, b);
     }
 
     MATH_INLINE quat inverse(const quat& q);

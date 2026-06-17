@@ -5,62 +5,108 @@
 #include "../json_serializer.h"
 #include "scene.h"
 
-JsonSerializeExternal(vec2, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y));
+ReflectObjectExternal(vec2, 
+    ReflectObjectFieldWithKey("x", x), 
+    ReflectObjectFieldWithKey("y", y));
 
-JsonSerializeExternal(vec3, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y), 
-    SerializeFieldWithKey("z", z));
+ReflectObjectExternal(vec3, 
+    ReflectObjectFieldWithKey("x", x), 
+    ReflectObjectFieldWithKey("y", y), 
+    ReflectObjectFieldWithKey("z", z));
 
-JsonSerializeExternal(vec4, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y), 
-    SerializeFieldWithKey("z", z),
-    SerializeFieldWithKey("w", w));
+ReflectObjectExternal(vec4, 
+    ReflectObjectFieldWithKey("x", x), 
+    ReflectObjectFieldWithKey("y", y), 
+    ReflectObjectFieldWithKey("z", z),
+    ReflectObjectFieldWithKey("w", w));
 
-JsonSerializeExternal(quat, 
-    SerializeFieldWithKey("x", x), 
-    SerializeFieldWithKey("y", y), 
-    SerializeFieldWithKey("z", z), 
-    SerializeFieldWithKey("w", w));
+ReflectObjectExternal(quat, 
+    ReflectObjectFieldWithKey("x", x), 
+    ReflectObjectFieldWithKey("y", y), 
+    ReflectObjectFieldWithKey("z", z), 
+    ReflectObjectFieldWithKey("w", w));
 
-JsonSerializeExternal(lodgroup,
-    SerializeFieldWithKey("mesh", renderers));
+ReflectObjectExternal(lodgroup,
+    ReflectObjectFieldWithKey("mesh", renderers));
 
-JsonSerializeExternal(renderer,
-    SerializeFieldWithKey("mesh", mesh_guid),
-    SerializeFieldWithKey("material", material_guid),
-    SerializeFieldWithKey("lightmap", lightmap_guid),
-    SerializeFieldWithKey("lightmapScaleOffset", lightmap_scale_offset));
+ReflectObjectExternal(renderer,
+    ReflectObjectFieldWithKey("mesh", mesh_guid),
+    ReflectObjectFieldWithKey("material", material_guid),
+    ReflectObjectFieldWithKey("lightmap", lightmap_guid),
+    ReflectObjectFieldWithKey("lightmapScaleOffset", lightmap_scale_offset));
 
-JsonSerializeExternal(transform,
-    SerializeFieldWithKey("position",   position),
-    SerializeFieldWithKey("scale",      scale),
-    SerializeFieldWithKey("rotation",   rotation));
+ReflectObjectExternal(transform,
+    ReflectObjectFieldWithKey("position",   position),
+    ReflectObjectFieldWithKey("scale",      scale),
+    ReflectObjectFieldWithKey("rotation",   rotation));
 
-JsonSerializeExternal(node,
-    SerializeFieldWithKey("name",       name),
-    SerializeFieldWithKey("tag",        tag),
-    SerializeFieldWithKey("transform",  transform),
-    SerializeFieldWithKey("renderer",   renderer),
-    SerializeFieldWithKey("childs",     childs));
+ReflectObjectExternal(node,
+    ReflectObjectFieldWithKey("name",       name),
+    ReflectObjectFieldWithKey("tag",        tag),
+    ReflectObjectFieldWithKey("transform",  transform),
+    ReflectObjectFieldWithKey("renderer",   renderer),
+    ReflectObjectFieldWithKey("childs",     childs));
 
-JsonSerializeExternal(scene,    
-    SerializeFieldWithKey("childs",     m_nodes),
-    SerializeFieldWithKey("meshes",     m_meshes),
-    SerializeFieldWithKey("materials",  m_materials));
+ReflectObjectExternal(scene,    
+    ReflectObjectFieldWithKey("childs",     m_nodes),
+    ReflectObjectFieldWithKey("meshes",     m_meshes),
+    ReflectObjectFieldWithKey("materials",  m_materials));
 
+struct ed_node {
+    interned_string         name;
+    interned_string         guid;
+    interned_string         tag;
+    uint64_t                flags; // static, enabled
+
+    uint32_t                index = 0;
+
+    transform               transform;
+    renderer                renderer;
+
+    std::vector<node>       childs;
+
+    ReflectObject(ed_node,
+        ReflectObjectFieldWithKey("name", name),
+        ReflectObjectFieldWithKey("guid", guid),
+        ReflectObjectFieldWithKey("tag", tag),
+        ReflectObjectFieldWithKey("transform", transform),
+        ReflectObjectFieldWithKey("renderer", renderer),
+        ReflectObjectFieldWithKey("childs", childs)
+    );
+};
+
+struct ed_scene {
+    // resource dependencie
+    std::vector<interned_string> meshes;
+    std::vector<interned_string> textures;
+    std::vector<interned_string> materials;
+    std::vector<interned_string> shaders;
+
+    std::vector<node> nodes;
+
+    ReflectObject(ed_scene, 
+        ReflectObjectFieldWithKey("meshes", meshes),
+        ReflectObjectFieldWithKey("textures", textures),
+        ReflectObjectFieldWithKey("materials", materials),
+        ReflectObjectFieldWithKey("shaders", shaders),
+        ReflectObjectFieldWithKey("childs", nodes)
+    );
+};
 
 struct scene_reader_json
 {
-    static scene create_form_file(const std::string_view& path)
+    static scene create_from_file(const std::string_view& path)
     {
         auto data = resource_manager::file_data(path);
-        std::string tmp(data.begin(), data.end());
 
-        return json::from_json_string<scene>(tmp);
+        //auto tmp = json::from_json_string<ed_scene>(data.size(), data.data());
+
+        return json::from_json_string<scene>(data.size(), data.data());
+    }
+
+
+    static scene convert_ed_scene_to_scene(ed_scene & scene)
+    {
     }
 };
 

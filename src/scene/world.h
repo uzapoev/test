@@ -3,38 +3,111 @@
 
 #include "scene.h"
 
-struct chunk_writer {
-
-public:
-    void write(char * data, size_t size){
-        for(int i = 0; i < size; ++i)
-            m_data.emplace_back(data[i]);
-    }
-    void    reset() { m_data.clear();  }
-    size_t  size()  { return m_data.size(); }
-    char *  data()  { return m_data.data(); }
-private:
-    size_t              m_pos;
-    size_t              m_size;
-    std::vector<char>   m_data;
-};
-
-
 inline void write_chunk_info(filestream* stream, uint32_t type, uint32_t size) {
     stream->write(type);
     stream->write(size);
 }
 
-inline void write_chunk(filestream* stream, uint32_t type, uint32_t size, const char* data) {
+inline void write_chunk(filestream* stream, uint32_t type, uint32_t size, const void* data) {
     stream->write(type);
     stream->write(size);
     stream->write(size, data);
 }
 
 
+class entity_factory {
+public:
+    static entity_factory& instance() {
+        static entity_factory inst;
+        return inst;
+    }
+
+    entity_factory() {
+        auto memory_resource = new aligned_allocator("entity_factory");
+        m_node_allocator = new paged_pool_allocator(memory_resource, sizeof(tinynode), 1024 * 16);
+    }
+
+    tinynode* create_entity()
+    {
+        uint32_t assigned_id = 0;
+
+        // Check if we can recycle an old ID to keep the pools dense
+        if (!m_free_runtime_ids.empty()) {
+            assigned_id = m_free_runtime_ids.front();
+            m_free_runtime_ids.pop();
+        }
+        else {
+            assigned_id = m_next_runtime_id++;
+        }
+        tinynode* tnode = m_node_allocator->allocate<tinynode>();
+        tnode->guid = uuid::generate_uuid_v4();
+        tnode->runtime_id = assigned_id;
+        tnode->component_mask = 0;
+
+        m_guid_to_node_map[tnode->guid] = tnode;
+
+        return tnode;
+    }
+
+    tinynode* create_entity(guid_t persistent_guid) {
+        uint32_t assigned_id = 0;
+        if (!m_free_runtime_ids.empty()) {
+            assigned_id = m_free_runtime_ids.front();
+            m_free_runtime_ids.pop();
+        }
+        else {
+            assigned_id = m_next_runtime_id++;
+        }
+
+        tinynode* tnode = create_entity();
+        m_guid_to_node_map.erase(tnode->guid);
+        tnode->guid = persistent_guid;
+        m_guid_to_node_map[persistent_guid] = tnode;
+
+        return tnode;
+    }
+
+    void destroy_entity(tinynode* node) {
+        if (!node) return;
+        m_free_runtime_ids.push(node->runtime_id);
+        m_guid_to_node_map.erase(node->guid);
+        node->~tinynode();
+        m_node_allocator->deallocate(node);
+    }
+
+    // Quick runtime translation (useful for scripts working with asset references)
+    tinynode* get_runtime_id(const guid_t& guid) const {
+        auto it = m_guid_to_node_map.find(guid);
+        return (it != m_guid_to_node_map.end()) ? it->second : nullptr;
+    }
+
+private:
+    paged_pool_allocator*                               m_node_allocator = nullptr;
+    uint32_t                                            m_next_runtime_id = 0;
+    std::queue<uint32_t>                                m_free_runtime_ids;
+    std::unordered_map<guid_t, tinynode*, guid_hasher>  m_guid_to_node_map;
+};
+
 class world
 {
 public:
+
+    static tinynode* create_node(class scene* owner = nullptr)
+    {
+        return entity_factory::instance().create_entity();
+    }
+
+    static tinynode* create_node(guid_t guid, class scene* owner = nullptr)
+    {
+        return entity_factory::instance().create_entity(guid);
+    }
+
+    static void destroy_node(tinynode * node)
+    {
+        entity_factory::instance().destroy_entity(node);
+    }
+
+
     world()
     {
         m_renderer = render_system::shared();
@@ -44,6 +117,13 @@ public:
     void init()
     {
         //register_serializer<renderer>()
+    }
+
+
+
+    tinynode * create_tinynode()
+    {
+        return entity_factory::instance().create_entity();
     }
 
     node* load_node(class scene* _scene, filestream* stream)
@@ -70,7 +150,7 @@ public:
     }
 
     template<class T> T* deserialize(class scene* _scene, filestream* stream){}
-    template<class T> void serialize(T * _component, filestream* stream){}
+    template<class T> void serialize(struct node* node, T * _component, filestream* stream){}
 
 
     /// <summary>
@@ -81,62 +161,41 @@ public:
     /// <returns></returns>
     template<> renderer* deserialize(class scene* _scene, filestream* stream)
     {
-        auto component = m_renderer->allocate_renderer();
+      /*  auto component = m_renderer->allocate_renderer();
 
         component->mesh_guid                = stream->read<interned_string>();;
         component->material_guid            = stream->read<interned_string>();
         component->lightmap_guid            = stream->read<interned_string>();
         component->lightmap_scale_offset    = stream->read<vec4>();
        
-        return component;
+        return component;*/
     }
 
-    template<> void serialize(struct renderer * _component, filestream* stream)
+    template<> void serialize(struct node* node, struct renderer * component, filestream* stream)
     {
-        uint32_t chunk_size =   _component->mesh_guid.length()      + sizeof(uint16_t) +
-                                _component->material_guid.length()  + sizeof(uint16_t) +
-                                _component->lightmap_guid.length()  + sizeof(uint16_t) +
-                                sizeof(_component->lightmap_scale_offset);
+        guid_t mesh_guid = uuid::str_to_guid(component->mesh_guid.c_str());
+        guid_t lm_color_guid = uuid::str_to_guid(component->lightmap_guid.c_str());
 
-        write_chunk_info(stream, scene::component_renderer, chunk_size);
-        stream->write(_component->mesh_guid);
-        stream->write(_component->material_guid);
-        stream->write(_component->lightmap_guid);
-        stream->write(_component->lightmap_scale_offset);
+        binary_writer bw = {};
+            bw.write(node->index);
+            bw.write(mesh_guid);
+            bw.write(component->material_count);
+            bw.write(sizeof(guid_t) * component->material_count, component->material_guids);
 
-        /*
-        * archive->write(_component->mesh_guid);
-        * archive->write(_component->material_count);
-        * for(int i = 0; i <_component->material_count; ++i)
-        * {
-        *       archive->write(_component->materials[i].guid);
-        *       archive->write_material_overrides();
-        * }
-        * 
-        * stream->write_chunk(component_renderer, id, archive.size(), archive.data());
-        */
-    }
-
-    template <> transform * deserialize(class scene* _scene, filestream* stream)
-    {
-        auto component = _scene->create_transform();
-
-        component->position = stream->read<vec3>();
-        component->rotation = stream->read<quat>();
-        component->scale    = stream->read<vec3>();
-        component->update_transform();/**/
-        
-        return component;
+            bw.write(lm_color_guid);
+            bw.write(component->lightmap_scale_offset);
+        write_chunk(stream, scene::component_renderer, bw.size(), (char*)bw.data());
     }
 
 
-    template <> void serialize(struct transform* _transform, filestream* stream)
+    template <> void serialize(struct node* node, struct transform* _transform, filestream* stream)
     {
-        uint32_t size = sizeof(vec3) + sizeof(quat) + sizeof(vec3);
-        write_chunk_info(stream, scene::component_transform, size);
-        stream->write(_transform->position);
-        stream->write(_transform->rotation);
-        stream->write(_transform->scale); 
+        binary_writer bw = {};
+            bw.write(node->index);
+            bw.write(_transform->position);
+            bw.write(_transform->rotation);
+            bw.write(_transform->scale);
+        write_chunk(stream, scene::component_transform, bw.size(), bw.data());
     }
 
     template <> collider* deserialize(class scene *_scene, filestream * stream)
@@ -171,8 +230,6 @@ public:
     class physic2d_manager *    m_physics2d     = nullptr;
     class physic3d_manager *    m_physics3d     = nullptr;
     class navigation_manager *  m_navigation    = nullptr;   // recast navmesh
-    class sound_system *        m_audio         = nullptr;   // recast navmesh
-    char                        m_tmpbuffer[512] = {};
 //  uicanvas *                  m_canvas;       // ui renderer
 };
 

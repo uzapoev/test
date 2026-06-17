@@ -6,39 +6,38 @@
 #include "../common.h"
 #include "../memmgr.h"
 
+#include "../json_serializer.h"
+#include "ecs.h"
+
 
 template<class T>
 struct shader_slot {
     interned_string     key;        // uniform name
-    interned_string     guid;       // for textures
     T                   value = {};
+
+    ReflectObject(shader_slot, ReflectObjectField(key), ReflectObjectField(value));
 };
 
-
-typedef struct gfx_material_instance_t {
+typedef struct material_instance_t {
     gfx_shader_t*                   shader = nullptr;
     gfx_pipeline_t*                 pipeline = nullptr;
 
+    uint32_t                        uniform_count;
+    gfx_uniform_t *                 uniforms;
+
     shader_slot<gfx_texture_t*>     textures[32];
+
+
     shader_slot<float4>             vectorsf[64];
     shader_slot<int4>               vectorsi[64];
     shader_slot<float>              scalarsf[64];
-} gfx_material_instance_t;
+} material_instance_t;
 
 
-typedef struct gfx_material_t {
-    gfx_material_instance_t *       instance = nullptr;
+typedef struct material_t {
+    material_instance_t *           instance = nullptr;
     gfx_descriptor_set_t*           descriptor_set = nullptr;
-}gfx_material_t;
-
-
-typedef struct collision_mesh_t {
-    uint32_t                vertex_count;
-    uint32_t                vertex_stride;
-
-    float *                 vertex_data;            // pos/normal/uv
-    uint16_t *              index_data;             // pos/normal/uv
-} collision_mesh_t;
+} material_t;
 
 
 typedef struct lightmap_t {
@@ -46,18 +45,6 @@ typedef struct lightmap_t {
     gfx_texture_t*          lightmask;
     vec4                    scale_offset;
 } lightmap_t;
-
-
-typedef struct renderer_t {
-    render_mesh_t*          mesh = nullptr;
-    gfx_material_t*         material = nullptr;
-    lightmap_t              lightmap;
-
-    mat4                    transform;
-    aabbox                  bounds;
-    bbox                    world_bounds;
-    vec4                    sphere_bound;
-} renderer_t;
 
 
 typedef struct camera_data {
@@ -69,9 +56,6 @@ typedef struct camera_data {
     vec4                    time;
     vec4                    view_port;
 }camera_data;
-
-typedef struct mesh_info {
-} mesh_info;
 
 typedef struct instance_data {
     mat4                    model;
@@ -140,7 +124,7 @@ class geometry_pass  : render_pass { };
 // class geometry_deferred_pass : render_pass { };
 
 
-class render_system
+class render_system :public iquery_listener
 {
 public:
     static void create_and_make_shared(gfx_context_t* ctx) {
@@ -151,26 +135,17 @@ public:
 
     render_system(gfx_context_t * ctx) ;
 
-    renderer *  allocate_renderer();
-    lodgroup *  allocate_lodgroup();
-    light    *  allocate_light();
-
-
-    void        deallocate_renderer(renderer * _renderer);
-    void        deallocate_lodgroup(lodgroup * _lodgroup);
 
 public:
     void enqueue_pass(render_pass * pass) {
         m_passes.push_back(pass);
     }
 
-    void draw() {
-        for(size_t i = 0; i < m_passes.size(); ++i) {
-            if(!m_passes[i]->active())
-                continue;
-            m_passes[i]->draw(/*this*/);
-        }
-    }
+    void draw(gfx_command_buffer_t* cmd);
+private:
+    virtual void on_node_changed(class tinynode* node, class component_manager& manager) override;
+
+    virtual void garbage_collect() override;
 
 private:
     static render_system*           s_shared;
@@ -178,42 +153,14 @@ private:
 
     std::vector<render_pass*>       m_passes;
 
+  //  icomponent_query *              m_renderer_query;
+
     struct aligned_allocator *      m_allocator = nullptr;
     struct paged_pool_allocator*    m_renderer_allocator = nullptr;
     struct paged_pool_allocator*    m_light_allocator = nullptr;
     struct paged_pool_allocator*    m_occluder_allocator = nullptr;
     struct paged_pool_allocator*    m_lodgroup_allocator = nullptr;
 };
-
-
-static void draw_renderer(gfx_command_buffer_t * cmd, const renderer_t * renderer)
-{
-    auto mesh = renderer->mesh;
-    auto set = renderer->material->descriptor_set;
-
-    gfx_cmd_bind_descriptor_set(cmd, 0, set);
-    gfx_cmd_bind_vertex_buffer(cmd, 0, mesh->vertex_buffer_offset, mesh->vertex_buffer);
-    gfx_cmd_bind_index_buffer(cmd, mesh->index_format, mesh->index_buffer_offset, mesh->index_buffer);
-
-    int32_t start_idx = 0;
-    for (size_t sub_idx = 0; sub_idx < mesh->submesh_count; sub_idx++)
-    {
-        uint32_t count = mesh->submeshes[sub_idx];
-        gfx_cmd_draw_indexed(cmd, count, start_idx, 1, 0);
-        start_idx += mesh->submeshes[sub_idx];
-    }
-
-    if (mesh->submesh_count == 0)
-    {
-        gfx_cmd_draw_indexed(cmd, mesh->index_count, 0, 1, 0);
-    }
-}
-
-
-static void draw_render_mesh(render_mesh_t* mesh, gfx_descriptor_set_t * set)
-{
-}
-
 
 
 #endif // __resources_h__
