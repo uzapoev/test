@@ -5,34 +5,20 @@
 #include "../json_serializer.h"
 #include "scene.h"
 
-ReflectObjectExternal(vec2, 
-    ReflectObjectFieldWithKey("x", x), 
-    ReflectObjectFieldWithKey("y", y));
-
-ReflectObjectExternal(vec3, 
-    ReflectObjectFieldWithKey("x", x), 
-    ReflectObjectFieldWithKey("y", y), 
-    ReflectObjectFieldWithKey("z", z));
-
-ReflectObjectExternal(vec4, 
-    ReflectObjectFieldWithKey("x", x), 
-    ReflectObjectFieldWithKey("y", y), 
-    ReflectObjectFieldWithKey("z", z),
-    ReflectObjectFieldWithKey("w", w));
-
-ReflectObjectExternal(quat, 
-    ReflectObjectFieldWithKey("x", x), 
-    ReflectObjectFieldWithKey("y", y), 
-    ReflectObjectFieldWithKey("z", z), 
-    ReflectObjectFieldWithKey("w", w));
+ReflectObjectExternal2(vec2, x, y);
+ReflectObjectExternal2(vec3, x, y, z);
+ReflectObjectExternal2(vec4, x, y, z, w);
+ReflectObjectExternal2(quat, x, y, z, w);
 
 ReflectObjectExternal(lodgroup,
-    ReflectObjectFieldWithKey("mesh", renderers));
+    ReflectObjectFieldWithKey("lod_count", lod_count));
 
 ReflectObjectExternal(renderer,
     ReflectObjectFieldWithKey("mesh", mesh_guid),
     ReflectObjectFieldWithKey("material", material_guid),
-    ReflectObjectFieldWithKey("lightmap", lightmap_guid),
+    ReflectObjectFieldWithKey("materials", material_guids),
+    ReflectObjectFieldWithKey("lightmap", lightmap_color_guid),
+    ReflectObjectFieldWithKey("lightmap_mask", lightmap_mask_guid),
     ReflectObjectFieldWithKey("lightmapScaleOffset", lightmap_scale_offset));
 
 ReflectObjectExternal(transform,
@@ -52,26 +38,21 @@ ReflectObjectExternal(scene,
     ReflectObjectFieldWithKey("meshes",     m_meshes),
     ReflectObjectFieldWithKey("materials",  m_materials));
 
-struct ed_node {
-    interned_string         name;
-    interned_string         guid;
-    interned_string         tag;
-    uint64_t                flags; // static, enabled
+ReflectObjectExternal(tinynode, 
+    ReflectObjectField(guid),
+    ReflectObjectField(name),
+    ReflectObjectField(flags));
 
-    uint32_t                index = 0;
-
+struct ed_node : tinynode {
     transform               transform;
     renderer                renderer;
 
     std::vector<node>       childs;
 
-    ReflectObject(ed_node,
-        ReflectObjectFieldWithKey("name", name),
-        ReflectObjectFieldWithKey("guid", guid),
-        ReflectObjectFieldWithKey("tag", tag),
+    ReflectObjectInherited(ed_node, tinynode,
+        ReflectObjectFieldWithKey("childs", childs),
         ReflectObjectFieldWithKey("transform", transform),
-        ReflectObjectFieldWithKey("renderer", renderer),
-        ReflectObjectFieldWithKey("childs", childs)
+        ReflectObjectFieldWithKey("renderer", renderer)
     );
 };
 
@@ -102,11 +83,6 @@ struct scene_reader_json
         //auto tmp = json::from_json_string<ed_scene>(data.size(), data.data());
 
         return json::from_json_string<scene>(data.size(), data.data());
-    }
-
-
-    static scene convert_ed_scene_to_scene(ed_scene & scene)
-    {
     }
 };
 

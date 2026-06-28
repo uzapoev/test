@@ -1,13 +1,24 @@
 #include "resource_loader.h"
 #include "common.h"
 #include "resource_manager.h"
-#include "gfx/gfx_reflection.h"
-#include "gfx/gfx_shader_compiler.h"
 
+
+#define GFX_SHADER_COMPILER_IMPL
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
 
-static gfx_shader_compiler_context_t* g_compiler_context = nullptr;
+#include "gfx/gfx_shader_compiler.h"
+#include "gfx/gfx_shader_reflection.h"
+
+
+#ifdef _MSC_VER
+#pragma warning(push, 0) 
+#endif // _MSC_VER
+#include <stb/stb_image.h>
+#ifdef _MSC_VER
+#pragma warning(pop) 
+#endif // _MSC_VER
+
+
 
 size_t filesize(FILE* file)
 {
@@ -16,34 +27,6 @@ size_t filesize(FILE* file)
     fseek(file, 0, SEEK_SET);
     return size;
 }
-
-
-uint32_t read_file_data2(const char* path, char** data_out)
-{
-    static char * s_ptr = nullptr;
-    static size_t s_size = 0;
-
-    FILE* file = fopen(path, "rb");
-    if (file == nullptr)
-        return 0;
-
-    fseek(file, 0, SEEK_END);
-    size_t size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    if(s_size < size)
-    {
-        s_ptr = (char*)realloc(s_ptr, size);
-        s_size = size;
-    }
-
-    fread(s_ptr, size, sizeof(char), file);
-    fclose(file);
-
-    *data_out = s_ptr;
-
-    return (uint32_t)size;
-}
-
 
 uint32_t read_file_data(const char* path, char** data_out)
 {
@@ -54,7 +37,7 @@ uint32_t read_file_data(const char* path, char** data_out)
     fseek(file, 0, SEEK_END);
     size_t size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    *data_out = (char*)calloc(1, size);
+    *data_out = (char*)calloc(1, size + 1);
     fread(*data_out, size, sizeof(char), file);
     fclose(file);
 
@@ -125,7 +108,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
 bool load_mesh_from_file_path(gfx_context_t* ctx, mesh_pool_t * pool, const char * path, render_mesh_t* out_mesh)
 {
     char* data = nullptr;
-    uint32_t size = read_file_data2(path, &data);
+    uint32_t size = read_file_data(path, &data);
     if(size != 0)
     {
         load_mesh_from_file_data(ctx, pool, strrchr(path, '/'), data, size, out_mesh);
@@ -136,7 +119,7 @@ bool load_mesh_from_file_path(gfx_context_t* ctx, mesh_pool_t * pool, const char
         return false;
     }
     
-    //free(data);
+    free(data);
     return true;
 }
 
@@ -163,8 +146,8 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
 
     if(pool != nullptr)
     {
-        auto offset_vb = gfx_offset_allocator_allocate(pool->vertex_buffer_allocator, vertex_buffer_size);
-        auto offset_ib = gfx_offset_allocator_allocate(pool->index_buffer_allocator, index_buffer_size);
+        uint32_t offset_vb = (uint32_t)gfx_offset_allocator_allocate(pool->vertex_buffer_allocator, vertex_buffer_size);
+        uint32_t offset_ib = (uint32_t)gfx_offset_allocator_allocate(pool->index_buffer_allocator, index_buffer_size);
 
         if(offset_vb != -1)
         {
@@ -489,6 +472,8 @@ typedef struct shader_header_t {
 } shader_header_t;
 #pragma pack (pop)
 
+
+static gfx_shader_compiler_context_t* g_compiler_context = nullptr;
 void save_shader_program(const char* path, compiled_shader_program_t * program)
 {
     FILE* file = fopen(path, "wb");
@@ -503,7 +488,7 @@ void save_shader_program(const char* path, compiled_shader_program_t * program)
         fflush(file);
     }
     fclose(file);
-}
+}/**/
 
 void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader_t** out_shader)
 {
@@ -526,7 +511,7 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
         load_shader_from_file_data(ctx, name, data, size, out_shader);
         free(data);
         return;
-    }/**/
+    }
 
     if(g_compiler_context == nullptr)
         gfx_shader_compiler_context_create(0, &g_compiler_context);
@@ -544,8 +529,7 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
         save_shader_program(compiled_name_buff, &compiled_program);
     }
 
-
-    free(data);
+    free(data);/**/
 }
 
 
@@ -573,7 +557,8 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
           stage_data[i] = { stg,   (uint32_t*)ptr, (uint32_t)stage_size };
           ptr += stage_size;
 
-          gfx_shader_reflection((char*)stage_data[i].data, stage_data[i].size, &uniforms[uniform_count], &uniform_count);
+
+          gfx_shader_reflection2((char*)stage_data[i].data, stage_data[i].size, &uniforms[uniform_count], &uniform_count);
         }
     }
     else
@@ -595,7 +580,7 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
         for (uint32_t i = 0; i < compiled_program.blob_count; ++i)
         {
             compiled_stage_t* blob = &compiled_program.blobs[i];
-            gfx_shader_reflection(blob->stage_data, blob->stage_data_size, &uniforms[uniform_count], &uniform_count);
+            gfx_shader_reflection2(blob->stage_data, blob->stage_data_size, &uniforms[uniform_count], &uniform_count);
             stage_data[i] = { blob->stage,   (uint32_t*)blob->stage_data[i], (uint32_t)blob->stage_data_size };
         }
     }

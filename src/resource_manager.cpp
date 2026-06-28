@@ -130,6 +130,66 @@ bool parse_name_with_guid_hand(const char* filename, char* out_name, guid_t* out
 }
 
 
+
+void material_manager::set_global_texture(uint64_t id, asset_handle_t texture_handle)
+{
+}
+void material_manager::set_global_texture(const char* name, asset_handle_t texture_handle)
+{
+}
+
+
+
+void material_manager::set_global_data(uint64_t id, void* data, uint32_t size)
+{
+ /*  
+ * struct uniform_material_binding{
+    uint32_t        uniform_id;
+    const char *    uniform_name;
+    uint64_t        gfx_handle;
+    uint32_t        material_count;
+    material_t *    material;
+};
+ int m_name_count = 0;
+    uniform_material_binding * bindnigs = nullptr;
+    for(int i = 0; i < m_name_count; ++i)
+    {
+        auto b = bindnigs[i];
+        if(b.uniform_id != id) continue;
+        for(uint32_t j = 0; j < bindnigs[i].material_count; ++i)
+        {
+            auto set = b.material[j].descriptor_set;
+            gfx_descriptor_set_write_buffer_data(set, b.gfx_handle, data, size);
+            
+        }
+    }*/
+}
+void material_manager::set_global_data(const char* name, void* data, uint32_t size)
+{
+    if(!name || !data || !size) return;
+    uint32_t id = gfx_utils_hash(name, (uint32_t)strlen(name));
+    set_global_data(id, data, size);
+}
+
+void material_manager::set_texture(asset_handle_t material, uint64_t id, asset_handle_t texture_handle)
+{
+}
+void material_manager::set_texture(asset_handle_t material, const char* name, asset_handle_t texture_handle)
+{
+}
+
+void material_manager::set_data(asset_handle_t material, uint64_t id, const void* data, uint32_t size)
+{
+}
+void material_manager::set_data(asset_handle_t material, const char* name, const void* data, uint32_t size)
+{
+}
+
+
+
+
+
+
 resource_manager * resource_manager::s_shared = nullptr;
 
 resource_manager* resource_manager::create_and_make_shared(gfx_context_t* ctx)
@@ -153,9 +213,13 @@ void resource_manager::init(platform_type type, const char* cash_path)
     m_cash_path.assign(cahs_dir);
 
     m_allocator = new aligned_allocator("resource_manager");
-    m_staging_allocator = new staging_allocator(m_allocator, 4*1024*1024, true);
+    m_staging_allocator = new staging_allocator(m_allocator, 4*1024*1024, true);    
+    
+    gfx_shader_t* test = nullptr;
+    load_shader_from_file_path(m_ctx, "../data/shaders/test.hlsl", &test);
 
     load_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
+
 
   //  create_mesh_pool(m_ctx, (64)*1024*1024, (8)*1024*1024, &m_mesh_pool);
     create_mesh_pool(m_ctx, 380*1024*1024, 32*1024*1024, &m_mesh_pool);
@@ -256,7 +320,7 @@ void resource_manager::set_assets_path(const std::string & dir)
         file_info_t info        = {};
         info.type               = type;
         info.guid               = uuid::runtime_guid(asset_guid);
-        info.size               = std::filesystem::file_size(cooked_filepath);
+        info.size               = (uint32_t)std::filesystem::file_size(cooked_filepath);
         info.compressed_size    = info.size;
         info.path               = interned_string(cooked_filepath).c_str();
         m_file_infos.emplace(info.guid, info);
@@ -415,7 +479,7 @@ guid_t resource_manager::get_or_create_guid(const char* path, const char * meta_
             debug::log_error("failed to read guid form meta file(%s)", meta_path);
     }
 
-    uint32_t path_len = strlen(path);
+    uint32_t path_len = (uint32_t)strlen(path);
     if (path_len > 512) {
         debug::log_error("abnormal file path: %d", path);
         return {};
@@ -425,7 +489,7 @@ guid_t resource_manager::get_or_create_guid(const char* path, const char * meta_
         return uuid::str_to_guid(path);
     }
 
-    uint32_t path_hash = hasher::murmur32(path, strlen(path));
+    uint32_t path_hash = hasher::murmur32(path, (uint32_t)strlen(path));
     return uuid::generate_from_seed(path_hash);
 }
 
@@ -462,6 +526,8 @@ asset_handle_t resource_manager::load(guid_t guid, load_params_t* param)
         //  debug::log_error("no file at path: %d", path);
         return INVALID_ASSET_HANDLE;
     }
+    char guidstr[33] = "";
+    uuid::guid_to_str(guid, guidstr);
 
     if(asset_slot_t* slot = get_slot(fileid)) {
         slot->ref_count++;
@@ -501,6 +567,10 @@ asset_handle_t resource_manager::load(guid_t guid, load_params_t* param)
             texture_t texture = { texture_handlde };
             m_textures_new.emplace_back(texture);
             slot.index_in_pool = (uint32_t)m_textures_new.size();
+        }
+        if (slot.type == asset_type_material) 
+        {
+            assert(false);
         }
 
         free_asset_blob(&blob);

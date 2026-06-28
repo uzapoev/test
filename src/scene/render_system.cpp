@@ -19,7 +19,7 @@ render_system::render_system(gfx_context_t* ctx) : m_ctx(ctx)
 }
 
 
-void render_system::on_node_changed(class tinynode* node, class component_manager& manager)
+void render_system::on_node_changed(struct tinynode* node, class component_manager& manager)
 {
     auto* rb_comp = manager.get_component<renderer>(node);
     if(rb_comp == nullptr) return;
@@ -42,14 +42,16 @@ void render_system::draw(gfx_command_buffer_t* cmd)
     for(auto [node, transf, render] : g_renderer_with_transforms)
     {
         //TODO: remove to on_node_changed processing
-        if(render->mesh_handle.handle == 0)
+        if(render->mesh_handle.handle == 0){
             component_manager::instance().remove_component<renderer>(node);
+            continue;
+         }
 
-        /*if (render->material->instance->pipeline != pipeline)
+        if (render->material && render->material->instance->pipeline != pipeline)
         {
-            pipeline = renderer->material->instance->pipeline;
+            pipeline = render->material->instance->pipeline;
             gfx_cmd_bind_pipeline(cmd, pipeline);
-        }*/
+        }
 
         const render_mesh_t * mesh = rm->get_mesh(render->mesh_handle); // todo: move to on_node_changed, sort/cell spatialize/ batch
                                                                         // map<pipeline, array<mesh_info>> 

@@ -18,7 +18,6 @@
   #pragma comment(lib, "x64/webgpu.lib")
 #endif
 
-#include "spirvflect.h"
 
 #if GFX_ENABLE_VERBOSE
 #define GFX_VERBOSE(exp)            { exp; }
@@ -425,7 +424,7 @@ static uint32_t wglsl_reflect(const char *data, gfx_uniform_t* uniforms, WGPUBin
 
 static uint32_t get_shader_uniforms(const void* data, uint32_t size, gfx_uniform_t* uniforms, const char** entry) {
     uint32_t uniform_count = 0;
-    bool is_spirv = *(uint32_t*)data == 0x07230203;
+    /*bool is_spirv = *(uint32_t*)data == 0x07230203;
     if (is_spirv) {
         spirvflect_t* reflect = nullptr;
         spirvflect_create((uint32_t*)data, size, &reflect);
@@ -458,7 +457,7 @@ static uint32_t get_shader_uniforms(const void* data, uint32_t size, gfx_uniform
         WGPUBindGroupLayoutEntry bgle[16] = {};
         uniform_count = wglsl_reflect((const char*)data, uniforms, bgle);
     }
-
+    */
     return uniform_count;
 }
 

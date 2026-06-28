@@ -48,46 +48,48 @@
 #endif
 
 
-/**
- * @brief API function execution results.
- */
 typedef enum gfx_result {
     gfx_ok,                                 /**< Operation completed successfully */
     gfx_error                               /**< Generic execution error */
 } gfx_result;
 
 
-/**
- * @brief Bitmask flags for context initialization and runtime behavior.
- */
 typedef enum gfx_options {
-    gfx_options_debug       = 1 << 0,   /**< Enable validation layers and graphics debugging features */
-    gfx_options_verbose     = 1 << 1,   /**< Enable detailed verbose log output */
-    gfx_options_callstack   = 1 << 2,   /**< Dump callstack on critical errors or validation failures */
+    gfx_options_debug       = 1 << 0,       /**< Enable validation layers and graphics debugging features */
+    gfx_options_verbose     = 1 << 1,       /**< Enable detailed verbose log output */
+    gfx_options_callstack   = 1 << 2,       /**< Dump callstack on critical errors or validation failures */
 } gfx_options;
 
 
 typedef enum gfx_gpu_type {
-    gfx_gpu_discrete,                   /**< High-performance standalone GPU with dedicated VRAM */
-    gfx_gpu_integrated                  /**< Power-efficient GPU integrated into the CPU/SoC sharing system RAM */
+    gfx_gpu_discrete,                       /**< High-performance standalone GPU with dedicated VRAM */
+    gfx_gpu_integrated                      /**< Power-efficient GPU integrated into the CPU/SoC sharing system RAM */
 } gfx_gpu_type;
 
 
 typedef enum gfx_msg {
-    gfx_msg_info,                       /**< Informational status message */
-    gfx_msg_warning,                    /**< Non-critical warning, execution can continue */
-    gfx_msg_error,                      /**< Critical runtime error */
+    gfx_msg_info,                           /**< Informational status message */
+    gfx_msg_warning,                        /**< Non-critical warning, execution can continue */
+    gfx_msg_error,                          /**< Critical runtime error */
 } gfx_msg;
 
 
 typedef enum gfx_backend {
-    gfx_backend_auto,                   /**< Auto-select: Metal on Apple, WebGPU on HTML5, Vulkan on Win/Android, DX12 on Win */
-    gfx_backend_vulkan,                 /**< Vulkan API backend */
-    gfx_backend_d3d12,                  /**< Direct3D 12 backend */
-    gfx_backend_metal,                  /**< Apple Metal backend */
-    gfx_backend_webgpu,                 /**< WebGPU backend */
+    gfx_backend_auto,                       /**< Auto-select: Metal on Apple, WebGPU on HTML5, Vulkan on Win/Android, DX12 on Win */
+    gfx_backend_vulkan,                     /**< Vulkan API backend */
+    gfx_backend_d3d12,                      /**< Direct3D 12 backend */
+    gfx_backend_metal,                      /**< Apple Metal backend */
+    gfx_backend_webgpu,                     /**< WebGPU backend */
 } gfx_backend;
 
+typedef enum gfx_feature {
+    gfx_feature_classic         = 0,
+    gfx_feature_bindless        = 1 << 0,
+    gfx_feature_mesh_shaders    = 1 << 1,
+    gfx_feature_ray_tracing     = 1 << 2,
+    gfx_feature_ray_query       = 1 << 3,
+    gfx_feature_all             = gfx_feature_bindless | gfx_feature_mesh_shaders | gfx_feature_ray_tracing | gfx_feature_ray_query
+} gfx_feature;
 
 typedef enum gfx_shader_format_flags {
     gfx_shader_format_unknown   = 0,
@@ -102,35 +104,35 @@ typedef enum gfx_shader_format_flags {
 
 
 typedef enum gfx_buffer_usage {
-    gfx_buffer_usage_staging,           /**< Host-visible memory used for CPU-to-GPU memory transfers */
-    gfx_buffer_usage_index,             /**< Device-local memory holding geometry indices */
-    gfx_buffer_usage_vertex,            /**< Device-local memory holding vertex attributes */
-    gfx_buffer_usage_uniform,           /**< Constrained size buffer for constant/uniform shader parameters */
-    gfx_buffer_usage_storage,           /**< Unbounded size buffer for read/write compute and shader structured storage */
-    gfx_buffer_usage_indirect,          /**< Buffer storing draw arguments for GPU indirect command execution */
+    gfx_buffer_usage_staging,               /**< Host-visible memory used for CPU-to-GPU memory transfers */
+    gfx_buffer_usage_index,                 /**< Device-local memory holding geometry indices */
+    gfx_buffer_usage_vertex,                /**< Device-local memory holding vertex attributes */
+    gfx_buffer_usage_uniform,               /**< Constrained size buffer for constant/uniform shader parameters */
+    gfx_buffer_usage_storage,               /**< Unbounded size buffer for read/write compute and shader structured storage */
+    gfx_buffer_usage_indirect,              /**< Buffer storing draw arguments for GPU indirect command execution */
 } gfx_buffer_usage;
 
 
 typedef enum gfx_memory_hint {
-    gfx_memory_auto,                    /**< Automatically determine optimal memory placement based on usage */
-    gfx_memory_gpu_only,                /**< VRAM allocation, inaccessible by CPU, maximum performance */
-    gfx_memory_cpu_to_gpu,              /**< Host-visible memory mapped for fast CPU writes to GPU */
-    gfx_memory_gpu_to_cpu,              /**< Host-visible memory optimized for reading data back from the GPU to CPU */
+    gfx_memory_auto,                        /**< Automatically determine optimal memory placement based on usage */
+    gfx_memory_gpu_only,                    /**< VRAM allocation, inaccessible by CPU, maximum performance */
+    gfx_memory_cpu_to_gpu,                  /**< Host-visible memory mapped for fast CPU writes to GPU */
+    gfx_memory_gpu_to_cpu,                  /**< Host-visible memory optimized for reading data back from the GPU to CPU */
 } gfx_memory_hint;
 
 
 typedef enum gfx_access_type {
-    gfx_access_read,                    /**< Read-only access */
-    gfx_access_write,                   /**< Write-only access */
-    gfx_access_rw                       /**< Read and Write access */
+    gfx_access_read,                        /**< Read-only access */
+    gfx_access_write,                       /**< Write-only access */
+    gfx_access_rw                           /**< Read and Write access */
 } gfx_access_type;
 
 
 typedef enum gfx_texture_type {
-    gfx_texture2d,                      /**< Standard 2D texture */
-    gfx_texture2d_cube,                 /**< Cubemap texture containing 6 faces */
-    gfx_texture2d_array,                /**< Array of independent 2D texture layers */
-    gfx_texture3d,                      /**< Volumetric 3D texture */
+    gfx_texture2d,                          /**< Standard 2D texture */
+    gfx_texture2d_cube,                     /**< Cubemap texture containing 6 faces */
+    gfx_texture2d_array,                    /**< Array of independent 2D texture layers */
+    gfx_texture3d,                          /**< Volumetric 3D texture */
 } gfx_texture_type;
 
 
@@ -143,20 +145,18 @@ typedef enum gfx_texture_usage_flags {
     gfx_texture_usage_transfer_dst  = 1 << 4,   /**< Texture can be used as a destination for blit/copy operations */
 } gfx_texture_usage_flags;
 
-/**
- * @brief Layout binding roles for shader resource variables.
- */
+
 typedef enum gfx_uniform_type {
-    gfx_uniform_undefined,              /**< Uninitialized or invalid binding type */
-    gfx_uniform_ubo,                    /**< Uniform Buffer Object block binding */
-    gfx_uniform_storage_buffer,         /**< Structured or ByteAddress storage buffer binding (RW/ReadOnly) */
-    gfx_uniform_storage_image,          /**< Read-Write texture image slot (e.g., RWTexture2D) */
-    gfx_uniform_sampler,                /**< Texture state sampler (filtering, addressing) */
-    gfx_uniform_texture2d,              /**< Standard 2D texture view binding */
-    gfx_uniform_texture2d_cube,         /**< Cubemap resource view binding */
-    gfx_uniform_texture2d_array,        /**< Texture array resource view binding */
-    gfx_uniform_texture3d,              /**< 3D volumetric texture view binding */
-    gfx_uniform_ubo_field,              /**< Individual field data type inside a UBO block (e.g., vec4, mat4) */
+    gfx_uniform_undefined,                  /**< Uninitialized or invalid binding type */
+    gfx_uniform_ubo,                        /**< Uniform Buffer Object block binding */
+    gfx_uniform_storage_buffer,             /**< Structured or ByteAddress storage buffer binding (RW/ReadOnly) */
+    gfx_uniform_storage_image,              /**< Read-Write texture image slot (e.g., RWTexture2D) */
+    gfx_uniform_sampler,                    /**< Texture state sampler (filtering, addressing) */
+    gfx_uniform_texture2d,                  /**< Standard 2D texture view binding */
+    gfx_uniform_texture2d_cube,             /**< Cubemap resource view binding */
+    gfx_uniform_texture2d_array,            /**< Texture array resource view binding */
+    gfx_uniform_texture3d,                  /**< 3D volumetric texture view binding */
+    gfx_uniform_ubo_field,                  /**< Individual field data type inside a UBO block (e.g., vec4, mat4) */
 } gfx_uniform_type;
 
 
@@ -608,7 +608,8 @@ typedef struct gfx_uniform_t {
             char            name[32];           /**< Variable label assigned to individual component member fields */
             uint16_t        stride;             /**< Memory padding footprint stride offset between array indices */
             uint16_t        offset;             /**< Byte offset address start position relative to uniform base address */
-            uint16_t        type;               /**< Variable data element primitive type classification */
+            gfx_format      type;               /**< Variable data element primitive type classification */
+            uint16_t        count;
         } fields[16];
     } buffer;
     
@@ -669,7 +670,7 @@ typedef struct gfx_vertex_attribute {
 //  gfx_semantic            semantic;
     uint32_t                location;           /**< Hardware layout shader location registration index slot (layout(location = X)) */
     uint32_t                binding;            /**< Input slot buffer source binding index register alignment link */
-    gfx_format       format;             /**< Primitive vector component layout size encoding and configuration classification */
+    gfx_format              format;             /**< Primitive vector component layout size encoding and configuration classification */
     uint32_t                offset;             /**< Byte offset starting boundaries address relative to current vertex index row start */
 } gfx_vertex_attribute;
 
@@ -1309,7 +1310,6 @@ gfx_api void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** 
 
 
 
-
 // ============================================================================
 // --- Mesh Shading Command Recording Dispatches ---
 // ============================================================================
@@ -1510,9 +1510,23 @@ gfx_api void gfx_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace
 gfx_api void gfx_cmd_trace_ray_query(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t tlas, uint32_t width, uint32_t height, uint32_t depth = 1);
 
 
+// ============================================================================
+// ---                        Experimentals                                 ---
+// ============================================================================
+// 
+// gfx_cmd_begin(shadowmap_pass_cmd); 
+//  draw_shadow_map(...);                   // fill in threads
+// gfx_cmd_end(shadowmap_pass_cmd);
+// gfx_cmd_barrier(shadowmap_pass_cmd, );   // wait for shadow map is ready for reading
+// 
+// gfx_cmd_execute_commands(frame->cmd, shadowmap_pass_cmd);
+// 
+//gfx_api void gfx_cmd_execute_commands(gfx_command_buffer_t* primary, gfx_command_buffer_t* seconady);
+
+
 
 // ============================================================================
-// ---                          Utils                                      ---
+// ---                          Utils                                       ---
 // ============================================================================
 
 uint32_t            gfx_utils_thread_id();

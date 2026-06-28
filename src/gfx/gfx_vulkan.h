@@ -85,6 +85,7 @@ typedef struct vk_context_t
 
     // --- Default / Fallback Resources ---
     vk_buffer_t*                        uniform_buffer          = nullptr;
+    vk_buffer_t*                        storage_buffer          = nullptr;
     vk_buffer_t*                        staging_buffer          = nullptr;
     gfx_sampler_t*                      default_sampler         = nullptr;
     vk_texture_t*                       default_texture         = nullptr;
@@ -264,7 +265,7 @@ typedef struct vk_descriptor_pool_t {
     uint32_t                            bindings_hash;          // Hash of descriptor layout bindings for validation
 
     uint32_t                            set_layout_binding_count = { 0 };  // per set
-    VkDescriptorSetLayoutBinding        set_layout_bindings[8];            // per set
+    VkDescriptorSetLayoutBinding        set_layout_bindings[GFX_MAX_DESCRIPTOR_BINDINGS];            // per set
 
     VkDescriptorPool                    pool;                   // Native Vulkan descriptor pool handle
     uint32_t                            capacity;               // Total number of descriptor sets available in this pool
@@ -388,11 +389,11 @@ gfx_api void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeli
 gfx_api void vk_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
 
-gfx_api [[deprecated("internal usge only")]] void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
-gfx_api [[deprecated("internal usge only")]] void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-gfx_api [[deprecated("internal usge only")]] void vk_cmd_begin(gfx_command_buffer_t* cmd);
-gfx_api [[deprecated("internal usge only")]] void vk_cmd_end(gfx_command_buffer_t* cmd);
-gfx_api [[deprecated("internal usge only")]] void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
+gfx_api void vk_cmd_create(gfx_context_t* ctx, gfx_command_buffer_t** cmd);
+gfx_api void vk_cmd_destroy(gfx_context_t* ctx, gfx_command_buffer_t* cmd);
+gfx_api void vk_cmd_begin(gfx_command_buffer_t* cmd);
+gfx_api void vk_cmd_end(gfx_command_buffer_t* cmd);
+gfx_api void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
 
 gfx_api void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass);

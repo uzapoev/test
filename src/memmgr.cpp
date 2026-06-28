@@ -245,10 +245,10 @@ void aligned_allocator::deallocate(void* memory)
 
 paged_pool_allocator::paged_pool_allocator(iallocator* memory_resource, size_t allocation_size, size_t allocations_per_page)
 :m_allocator(memory_resource)
-,m_allocation_size(allocation_size)
-,m_allocations_per_page(allocations_per_page)
+,m_allocation_size((uint32_t)allocation_size)
+,m_allocations_per_page((uint32_t)allocations_per_page)
 {
-    m_allocations_per_page = align_up(allocations_per_page, 64);
+    m_allocations_per_page = (uint32_t)align_up(allocations_per_page, 64);
     m_bitset_word_count = m_allocations_per_page / 64;
     m_page_size = m_allocations_per_page * m_allocation_size;
 
@@ -393,7 +393,7 @@ void* paged_pool_allocator::data_by_index(uint32_t index)
 
 
 staging_allocator::staging_allocator(iallocator* memory_resource, size_t allocation_size, bool stretch)
-    : m_allocator(memory_resource), m_initial_size(allocation_size), m_size(allocation_size), m_end(allocation_size), m_stretch(stretch)
+    : m_allocator(memory_resource), m_initial_size((uint32_t)allocation_size), m_size((uint32_t)allocation_size), m_end((uint32_t)allocation_size), m_stretch(stretch)
 {
     if (m_allocator && m_size > 0) {
         m_data = (uint8_t*)m_allocator->allocate(m_size, 16);

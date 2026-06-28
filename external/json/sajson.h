@@ -26,9 +26,8 @@
 
 #include <algorithm>
 #include <assert.h>
-#include <cstdio>
+#include <stdio.h>
 #include <limits.h>
-#include <limits>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -49,6 +48,7 @@
 #define SAJSON_UNLIKELY(x) x
 #define SAJSON_ALWAYS_INLINE __forceinline
 #define SAJSON_UNREACHABLE() __assume(0)
+#pragma warning(disable: 4200)
 #if (_MSC_VER <= 1800)
 #define SAJSON_snprintf _snprintf
 #else
@@ -192,7 +192,7 @@ public:
         incref();
     }
 
-    allocated_buffer(allocated_buffer&& that)
+    allocated_buffer(allocated_buffer&& that) noexcept
         : memory(that.memory) {
         that.memory = 0;
     }
@@ -208,7 +208,7 @@ public:
         return *this;
     }
 
-    allocated_buffer& operator=(allocated_buffer&& that) {
+    allocated_buffer& operator=(allocated_buffer&& that) noexcept {
         if (this != &that) {
             decref();
             memory = that.memory;
@@ -321,7 +321,7 @@ public:
         , buffer(that.buffer) {}
 
     /// Move constructor - neuters the old mutable_string_view.
-    mutable_string_view(mutable_string_view&& that)
+    mutable_string_view(mutable_string_view&& that) noexcept
         : length_(that.length_)
         , data(that.data)
         , buffer(std::move(that.buffer)) {
@@ -329,7 +329,7 @@ public:
         that.data = 0;
     }
 
-    mutable_string_view& operator=(mutable_string_view&& that) {
+    mutable_string_view& operator=(mutable_string_view&& that) noexcept {
         if (this != &that) {
             length_ = that.length_;
             data = that.data;
@@ -734,7 +734,7 @@ public:
     explicit ownership(size_t* p_)
         : p(p_) {}
 
-    ownership(ownership&& p_)
+    ownership(ownership&& p_) noexcept
         : p(p_.p) {
         p_.p = 0;
     }
@@ -817,7 +817,7 @@ public:
     document()
         : document{ mutable_string_view{}, 0, 0, ERROR_UNINITIALIZED, 0 } {}
 
-    document(document&& rhs)
+    document(document&& rhs) noexcept
         : input(rhs.input)
         , structure(std::move(rhs.structure))
         , root_tag(rhs.root_tag)
@@ -979,7 +979,7 @@ public:
 
     class stack_head {
     public:
-        stack_head(stack_head&& other)
+        stack_head(stack_head&& other) noexcept
             : stack_bottom(other.stack_bottom)
             , stack_top(other.stack_top) {}
 
@@ -1046,7 +1046,7 @@ public:
             , write_cursor(0)
             , should_deallocate(false) {}
 
-        allocator(allocator&& other)
+        allocator(allocator&& other) noexcept
             : structure(other.structure)
             , structure_end(other.structure_end)
             , write_cursor(other.write_cursor)
@@ -1164,7 +1164,7 @@ public:
 
     class stack_head {
     public:
-        stack_head(stack_head&& other)
+        stack_head(stack_head&& other) noexcept
             : stack_top(other.stack_top)
             , stack_bottom(other.stack_bottom)
             , stack_limit(other.stack_limit) {
@@ -1278,7 +1278,7 @@ public:
             , ast_write_head(0)
             , initial_stack_capacity(0) {}
 
-        allocator(allocator&& other)
+        allocator(allocator&& other) noexcept
             : ast_buffer_bottom(other.ast_buffer_bottom)
             , ast_buffer_top(other.ast_buffer_top)
             , ast_write_head(other.ast_write_head)
@@ -1414,7 +1414,7 @@ public:
 
     class stack_head {
     public:
-        stack_head(stack_head&& other)
+        stack_head(stack_head&& other) noexcept
             : source_allocator(other.source_allocator) {
             other.source_allocator = 0;
         }
@@ -1478,7 +1478,7 @@ public:
             , write_cursor(structure_end)
             , stack_top(structure) {}
 
-        allocator(allocator&& other)
+        allocator(allocator&& other) noexcept
             : structure(other.structure)
             , structure_end(other.structure_end)
             , write_cursor(other.write_cursor)

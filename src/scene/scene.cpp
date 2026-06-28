@@ -10,7 +10,7 @@ struct scene_chunk_info_t {
 };
 
 struct scene_header_t {
-    uint32_t magick = MAKEFOURCC('S', 'C', 'N', '0');
+    uint32_t magick;
     uint32_t version;
 
     uint32_t node_count;
@@ -46,13 +46,27 @@ scene scene::create_from_file(const std::string_view& path)
 }
 
 
+void scene_traverse(scene& s, node& n, std::function<void(scene& s, node&)>& callback)
+{
+    for (size_t i = 0; i < n.childs.size(); ++i)
+    {
+        callback(s, n.childs[i]);
+        scene_traverse(s, n.childs[i], callback);
+    }
+}
+
 scene scene::create_from_json_file(const std::string_view& path)
 {
     measure ms("\nscene loading");
 
     if(std::filesystem::exists(path)) {
+        std::function<void(scene& s, node& n)> callback = [](scene &s, node& n) { s.m_nodes_flat_list.push_back(&n); };
         scene result = scene_reader_json::create_from_file(path);
-        result.init();
+        for (size_t i = 0; i < result.m_nodes.size(); ++i)
+        {
+            callback(result, result.m_nodes[i]);
+            scene_traverse(result, result.m_nodes[i], callback);
+        }
         return result;
     } else {
         debug::log_error("no file at path %s", path.data());
@@ -194,16 +208,29 @@ node* scene::create_node(interned_string name, interned_string guid)
     return result;
 }
 
+template<class T> inline void deserialize_component(T& object, filestream* stream)
+{
+    auto properties = reflection::get_properties<T>();
+    reflection::for_each(properties, [&](size_t idx, auto* arg) {
+        using member_type = std::decay_t<decltype(object.*arg->member)>;
+
+        if constexpr (std::is_trivially_copyable_v<member_type>) {
+            object.*arg->member = stream->read<member_type>();
+        }
+
+        else if constexpr (!std::is_same_v<decltype(reflection::get_properties<member_type>()), void>) {
+            deserialize_component(object.*arg->member, stream);
+        }
+    });
+}
 
 
 void scene::load(const std::string_view& path)
 {
     component_manager::instance().register_query(&m_render_query);
 
-    if(m_node_allocator == nullptr){
+    if(m_world == nullptr){
         m_world = new world();
-        auto allocator = new aligned_allocator("scene node");
-        m_node_allocator = new paged_pool_allocator(allocator, sizeof(node), 1024*16);
     }
 
     PROFILE_SAMPLE("scene::load::bin")
@@ -221,7 +248,7 @@ void scene::load(const std::string_view& path)
     if(header.version == 2){
         auto mesh_count = stream->read<uint32_t>();
         mesh_guids.resize(mesh_count);
-        stream->read(sizeof(guid_t) * mesh_guids.size(), mesh_guids.data());
+        stream->read((uint32_t)(sizeof(guid_t) * mesh_guids.size()), mesh_guids.data());
     }
 
     m_nodes.resize(header.node_count);// = allocator->alloc<node>(nodes_count);
@@ -244,40 +271,33 @@ void scene::load(const std::string_view& path)
             case component_transform: {
                 uint32_t  index = stream->read<uint32_t>();
                 tinynode* node  = m_tiny_nodes[index];
-                auto component  = node->add_component<transform>();
 
-                component->position = stream->read<vec3>();
-                component->rotation = stream->read<quat>();
-                component->scale    = stream->read<vec3>();
-                component->update_transform();
+                auto component  = node->add_component<transform>();
+                transform::deserialize(component, stream);
             } break;
 
             case component_hierarchy: {
                 uint32_t  index = stream->read<uint32_t>();
                 tinynode* node  = m_tiny_nodes[index];
                 auto component  = node->add_component<hierarchy>();
+               // hierarchy::deserialize(component, stream);
             } break;
 
             case component_light: {
                 uint32_t  index = stream->read<uint32_t>();
                 tinynode* node  = m_tiny_nodes[index];
                 //auto component  = node->add_component<light>();
+                //light::deserialize(component, stream);
             }break;
 
             case component_renderer: {
                 uint32_t  index = stream->read<uint32_t>();
                 tinynode* node  = m_tiny_nodes[index];
+
                 auto component  = node->add_component<renderer>();
+                renderer::deserialize(component, stream);
 
-                guid_t material_guids[32] = {};
-                guid_t mesh_guid    = stream->read<guid_t>();
-                uint32_t mat_count  = stream->read<uint32_t>();
-                stream->read(sizeof(guid_t) * mat_count, &material_guids[0]);
-
-                guid_t lm_guid = stream->read<guid_t>(); // lightmap texture guid
-                float4 lm_scale_offset = stream->read<float4>(); // lightmap scale offset
-
-                component->mesh_handle = resource_manager::shared()->load(mesh_guid, nullptr);
+                component->mesh_handle = resource_manager::shared()->load(component->mesh_guid, nullptr);
             } break;
 
             default: 
@@ -296,47 +316,46 @@ void scene::save(const std::string_view& path)
     filestream * stream = filestream::open_wb(path.data());
 
     scene_header_t header = {};
-        header.magick       = MAKEFOURCC('S', 'C', 'N', '0');
+        header.magick       = gfx_fourcc('S', 'C', 'N', '0');
         header.version      = 1;
         header.node_count   = (uint32_t)m_nodes_flat_list.size();
     stream->write(header);
     // write meta
 
+    int emptynodes = 0;
     for (uint32_t i = 0; i < m_nodes_flat_list.size(); i++)
     {
         auto & node = m_nodes_flat_list[i];
         node->index = i;
 
         m_world->save_node(node, stream);
+
+        if (node->renderer.mesh_guid == 0)
+            emptynodes++;
     }
     for (uint32_t i = 0; i < m_nodes_flat_list.size(); i++)
     {
         auto& node = m_nodes_flat_list[i];
-        m_world->serialize<transform>(node, &node->transform, stream);
-
-        if (!node->renderer.mesh_guid.empty())
-            m_world->serialize<renderer>(node, &node->renderer, stream);
+        {
+            binary_writer bw = {};
+            bw.write(i);
+            transform::serialize(&node->transform, &bw);
+            write_chunk(stream, scene::component_transform, bw.size(), (char*)bw.data());
+        }
+        
+        if (node->renderer.mesh_guid != 0 )
+        {
+            binary_writer bw0 = {};
+            bw0.write(i);
+            renderer::serialize(&node->renderer, &bw0);
+            write_chunk(stream, scene::component_renderer, bw0.size(), (char*)bw0.data());
+        }
      }
 
     stream->flush();
     delete stream;
 }
 
-void scene::init()
-{
-    std::function<void(node&)> cb = [this](node& n) {
-        m_nodes_flat_list.push_back(&n);
-    };
-   
-    m_meshes.reserve(1024 * 8);
-    m_nodes_flat_list.reserve(1024 * 8);
-
-    for (size_t i = 0; i < m_nodes.size(); ++i)
-    {
-        cb(m_nodes[i]);
-        traverse(m_nodes[i], cb);
-    }
-}
 
 void scene::clear()
 {
@@ -458,14 +477,7 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
     gfx_cmd_pop_marker(cmd);
 }
 
-void scene::traverse(node & n, std::function<void(node&)> &cb)
-{
-    for (size_t i = 0; i < n.childs.size(); ++i)
-    {
-        cb(n.childs[i]);
-        traverse(n.childs[i], cb);
-    }
-}
+
 
 
 struct renderer_sort

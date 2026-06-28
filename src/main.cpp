@@ -1,21 +1,29 @@
 ﻿#include <stdio.h>
 #include <time.h> 
-#include <sys/stat.h> // stat
-#include <stdarg.h> // stat
+#include <sys/stat.h>   // stat
+#include <stdarg.h>     // stat
+#include <cstdlib>      // sysem
 
 #include <array>
 #include <filesystem>
 #include <unordered_set>
 
+#include "gfx/gfx_shader_compiler.h"
+
 #include "platform/platform.h"
 #include "mathlib.h"
 #include "common.h"
 #include "memmgr.h"
+#include "json_serializer.h"
 
 #include "scene/scene.h"
 #include "scene/render_system.h"
 
 #include "resource_manager.h"
+#include "resource_compiler.h"
+
+#include "mesh.h"
+
 
 
 uintptr_t g_handle;
@@ -27,8 +35,14 @@ static scene g_scene;
 
 void scene_test(gfx_context_t* ctx, const char * data_path, const char* scene_name)
 {
-    g_scene = scene::create_from_json_file(scene_name);
-    /*
+    std::string bin_path = scene_name;
+    bin_path.append(".bin");
+    if (std::filesystem::exists(bin_path)) {
+        g_scene.load(bin_path);
+    }
+
+    /*g_scene = scene::create_from_json_file(scene_name);
+    
     std::string bin_path = std::string(scene_name).append(".bin");
 
     if(std::filesystem::exists(bin_path))
@@ -51,7 +65,7 @@ void log_func(gfx_msg type, const char* msg, ...)
     }
     vprintf(msg, arglist);
     va_end(arglist);
-    printf("\033[0m\n");
+    printf("\033[0m");
   //  flushall();
 }
 
@@ -67,6 +81,7 @@ gfx_allocator_t gfx_allocator = {
         return free(ptr);
     }
  };
+
 
 
 void platform_main(uintptr_t handle, int argc, char** argv)
@@ -85,7 +100,6 @@ void platform_main(uintptr_t handle, int argc, char** argv)
 
     gfx_caps_t caps = {};
     gfx_get_caps(ctx, &caps);
-    // Engine runtime notifications
     log_func(gfx_msg_info, "Initialized GPU backend: %s (%s)", caps.gpu_name, caps.gpu_vendor);
     log_func(gfx_msg_info, "Capabilities - Bindless: %s (Max Textures: %u), Mesh Shaders: %s, UMA: %s",
         caps.support_bindless ? "ENABLED" : "DISABLED",
@@ -109,28 +123,34 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     gfx_pipeline_compute_t * compute_pipeline = gfx_compute_pipeline_create(ctx, &compute_desc);
     */
 
-    resource_manager::create_and_make_shader(ctx);
-    render_system::create_and_make_shader(ctx);
+    auto assets = resource_manager::create_and_make_shared(ctx);
 
-    resource_manager::shared()->mount("../data/");
+    assets->set_compiler(asset_type_scene, resource_compile_scene);
+    assets->set_compiler(asset_type_mesh, resource_compile_mesh);
+    assets->set_compiler(asset_type_shader, resource_compile_shader);
+    assets->set_compiler(asset_type_texture, resource_compile_texture);
+    assets->set_compiler(asset_type_material, resource_compile_material);
 
-    
-    gfx_shader_t* shader = nullptr;
-    load_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
+    assets->set_cash_path("../.cash");
+    assets->set_assets_path("../data/");
 
+    render_system::create_and_make_shared(ctx);
+
+    //gfx_shader_t* shader = nullptr;
+    //load_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
 
     gfx_vertex_attribute attributes[] = {
-        { 0, 0, gfx_vertex_format_float4,   offsetof(vertex, position)  },
-        { 1, 0, gfx_vertex_format_float4,   offsetof(vertex, uv)        },
-        { 2, 0, gfx_vertex_format_float4,   offsetof(vertex, normal)    },
-        { 3, 0, gfx_vertex_format_float4,   offsetof(vertex, tangent)   },
+        { 0, 0, gfx_format_float4,   offsetof(vertex, position)  },
+        { 1, 0, gfx_format_float4,   offsetof(vertex, uv)        },
+        { 2, 0, gfx_format_float4,   offsetof(vertex, normal)    },
+        { 3, 0, gfx_format_float4,   offsetof(vertex, tangent)   },
     };
 
     gfx_vertex_slot_t slots[] = {
         {0, sizeof(vertex), gfx_vertex_rate_vertex},
    //     {1, sizeof(instance_data), gfx_vertex_rate_instance}
     };
-
+    /*
     gfx_pipeline_desc_t piplene_desc = { 0 };
 
         piplene_desc.shader                     = shader;
@@ -143,6 +163,8 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         piplene_desc.assembly.slots             = slots;
 
     pipeline = gfx_pipeline_create(ctx, &piplene_desc);
+    */
+
     
    /* mvp_location            = gfx_uniform_location(shader, "mvp");
     auto color_location     = gfx_uniform_location(shader, "_color");
@@ -168,10 +190,17 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     g_camera.set_pos(math::make_vec3(4.366324f, 9.78074f, 185.8569f));
     g_camera.set_target(g_camera._pos + math::make_vec3(0, 0, 1));
 
+    icomponent_query* renderer_query = component_manager::instance().create_query<transform, renderer>();
   //  scene_test(ctx, "../data/unity", "Southside.big.json");
   //  scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
-  //  scene_test(ctx, "../data/unity", "../data/unity/City.json");
+  //  scene_test(ctx, "../data/unity", "../data/City.json");
     scene_test(ctx, "../data/gungsta", "../data/gungsta/Demo.json");
+
+    auto& active_query = renderer_query->as<transform, renderer>();
+
+    for (auto [node, rend, trans] : active_query) {
+        if (!node) continue;
+    }
 }
 
 
@@ -196,11 +225,22 @@ void update_camera(camera & cam)
     cam.update();
 }
 
+gfx_pass_info_t gfx_default_pass(gfx_frame_t * frame)
+{
+    gfx_pass_info_t pass = { 0 };
+        pass.color_clear_value = gfx_fourcc(64, 128, 255, 255);
+        pass.depth_clear_value = 1.0f;
+        pass.stencil_clear_value = 0;
+        pass.target = frame->target;
+    return pass;
+}
 
 void platform_tick(void* userdata)
 {
    // measure ms("\nplatform_tick");
     Time::tick();
+
+    resource_manager::shared()->perform_resource_uploading();
 
     update_camera(g_camera);
 
@@ -214,7 +254,7 @@ void platform_tick(void* userdata)
 
     if (input_kb_state(Input::Keyboard::M))
     {
-        memory_stats_t  stats = {};
+        memory_stats_t stats = {};
         memory::dump(&stats);
         debug::log("\nmemsize : %.3f Mb", (float)(stats.total_allocated_size) / 1024.0f / 1024.0f);
     }
@@ -227,16 +267,12 @@ void platform_tick(void* userdata)
     g_camera.setup(g_camera.m_fov, width / height, g_camera.m_near, g_camera.m_far);
     g_camera.update();
 
-    gfx_pass_info_t pass = { 0 };
-        pass.color_clear_value = gfx_fourcc(64,128,255,255);
-        pass.depth_clear_value = 1.0f;
-        pass.stencil_clear_value = 0;
-
     auto frame = gfx_begin_frame(ctx, &surface);
     {
-        pass.target = frame->target;
+        auto pass = gfx_default_pass(frame);
 
         gfx_cmd_begin_pass(frame->cmd, &pass);
+            render_system::shared()->draw(frame->cmd);
             g_scene.draw(frame->cmd, g_camera);
         gfx_cmd_end_pass(frame->cmd);
     }

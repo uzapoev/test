@@ -41,8 +41,8 @@ typedef struct material_t {
 
 
 typedef struct lightmap_t {
-    gfx_texture_t*          lightmap;
-    gfx_texture_t*          lightmask;
+    gfx_texture_t*          lightmap    = nullptr;
+    gfx_texture_t*          lightmask   = nullptr;
     vec4                    scale_offset;
 } lightmap_t;
 
@@ -143,7 +143,7 @@ public:
 
     void draw(gfx_command_buffer_t* cmd);
 private:
-    virtual void on_node_changed(class tinynode* node, class component_manager& manager) override;
+    virtual void on_node_changed(struct tinynode* node, class component_manager& manager) override;
 
     virtual void garbage_collect() override;
 

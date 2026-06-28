@@ -78,14 +78,14 @@ endif(EMSCRIPTEN)
 
 #add_definitions("-std=c++17")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
-    add_compile_options(/W4 /O2 /Oi /GR- /EHa-) # disable RTTI and exceptions
+    add_compile_options(/W3 /Oi /GR- /EHa-) # disable RTTI and exceptions
 else()
     add_compile_options(-Wall -Wextra -O3 -fno-rtti -fno-exceptions)
 endif()
@@ -107,6 +107,8 @@ endfunction()
 include_directories(external)
 aux_source_directory(external EXTERNAL_SRCS)
 
+#target_include_directories(gittest SYSTEM PRIVATE /external)
+
 file(GLOB_RECURSE HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
 file(GLOB_RECURSE SOURCES_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
@@ -117,6 +119,7 @@ set(SOURCES
     src/platform/platform.h
     src/gfx/gfx.h
     src/gfx/gfx_shader_compiler.h
+    src/gfx/gfx_shader_reflection.h
     src/gfx/gfx.cpp
     src/gfx/gfx_dx12.h
     src/gfx/gfx_dx12.cpp
@@ -125,13 +128,17 @@ set(SOURCES
     src/gfx/gfx_vulkan.h
     src/gfx/gfx_webgpu.cpp
     src/gfx/gfx_webgpu.h
+    src/scene/components.h
     src/scene/scene.cpp
     src/scene/scene.h
+    src/scene/scene_json.h
     src/scene/ecs.h
     src/scene/world.h
     src/scene/render_system.cpp
     src/scene/render_system.h
     src/json_serializer.h
+    src/resource_compiler.h
+    src/resource_compiler.cpp
     src/resource_loader.cpp
     src/resource_loader.h
     src/resource_manager.cpp

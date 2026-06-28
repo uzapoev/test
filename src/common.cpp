@@ -74,7 +74,7 @@ std::string bin2hex::dump(const char* data, size_t size, const char * name)
         snprintf(&buffer[hexPos], hex_symbol_width - hexPos, "0x%02x, ", u8data[asciiPos]);
         snprintf(&buffer[hex_symbol_width], 3, "// " );
 
-        sprintf(tmp, "%*0x %02x,", asciiPos*6, u8data[asciiPos]);
+        sprintf(tmp, "%0x %02x,", asciiPos*6, u8data[asciiPos]);
         buffer[text_symbol_pos + asciiPos] = isprint(u8data[asciiPos]) && u8data[asciiPos] != '\\' ? u8data[asciiPos] : '.';
     
         asciiPos++;  
@@ -330,6 +330,10 @@ int path::copy_file(const char* src_path, const char* dest_path)
     }
 
     char * buffer = (char*)calloc(1, 65536);
+    if(buffer == nullptr) {
+        debug::log_error("%s, %d",__FILE__, __LINE__);
+        return 0;
+     }
     size_t bytes_read;
     int success = 1;
 
@@ -823,6 +827,8 @@ guid_t uuid::generate_uuid_v4()
 guid_t uuid::str_to_guid(const char* str)
 {
     guid_t result = {};
+    if (!is_guid_str(str))
+        return result;
 
     for (int i = 0; i < 16; ++i) {
         result.high = (result.high << 4) | hex_char_to_val(str[i]);

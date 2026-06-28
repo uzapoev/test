@@ -110,8 +110,6 @@ public:
 
     world()
     {
-        m_renderer = render_system::shared();
-        m_resources = resource_manager::shared();
     }
 
     void init()
@@ -126,6 +124,28 @@ public:
         return entity_factory::instance().create_entity();
     }
 
+
+    std::vector<icomponent*> get_all_components(tinynode* node) {
+        std::vector<icomponent*> result;
+
+        uint64_t mask = node->component_mask;
+        if (mask == 0) return result;
+
+        auto& manager = component_manager::instance();
+
+        for (uint32_t i = 0; i < 64; ++i) {
+            if ((mask & (1ULL << i)) != 0) {
+                if (icomponent_pool* pool = manager.get_pool_by_type_index(i)) {
+                    void* data = pool->get_raw(node->runtime_id);
+                    const char* name = component_registry::type_name(i);
+
+                   result.push_back((icomponent*)data);
+                }
+            }
+        }
+        return result;
+    }
+
     node* load_node(class scene* _scene, filestream* stream)
     {    
         interned_string guid    = stream->read<interned_string>();
@@ -137,6 +157,9 @@ public:
 
     void save_node(struct node* _node, filestream* stream)
     {
+        binary_writer writer;
+        writer.write((uint32_t)_node->guid.length());
+
         uint32_t size = (uint32_t)_node->guid.length() + sizeof(uint16_t) +
                         (uint32_t)_node->name.length() + sizeof(uint16_t) +
                         (uint32_t)_node->tag.length()  + sizeof(uint16_t) +
@@ -153,17 +176,11 @@ public:
     template<class T> void serialize(struct node* node, T * _component, filestream* stream){}
 
 
-    /// <summary>
-    ///  renderer
-    /// </summary>
-    /// <param name="_scene"></param>
-    /// <param name="stream"></param>
-    /// <returns></returns>
     template<> renderer* deserialize(class scene* _scene, filestream* stream)
     {
       /*  auto component = m_renderer->allocate_renderer();
 
-        component->mesh_guid                = stream->read<interned_string>();;
+        component->mesh_guid                = stream->read<interned_string>();
         component->material_guid            = stream->read<interned_string>();
         component->lightmap_guid            = stream->read<interned_string>();
         component->lightmap_scale_offset    = stream->read<vec4>();
@@ -173,16 +190,18 @@ public:
 
     template<> void serialize(struct node* node, struct renderer * component, filestream* stream)
     {
-        guid_t mesh_guid = uuid::str_to_guid(component->mesh_guid.c_str());
-        guid_t lm_color_guid = uuid::str_to_guid(component->lightmap_guid.c_str());
+        guid_t mesh_guid = component->mesh_guid;
 
         binary_writer bw = {};
             bw.write(node->index);
-            bw.write(mesh_guid);
+            bw.write(component->mesh_guid);
+            bw.write(component->material_guid);
+
             bw.write(component->material_count);
             bw.write(sizeof(guid_t) * component->material_count, component->material_guids);
 
-            bw.write(lm_color_guid);
+            bw.write(component->lightmap_color_guid);
+            bw.write(component->lightmap_mask_guid);
             bw.write(component->lightmap_scale_offset);
         write_chunk(stream, scene::component_renderer, bw.size(), (char*)bw.data());
     }
@@ -215,21 +234,6 @@ public:
         return nullptr;
     }
 
-
-    void register_serializer(uint32_t type, std::function<void(class scene*, struct filestream*)>)
-    {
-    }
-
-    bool resolve_component(uint32_t type, std::function<void(class scene*, struct filestream*, struct icomponent**)>* cb)
-    {
-        return false;
-    }
-
-    class resource_manager *    m_resources     = nullptr;
-    class render_system*        m_renderer      = nullptr;
-    class physic2d_manager *    m_physics2d     = nullptr;
-    class physic3d_manager *    m_physics3d     = nullptr;
-    class navigation_manager *  m_navigation    = nullptr;   // recast navmesh
 //  uicanvas *                  m_canvas;       // ui renderer
 };
 

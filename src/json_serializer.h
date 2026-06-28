@@ -1,4 +1,4 @@
-#ifndef __json_serializer_h__
+﻿#ifndef __json_serializer_h__
 #define __json_serializer_h__
 
 #include <string>
@@ -21,43 +21,55 @@
             ReflectObjectFieldWithKey("url", url  )
         );
     };
-    auto userinfo = json::from_json<UserInfo>(data);
-
-    struct RenderMeshComponent
-    {
-        guid    mesh_guid;
-        guid*  material_guids;
-
-        ReflectObject(RenderMeshComponent,
-            ReflectObjectField("mesh",        mesh_guid ),
-            ReflectObjectField("materials",   material_guids )
-        );
-    };
+    auto user_info = json::from_json_string<UserInfo>(data.size(), data.data());
+    auto str_data = json::to_json_string(user_info);
 
     struct vec3
     {
         float x,y,z;
     }
-
-    ReflectObjectExternal(vec3, ReflectObjectField(x), 
-                                ReflectObjectField(y), 
-                                ReflectObjectField(z) );
+    ReflectObjectExternal(vec3, x, y, z );
 */
 
 typedef enum field_options {
     field_options_none,
+    field_options_asset_ref,
     field_options_read_only,
     field_options_hide_in_inspector,
 } field_options;
 
+
+#define _REFLECT_EXPAND_ARGS(x) x
+
+#define _REFLECT_EXPAND_1(x)          ReflectObjectField(x)
+#define _REFLECT_EXPAND_2(x, ...)     ReflectObjectField(x), _REFLECT_EXPAND_ARGS(_REFLECT_EXPAND_1(__VA_ARGS__))
+#define _REFLECT_EXPAND_3(x, ...)     ReflectObjectField(x), _REFLECT_EXPAND_ARGS(_REFLECT_EXPAND_2(__VA_ARGS__))
+#define _REFLECT_EXPAND_4(x, ...)     ReflectObjectField(x), _REFLECT_EXPAND_ARGS(_REFLECT_EXPAND_3(__VA_ARGS__))
+#define _REFLECT_EXPAND_5(x, ...)     ReflectObjectField(x), _REFLECT_EXPAND_ARGS(_REFLECT_EXPAND_4(__VA_ARGS__))
+#define _REFLECT_EXPAND_6(x, ...)     ReflectObjectField(x), _REFLECT_EXPAND_ARGS(_REFLECT_EXPAND_5(__VA_ARGS__))
+#define _REFLECT_EXPAND_7(x, ...)     ReflectObjectField(x), _REFLECT_EXPAND_ARGS(_REFLECT_EXPAND_6(__VA_ARGS__))
+#define _REFLECT_EXPAND_8(x, ...)     ReflectObjectField(x), _REFLECT_EXPAND_ARGS(_REFLECT_EXPAND_7(__VA_ARGS__))
+
+#define _REFLECT_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8, NAME, ...) NAME
+
+#define _REFLECT_EXPAND_FIELDS(...) \
+    _REFLECT_EXPAND_ARGS(_REFLECT_GET_MACRO(__VA_ARGS__, \
+        _REFLECT_EXPAND_8, _REFLECT_EXPAND_7, _REFLECT_EXPAND_6, _REFLECT_EXPAND_5, \
+        _REFLECT_EXPAND_4, _REFLECT_EXPAND_3, _REFLECT_EXPAND_2, _REFLECT_EXPAND_1)(__VA_ARGS__))
+
+
+
+
 #define ReflectObject( CLASS, ... )                 public: static auto reflection_properties() { using Type = CLASS; return std::make_tuple(__VA_ARGS__); }   
-#define ReflectObjectInherited( CLASS, BASE, ... )  public: static auto reflection_properties() { using Type = CLASS; return std::tuple_cat(std::make_tuple(__VA_ARGS__), BASE::reflection_properties()); }
-#define ReflectObjectExternal( CLASS, ...)          template <> inline auto reflection_properties<CLASS>() { using Type = CLASS;  return std::make_tuple(__VA_ARGS__); }
+#define ReflectObjectInherited( CLASS, BASE, ... )  public: static auto reflection_properties() { using Type = CLASS; return std::tuple_cat(std::make_tuple(__VA_ARGS__), reflection::get_properties<BASE>()); }
+#define ReflectObjectExternal( CLASS, ...)          template <> inline auto reflection_properties<CLASS>() { using Type = CLASS; return std::make_tuple(__VA_ARGS__); }
+#define ReflectObjectExternal2( CLASS, ... )        template <> inline auto reflection_properties<CLASS>() { using Type = CLASS; return std::make_tuple(_REFLECT_EXPAND_FIELDS(__VA_ARGS__)); }
+
 
 #define ReflectObjectField(FIELD)                   reflection::make_property(&Type::FIELD, #FIELD)
 #define ReflectObjectFieldWithKey(KEY, FIELD)       reflection::make_property(&Type::FIELD, KEY)
 
-template<class T> inline auto                       reflection_properties() { return std::make_tuple(); }
+template<class T> inline auto                       reflection_properties() {  } // return "void", if reflection::get_reflection<TYPE>() 
 
 
 namespace reflection
@@ -187,9 +199,9 @@ namespace json
         }
 
         void start_object() { write_char('{'); first_element = true; }
-        void end_object() { write_char('}'); first_element = false; }
-        void start_array() { write_char('['); first_element = true; }
-        void end_array() { write_char(']'); first_element = false; }
+        void end_object()   { write_char('}'); first_element = false; }
+        void start_array()  { write_char('['); first_element = true; }
+        void end_array()    { write_char(']'); first_element = false; }
 
         void write_char(char c) {
             buffer.push_back(c);
@@ -240,15 +252,11 @@ namespace json
 
     namespace detail
     {
-        template<class T, typename Enable = void>
-        struct is_vector {
-            static bool const value = false;
-        };
-
         template<class T>
-        struct is_vector<std::vector<T> > {
-            static bool const value = true;
-        };
+        struct is_vector                    { static bool const value = false;        };
+
+        template<class T> 
+        struct is_vector<std::vector<T> >   { static bool const value = true;        };
 
         template <class T> inline void read_vector(const sajson::value & obj, std::vector<T>& value)
         {
@@ -278,27 +286,32 @@ namespace json
 
                 using member_type = std::decay_t<decltype(object.*arg->member)>;
 
-               if constexpr (std::is_assignable_v<member_type, std::string>)   // string, string_view
+                if constexpr (std::is_assignable_v<member_type, std::string>)   // string, string_view
                 {
-                    const char* str = value.as_cstring();
-                    object.*arg->member = str;
+                    object.*arg->member = value.as_cstring();;
                 }
-                if constexpr (std::is_floating_point_v<member_type>)        // float, double
+                else if constexpr (std::is_floating_point_v<member_type>)        // float, double
                 {
                     object.*arg->member = (member_type)value.get_number_value();
                 }
-                if constexpr (std::is_integral_v<member_type>)             // bool, int, int16m int32...
+                else if constexpr (std::is_integral_v<member_type>)             // bool, int, int16m int32...
                 {
                     object.*arg->member = (member_type)value.get_integer_value();
                 }
-                if constexpr (detail::is_vector<member_type>::value)       // vector
+                else if constexpr (detail::is_vector<member_type>::value)       // vector
                 {
                     detail::read_vector(value, object.*arg->member);
                 }
-                if constexpr (!std::is_same_v<decltype(reflection::get_properties<member_type>()), void>)
+                else if constexpr (std::is_same_v<member_type, guid_t>)
+                {
+                    const char* str = value.as_cstring();
+                    object.*arg->member = uuid::str_to_guid(str);
+                } 
+                else if constexpr (!std::is_same_v<decltype(reflection::get_properties<member_type>()), void>)
                 {
                     deserialize_sajson(object.*arg->member, value);
                 }
+               // debug::log_error("unknmown type");
             }); // for_each
         }
     }
@@ -310,14 +323,15 @@ namespace json
         {
             detail::tuple_for_each(detail::get_properties<T>(), [&](size_t idx, auto* arg) {
 
-               using member_type = std::decay_t<decltype(object.*arg->member)>;
-                if constexpr (std::is_assignable_v<member_type, std::string>)   // string, string_view
-                {
-                    writer.add_key(arg->name);
+                using member_type = std::decay_t<decltype(object.*arg->member)>;
+
+                writer.add_key(arg->name);
+                if constexpr (std::is_assignable_v<member_type, std::string>) {
                     writer.write_string_value(object.*arg->member.c_str());
-                }
-                else
-                {
+                } else if constexpr (std::is_floating_point_v<member_type>) {
+                    writer.write_float_value(object.*arg->member);
+                } else {
+                    writer.write_string_value("!!!!error");
                     debug::breakpoint();
                 }
             });

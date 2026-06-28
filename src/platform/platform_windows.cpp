@@ -16,7 +16,7 @@ static bool is_window_active = false;
 platform_ctx_t *g_platform_ctx = nullptr;
 /*
 input_event_t    g_events[1024] = {};
-int              g_current_event_idx = 0;;
+int              g_current_event_idx = 0;
 uint8_t          g_keyboard_key_states[256] = {};
 input_point_t    g_point_states[8] = {};
 input_state      g_mouse_btn_states[16] = {};*/

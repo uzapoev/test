@@ -14,9 +14,12 @@
 
 #include "scene/render_system.h"
 
-
+// pc       textures - dxt1..dxt7;  shaders -spirv
+// mobile   textures - astc,        shaders - sriprv(android), msl(ios)
+// web      textures - dxt1..dxt7;  shaders - wgsl
 typedef enum platform_type:uint8_t {
-    platform_type_pc,       // x86/apple silicon
+    platform_type_common,   // common for all platrorm f.e. scene, mesh, materials
+    platform_type_pc,       // x86/apple silicon, 
     platform_type_mobile,   // ios/android
     platform_type_web,      // wasm
     count
@@ -49,6 +52,23 @@ typedef enum asset_state : uint8_t {
     loading,        // queued for load, threaded io
     ready           // loaded
 } asset_state;
+
+
+struct asset_handle_t {
+    union {
+        uint64_t handle;
+        struct {
+            uint32_t slot_index;    // index
+            uint16_t generation;    // generation 
+            uint16_t flags;         // resource_type
+        };
+    };
+};
+const asset_handle_t INVALID_ASSET_HANDLE = { 0 };
+
+inline bool operator == (asset_handle_t a, nullptr_t) { return a.handle == 0; }
+inline bool operator != (asset_handle_t a, nullptr_t) { return a.handle != 0; }
+inline bool operator == (asset_handle_t a, asset_handle_t b) { return a.handle == b.handle; }
 
 
 struct file_info_t {
@@ -230,30 +250,45 @@ class bundle {
 
 typedef bool (*asset_compile_func_t)(const char* src_path, const char* out_bin_path, const char* meta_path, platform_type target_platform, void* userdata);
 
-class texture_streaming_manager
+struct texture_streaming_manager
 {
+    void set_gpu_ram_limit();
+private:
     class texture_streaming_manager_impl * m_impl;
+};
+
+class mesh_pool_manager
+{
 };
 
 class material_manager
 {
+    friend class resource_manager;
 public:
     void set_global_texture(uint64_t id, asset_handle_t texture_handle);
     void set_global_texture(const char* name, asset_handle_t texture_handle);
 
-    void set_global_data(uint64_t id, const void * data, uint32_t size);
-    void set_global_data(const char* name, const void* data, uint32_t size);
+    void set_global_data(uint64_t id, void * data, uint32_t size);
+    void set_global_data(const char* name, void* data, uint32_t size);
 
     void set_texture(asset_handle_t material, uint64_t id, asset_handle_t texture_handle);
     void set_texture(asset_handle_t material, const char* name, asset_handle_t texture_handle);
 
     void set_data(asset_handle_t material, uint64_t id, const void* data, uint32_t size);
     void set_data(asset_handle_t material, const char* name, const void* data, uint32_t size);
+
+protected:
+    void trigger_material_changed(material_t * material);
+    void trigger_shader_changed(gfx_shader_t * old_shader, gfx_shader_t * new_texture);
+    void trigger_texture_changed(texture_t * old_texture, texture_t * new_texture);
+
 private:
     class material_manager_impl *                               m_impl;
     class resource_manager*                                     m_resource_manager;
     std::unordered_map<uint64_t,  std::vector<asset_handle_t>>  m_unform_2_material;
 };
+
+
 
 class resource_manager
 {
@@ -301,28 +336,29 @@ private:
     std::vector<std::shared_ptr<material_t>>                                    m_materials;
 
 public:
-    void                                    set_compiler(asset_type, asset_compile_func_t func);
+    void                            set_compiler(asset_type, asset_compile_func_t func);
 
-    void                                    set_assets_path(const std::string& dir);
-    void                                    set_cash_path(const char* path);
-    void                                    set_dlc_path(const char* path);
+    void                            set_assets_path(const std::string& dir);
+    void                            set_cash_path(const char* path);
+    void                            set_dlc_path(const char* path);
 
-    asset_handle_t                          load(guid_t guid, load_params_t* param);
-    asset_handle_t                          load(const char* path, load_params_t* param);
+    asset_handle_t                  load(guid_t guid, load_params_t* param);
+    asset_handle_t                  load(const char* path, load_params_t* param);
 
-    asset_slot_t *                          get_slot(uint64_t runtime_guid); // private
-    file_info_t *                           get_file_info(uint64_t runtime_guid); // private
+    inline const render_mesh_t*     get_mesh(asset_handle_t handle) noexcept;
+    inline const gfx_shader_t*      get_shader(asset_handle_t handle) noexcept;
+    inline const texture_t*         get_texture(asset_handle_t handle) noexcept;
+    inline const material_t*        get_material(asset_handle_t handle) noexcept;
 
-    inline const render_mesh_t*             get_mesh(asset_handle_t handle) noexcept;
-    inline const gfx_shader_t*              get_shader(asset_handle_t handle) noexcept;
-    inline const texture_t*                 get_texture(asset_handle_t handle) noexcept;
-    inline const material_t*                get_material(asset_handle_t handle) noexcept;
+    asset_slot_t *                  get_slot(uint64_t runtime_guid); // private
+    file_info_t *                   get_file_info(uint64_t runtime_guid); // private
+
 
     void    ensure_asset_is_loaded(asset_handle_t handle);
     void    job_push_io_request(guid_t guid);
     void    job_steal_request(guid_t guid);
     void    perform_resource_uploading();
-
+private:
     asset_io_blob_t                         read_asset_blob(file_info_t * info);
     void                                    free_asset_blob(asset_io_blob_t* blob);
 
@@ -340,6 +376,9 @@ private:
     std::vector<render_mesh_t>                      m_render_meshes;            // replace to dense map
     std::vector<texture_t>                          m_textures_new;             // replace to dense map
     std::vector<material_instance_t>                m_material_instances_new;   // replace to dense map
+    std::vector<material_t>                         m_materials_new;            // replace to dense map
+
+    paged_pool_allocator_t<material_t>*             m_material_storage;
 
     std::unordered_map<interned_string, guid_t>     m_path_to_guid;     // 
     std::unordered_map<interned_string, guid_t>     m_guid_to_guid;     // 
@@ -387,6 +426,18 @@ const texture_t* resource_manager::get_texture(asset_handle_t handle) noexcept
         return nullptr;
 
     return nullptr;
+}
+
+inline const material_t* resource_manager::get_material(asset_handle_t handle) noexcept
+{
+    const uint32_t idx = handle.slot_index;
+    if (idx >= m_slots.size())
+        return nullptr;
+
+    const asset_slot_t& slot = m_slots[idx];
+    const bool valid = slot.handle.handle == handle.handle;
+
+    return valid ? &m_materials_new[slot.index_in_pool] : nullptr;
 }
 
 #endif // __resource_manager_h__

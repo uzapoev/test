@@ -603,7 +603,7 @@ static VkInstance _vk_create_instance(bool isdebug)
     uint32_t extension_count = isdebug ? _countof(extensions_debug) : _countof(extensions_release);
 
     uint32_t property_layer_count = 0;
-    VkLayerProperties* properties = (VkLayerProperties*)calloc(128, sizeof(VkLayerProperties));;
+    VkLayerProperties* properties = (VkLayerProperties*)calloc(128, sizeof(VkLayerProperties));
     vkEnumerateInstanceLayerProperties(&property_layer_count, nullptr);
     vkEnumerateInstanceLayerProperties(&property_layer_count, properties);
 
@@ -1382,11 +1382,6 @@ void vk_destroy_renderer(gfx_context_t * ctx)
     vkDestroySurfaceKHR(vctx->vk_instance, vctx->vk_surface, nullptr);
     vkDestroyInstance(vctx->vk_instance, nullptr);
 
-
-    PFN_vkSetDebugUtilsObjectNameEXT    vk_dbg_set_object_name;
-    PFN_vkCmdBeginDebugUtilsLabelEXT    vk_dbg_cmd_push_label;
-    PFN_vkCmdEndDebugUtilsLabelEXT      vk_dbg_cmd_pop_label;
-
     free(vctx);
 }
 
@@ -1993,9 +1988,7 @@ void _vk_reset_descriptor_set(vk_context_t* ctx, vk_descriptor_pool_t* pool, vk_
 
 void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t set_idx, uint32_t capacity, vk_descriptor_pool_t** out_pool)
 {
-    if(ctx == nullptr) return;
-    if(shader == nullptr) return;
-    if(out_pool == nullptr) return;
+    if(ctx == nullptr || shader == nullptr || out_pool == nullptr) return;
 
     uint32_t buffer_alignment = alignof(void*);
 
@@ -2020,12 +2013,12 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
 
     VkDescriptorSetLayoutBinding* set_layout_bindings = shader->set_bindings[set_idx];
 
-    pool->set_layout_binding_count = shader->set_binding_count[set_idx];;
+    pool->set_layout_binding_count = shader->set_binding_count[set_idx];
     for (uint32_t i = 0; i < pool->set_layout_binding_count; ++i){
         pool->set_layout_bindings[i] = set_layout_bindings[i];
     }
     
-    const uint32_t VK_DESCRIPTOR_TYPE_RANGE_SIZE = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+    const uint32_t VK_DESCRIPTOR_TYPE_RANGE_SIZE = 16;
 
     VkDescriptorPoolSize pool_sizes[VK_DESCRIPTOR_TYPE_RANGE_SIZE] = {};
     VkDescriptorPoolSize pool_sizes_by_type[VK_DESCRIPTOR_TYPE_RANGE_SIZE] = {};
@@ -2073,6 +2066,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
     pool->free_set_count = capacity;
     pool->descriptor_sets = sets;  
     vk_buffer_t * ubo_buffer = ctx->uniform_buffer;
+    vk_buffer_t * storage_buffer = ctx->storage_buffer;
 
     for (uint32_t i = 0; i < capacity; i++)
     {
@@ -2117,7 +2111,7 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
             {
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-                    current_set->ubo_offset = gfx_offset_allocator_allocate(ctx->uniform_buffer_allocator, aligned_size);
+                    current_set->ubo_offset = (uint32_t)gfx_offset_allocator_allocate(ctx->uniform_buffer_allocator, aligned_size);
 
                     descriptor_buffer_info[writes_idx].buffer = ubo_buffer ? ubo_buffer->buffer : nullptr;
                     descriptor_buffer_info[writes_idx].range  = aligned_size;
@@ -2136,9 +2130,14 @@ void vk_create_descriptor_pool(vk_context_t* ctx, vk_shader_t* shader, uint32_t 
                     break;
 
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+                    descriptor_buffer_info[writes_idx].buffer = storage_buffer ? storage_buffer->buffer : nullptr;
+                    descriptor_buffer_info[writes_idx].range = aligned_size;
+
+                    descriptor_writes[writes_idx].pBufferInfo = &descriptor_buffer_info[writes_idx]; 
+                    descriptor_writes[writes_idx].pImageInfo = nullptr;
+                    descriptor_writes[writes_idx].pTexelBufferView = nullptr;
                     // todo: 
                     //sets[i].write_infos[j].buffer_info.buffer = ;
-                    assert(false);
                     break;
 
                 default: assert(false); break;
@@ -2252,6 +2251,9 @@ static void _vk_create_descriptor_layouts(vk_context_t * ctx, vk_shader_t* shade
         stage_flags |= HAS_FLAG(u->stage_mask, 1 << gfx_shader_vertex)   ? VK_SHADER_STAGE_VERTEX_BIT   : 0;
         stage_flags |= HAS_FLAG(u->stage_mask, 1 << gfx_shader_fragment) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0;
         stage_flags |= HAS_FLAG(u->stage_mask, 1 << gfx_shader_compute)  ? VK_SHADER_STAGE_COMPUTE_BIT  : 0;
+
+        if(bindings_per_set == nullptr || bindings_per_set[s] == nullptr)
+            continue;
 
         bindings_per_set[s][sidx].stageFlags = stage_flags;
         bindings_per_set[s][sidx].binding = u->binding;
@@ -2455,7 +2457,7 @@ void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
     }
 
     // 
-    uint32_t bindings_hash = _descriptor_set_layout_hash(vk_shader->set_bindings[set_idx], vk_shader->set_binding_count[set_idx]);
+    uint32_t bindings_hash = (uint32_t)_descriptor_set_layout_hash(vk_shader->set_bindings[set_idx], vk_shader->set_binding_count[set_idx]);
     vk_descriptor_pool_t* pool = _get_or_create_descriptor_set_pool(vctx, vk_shader, set_idx, bindings_hash);
 
     for (uint32_t i = 0; i < pool->bitset_word_count; ++i)
@@ -3558,7 +3560,7 @@ void vk_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures,
 
     VkDependencyInfo dependency_info = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO, NULL };
     dependency_info.imageMemoryBarrierCount = image_barrier_count;
-    dependency_info.pImageMemoryBarriers    = image_barrier_count > 0 ? image_barriers : NULL;;
+    dependency_info.pImageMemoryBarriers    = image_barrier_count > 0 ? image_barriers : NULL;
     vkCmdPipelineBarrier2(vk_cmd->cmd, &dependency_info);
 }
 

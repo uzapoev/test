@@ -89,7 +89,10 @@ struct uuid
     static char*        guid_to_str(guid_t g, char * buff);
 };
 
+inline bool operator==(const guid_t& a, std::nullptr_t) { return (a.high | a.low) == 0; }
+inline bool operator!=(const guid_t& a, std::nullptr_t) { return (a.high | a.low) != 0; }
 inline bool operator==(const guid_t& a, const guid_t& b) { return a.high == b.high && a.low == b.low; }
+inline bool operator!=(const guid_t& a, const guid_t& b) { return a.high != b.high && a.low != b.low; }
 
 struct guid_hasher {
     std::size_t operator()(const guid_t& g) const noexcept {
@@ -102,18 +105,18 @@ struct interned_string
 {
 public:
     interned_string() { clear(); }
-    interned_string(const char* str) { m_str = make_intern(str); }
-    interned_string(const std::string& str) { m_str = make_intern(str.data()); }
-    interned_string(const std::string_view& str) { m_str = make_intern(str.data()); }
+    interned_string(const char* str) { m_ptr = make_intern(str); }
+    interned_string(const std::string& str) { m_ptr = make_intern(str.data()); }
+    interned_string(const std::string_view& str) { m_ptr = make_intern(str.data()); }
 
-    void                clear() { m_str = ""; }
-    inline size_t       length() const { return m_str.length(); }
-    inline const char*  data()   const { return m_str.data(); }
-    inline const char*  c_str()  const { return m_str.data(); }
-    inline bool         empty()  const { return m_str.length() == 0; }
+    void                clear() { m_ptr = ""; }
+    inline size_t       length() const { return strlen(m_ptr); }
+    inline const char*  data()   const { return m_ptr; }
+    inline const char*  c_str()  const { return m_ptr; }
+    inline bool         empty()  const { return length() == 0; }
 
-    inline friend bool operator == (const interned_string& b1, const interned_string& b2) { return b1.m_str == b2.m_str; }
-    inline friend bool operator <  (const interned_string& b1, const interned_string& b2) { return b1.m_str < b2.m_str; }
+    inline friend bool operator == (const interned_string& b1, const interned_string& b2) { return b1.m_ptr == b2.m_ptr; }
+    inline friend bool operator <  (const interned_string& b1, const interned_string& b2) { return b1.m_ptr < b2.m_ptr; }
 
     static size_t msize()
     {
@@ -129,8 +132,8 @@ private:
     {
         return s_interned.insert(value).first->c_str();
     }
-
-    std::string_view  m_str;
+    const char * m_ptr = "";
+    //std::string_view  m_str;
 };
 
 

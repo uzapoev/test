@@ -118,10 +118,13 @@ struct paged_pool_allocator_t
     paged_pool_allocator_t(iallocator* memory_resource, uint32_t allocation_per_page)
     :m_allocator(memory_resource, sizeof(T), allocation_per_page) { }
 
-    inline T*      allocate()           { return m_allocator.allocate(sizeof(T), alignof(T)); }
-    inline void    deallocate(T* ptr)   { m_allocator.deallocate(ptr);}
+    inline T*       allocate()                  { return m_allocator.allocate(sizeof(T), alignof(T)); }
+    inline void     deallocate(T* ptr)          { m_allocator.deallocate(ptr);}
+
+    inline T*       get_by_index(uint32_t idx)  { (T*)return m_allocator.data_by_index(idx); }
+
 private:
-    paged_pool_allocator m_allocator;
+    paged_pool_allocator                        m_allocator;
 };
 
 //

@@ -16,14 +16,9 @@
 
 #include "ecs.h"
 
-#ifndef MAKEFOURCC
-#define MAKEFOURCC(ch0, ch1, ch2, ch3) ((uint32_t)(ch0) | ((uint32_t)(ch1) << 8) | ((uint32_t)(ch2) << 16) | ((uint32_t)(ch3) << 24 ))
-#endif
-
 constexpr uint32_t const_hash(char const* input) {
     return *input ? static_cast<uint32_t>(*input) + 33 * const_hash(input + 1) : 5381;
 }
-
 
 // https://github.com/suVrik/acceleration_structure_benchmark
 struct itree
@@ -42,7 +37,7 @@ struct octree   : itree {};
 struct quadtree : itree {};
 
 
-struct camera
+struct camera : icomponent
 {
     void set_fov(float v)                                       { m_fov = v; }
     void set_apect(float v)                                     { m_aspect = v; }
@@ -81,9 +76,9 @@ struct node
     interned_string         name;
     interned_string         guid;
     interned_string         tag;
-    uint64_t                flags; // static, enabled
+    uint64_t                flags = 0; // static, enabled
 
-    uint32_t                index = 0;
+    uint32_t                index = 0; // index in scene, read only
 
     transform               transform;
     renderer                renderer;
@@ -98,88 +93,75 @@ public:
     enum component_type : uint32_t {
         scene_meta_data             = const_hash("meta"),
 
-        component_node              /*= const_hash("node")*/,       // name, guid, tag, flags
-        component_hierarchy         = const_hash("hierarhy"),       // parnet, childs;
-        component_transform         = const_hash("transform"),      // 
+        component_node              = const_hash("node"),               // name, guid, tag, flags
+        component_hierarchy         = const_hash("hierarhy"),           // parent, childs;
+        component_transform         = const_hash("transform"),          // 
 
         component_camera            = const_hash("camera"),
-        component_renderer          = const_hash("renderer"),       // mesh, materials, lightmap, renderparams(cast shadow, etc), occluder
-        component_decal             = const_hash("decal"),           // <-- NEW:
-        component_reflection_probe  = const_hash("reflection_probe"), // <-- NEW:
-        component_particle_system   = const_hash("particles"),    // <-- NEW: (VFX)
+        component_renderer          = const_hash("renderer"),           // mesh, materials, lightmap, renderparams(cast shadow, etc), occluder
+        component_decal             = const_hash("decal"),              // <-- NEW:
+        component_reflection_probe  = const_hash("reflection_probe"),   // <-- NEW:
+        component_particle_system   = const_hash("particles"),          // <-- NEW: (VFX)
 
-        component_light             = const_hash("light"),          // point/dir/area, type(static/dynamic/mixed)
-        component_lodgroup          = const_hash("lodgroup"),       // level of details
-        component_occlusion         = const_hash("occlusion"),      // occlusion data
-        component_streaming         = const_hash("streaming"),      // streaming data
-        component_lightprobes       = const_hash("lightprobes"),    // 
+        component_light             = const_hash("light"),              // point/dir/area, type(static/dynamic/mixed)
+        component_lodgroup          = const_hash("lodgroup"),           // level of details
+        component_occlusion         = const_hash("occlusion"),          // occlusion data
+        component_streaming         = const_hash("streaming"),          // streaming data
+        component_lightprobes       = const_hash("lightprobes"),        // 
         component_volume_profile    = const_hash("volume_profile"),
 
-        component_collider          = const_hash("collider"),       // box, sphere, capsule, mesh, trigger
-        component_trigger           = const_hash("trigger"),
-        component_rigidbody         = const_hash("rigidbody"),      // 
+        component_collider          = const_hash("collider"),           // box, sphere, capsule, mesh, trigger
+        component_collider2d        = const_hash("collider2d"),         // box, sphere, capsule, mesh, trigger
+        component_rigidbody         = const_hash("rigidbody"),          // 
 
-        component_animator          = const_hash("animator"),       // skinned mesh animator
-        component_cinematic         = const_hash("cinematic"),      // kinda dotweens/ transform animations
+        component_animator          = const_hash("animator"),           // skinned mesh animator
+        component_cinematic         = const_hash("cinematic"),          // kinda dotweens/ transform animations
 
-        component_navagent          = const_hash("navagent"),       // pathfinding
-        component_navmap            = const_hash("navmap"),         // pathfinding
-        component_navobstacle       = const_hash("navobstacle"),    // pathfinding
+        component_navagent          = const_hash("navagent"),           // pathfinding
+        component_navmap            = const_hash("navmap"),             // pathfinding
+        component_navobstacle       = const_hash("navobstacle"),        // pathfinding
 
-        component_audio_ambient     = const_hash("audio_ambient"),  // 
-        component_audio_room        = const_hash("audio_room"),     // 
-        component_audio_portal      = const_hash("audio_portal"),   // 
-        component_audio_reflector   = const_hash("audio_reflector"),   // 
+        component_audio_ambient     = const_hash("audio_ambient"),      // 
+        component_audio_room        = const_hash("audio_room"),         // 
+        component_audio_portal      = const_hash("audio_portal"),       // 
+        component_audio_reflector   = const_hash("audio_reflector"),    // 
 
         component_canvas            = const_hash("canvas"),
-        component_script            = const_hash("script"),         // scripts(backends: lua/c#/native)
-        component_userdata          = const_hash("userdata"),       // user data component
+        component_script            = const_hash("script"),             // scripts(backends: lua/c#/native)
+        component_userdata          = const_hash("userdata"),           // user data component
     };
 
-    static scene                            create_from_json_file(const std::string_view& path);
-    static scene                            create_from_xml_file(const std::string_view& path);
-    static scene                            create_from_file(const std::string_view& path);
+    static scene    create_from_json_file(const std::string_view& path);
+    static scene    create_from_xml_file(const std::string_view& path);
+    static scene    create_from_file(const std::string_view& path);
 
 public:
-    void                                    load(const std::string_view& path);
-    void                                    save(const std::string_view& path);
+    void            load(const std::string_view& path);
+    void            save(const std::string_view& path);
 
-    void                                    init();
-    void                                    clear();
-    void                                    update();
-    void                                    draw(gfx_command_buffer_t* cmd, camera & cam);
-
-    //const std::vector<renderer_t> &         visible() const {return m_renderers;}
+    void            clear();
+    void            update();
+    void            draw(gfx_command_buffer_t* cmd, camera & cam);
 
  public:
-   node *       create_node(interned_string name = "", interned_string guid = "");
+   node *           create_node(interned_string name = "", interned_string guid = "");
 
-public:
-    void                                    traverse(node &root, std::function<void(node&)> &cb);
-
-  //  const std::vector<renderer_t*> &        cull(const camera& camera);
 public:
     friend struct scene_reader_json;
     friend struct scene_reader_xml;
 
-   // std::vector<renderer_t>                 m_renderers;
-   // std::vector<renderer_t*>                m_visibles;
+    class world*                            m_world = nullptr;
 
     std::vector<node>                       m_nodes;
     std::vector<node*>                      m_nodes_flat_list;
     std::vector<node*>                      m_allocated_nodes;
      
-  //  entity_query<renderer_t>                m_render_query1;
     entity_query<transform, renderer>       m_render_query;
     std::vector<tinynode*>                  m_tiny_nodes;
     
-
     //scene resources
     std::unordered_set<interned_string>     m_meshes;
     std::unordered_set<interned_string>     m_materials;
-
-    class world *                           m_world = nullptr;
-    paged_pool_allocator *                  m_node_allocator = nullptr;
 };
 
 #endif

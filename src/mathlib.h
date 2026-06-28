@@ -1146,7 +1146,7 @@ namespace math
         auto quantize9 = [](float v) -> uint32_t {
             float normalized = (v / 0.707106f) * 0.5f + 0.5f;
             uint32_t quantized = static_cast<uint32_t>(normalized * 511.0f + 0.5f);
-            return clamp(quantized, 0u, 511u);
+            return (uint32_t)clamp((float)quantized, 0.0f, 511.0f);
             };
 
         uint32_t components[3];
