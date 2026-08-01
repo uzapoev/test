@@ -143,6 +143,10 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
 
     int32_t vertex_buffer_size = gfx_utils_align_up(header->vertex_stride * header->vertex_count, 32);
     int32_t index_buffer_size = gfx_utils_align_up(header->index_stride * header->index_count, 32);
+    if(vertex_buffer_size == 0 || index_buffer_size == 0) {
+        debug::log_error("zero lenght data in \' %s\' mesh", name);
+        return;
+    }
 
     if(pool != nullptr)
     {
@@ -474,6 +478,7 @@ typedef struct shader_header_t {
 
 
 static gfx_shader_compiler_context_t* g_compiler_context = nullptr;
+
 void save_shader_program(const char* path, compiled_shader_program_t * program)
 {
     FILE* file = fopen(path, "wb");
@@ -609,8 +614,9 @@ void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct m
     free(data);
 }
 
-void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_instance_t** insance)
+void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_instance_t** out_insance)
 {
+  //  (*out_insance)->
   //  std::string jstr(data, size);
   //  json::from_json<gfx_material_instance_t>(jstr);
 }

@@ -14,7 +14,7 @@
 #include <functional>
 #include <unordered_set>
 
-//#include "threads.h"
+#include "threads.h"
 
 #define PROFILE_SAMPLE(SAMPLE_NAME) measure ms(SAMPLE_NAME);
 
@@ -94,12 +94,11 @@ inline bool operator!=(const guid_t& a, std::nullptr_t) { return (a.high | a.low
 inline bool operator==(const guid_t& a, const guid_t& b) { return a.high == b.high && a.low == b.low; }
 inline bool operator!=(const guid_t& a, const guid_t& b) { return a.high != b.high && a.low != b.low; }
 
-struct guid_hasher {
-    std::size_t operator()(const guid_t& g) const noexcept {
-        return std::hash<uint64_t>{}(g.high) ^ (std::hash<uint64_t>{}(g.low) << 1);
+template<> struct std::hash<guid_t> {
+    std::size_t operator()(const guid_t& g) const noexcept { 
+        return std::hash<uint64_t>{}(g.high) ^ (std::hash<uint64_t>{}(g.low) << 1); 
     }
 };
-
 
 struct interned_string
 {
@@ -160,12 +159,13 @@ struct binary_writer {
     }
 
     template<class T> void write(const T& v) {
+        static_assert(std::is_trivially_copyable_v<T>);
         write(sizeof(T), &v);
     }
 
 private:
-    char buffer[512] = { 0 };
-    uint32_t current_size = 0;
+    char        buffer[512] = { 0 };
+    uint32_t    current_size = 0;
 };
 
 struct filestream
@@ -173,8 +173,6 @@ struct filestream
     static filestream* open(const char* path, const char* mode);
     static filestream* open_rb(const char* path);   // binary read only 
     static filestream* open_wb(const char* path);   // binary write
-    static filestream* open_mem_rw();              // binary write
-
     ~filestream();
 
     virtual uint32_t            read(uint32_t size, void* out_data);
@@ -187,9 +185,9 @@ struct filestream
     inline T            read() { T res = {}; read(sizeof(T), &res); return res; }
 
     template<class T>
-    inline void         write(T v) { write(sizeof(T), &v); }
+    inline void         write(T v) { static_assert(std::is_pod_v<T>); write(sizeof(T), &v); }
 
-    template<>
+    template<> 
     inline void write(interned_string str) {
         write((uint16_t)str.length());
         write((uint32_t)str.length(), str.data());

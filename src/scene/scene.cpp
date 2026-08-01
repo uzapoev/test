@@ -298,6 +298,7 @@ void scene::load(const std::string_view& path)
                 renderer::deserialize(component, stream);
 
                 component->mesh_handle = resource_manager::shared()->load(component->mesh_guid, nullptr);
+                component->material_handle = resource_manager::shared()->load(component->material_guid, nullptr);
             } break;
 
             default: 

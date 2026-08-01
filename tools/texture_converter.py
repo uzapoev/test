@@ -25,7 +25,7 @@ def compress_astc(src_png, dst_astc, block_size):
 def compress_dxt(src_png, dst_dds, codec_format):
     """Compresses the temporary PNG into BC/DXT formats using CompressonatorCLI."""
     print(f"[2/2] Compressing to DXT/BC ({codec_format})...")
-    cmd = ["../tools/compressonatorcli/compressonatorcli.exe", "-miplevels", "10", "-NumThreads", "16","-fd", codec_format, src_png, dst_dds]
+    cmd = ["../tools/utils/compressonatorcli/compressonatorcli.exe", "-miplevels", "10", "-NumThreads", "16","-fd", codec_format, src_png, dst_dds]
     #cmd = ["../tools/compressonatorcli/compressonatorcli.exe"]
     cwd = os.getcwd()
     print(f"Current working directory: {cwd}")

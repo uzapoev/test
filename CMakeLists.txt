@@ -3,33 +3,60 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 project(gittest)
 
 
+option(USE_VULKAN "Use Vulcan SDK in project" ON)
+option(USE_WEBGPU_DAWN "Use dawn lib for webgpu in project" ON)
+
+option(USE_QT "Use Qt SDK in project" OFF)
+option(USE_FBX_SDK "Use FBXSDK in project" OFF)
+
 if(WIN32)    
     find_package(Vulkan REQUIRED)
-
-#    include_directories("$ENV{DXSDK_DIR}/Include")
-    include_directories("$ENV{POWERVR_SDK}/Builds/Include")
-#    link_directories("$ENV{DXSDK_DIR}/Lib/x86")
-
-    # Qt
-    include_directories("$ENV{QTSDK_DIR}/Include")
-    link_directories("$ENV{QTSDK_DIR}/Lib")
     
-    # FBXSDK
-    include_directories("$ENV{FBXSDK_DIR}/Include")
-    link_directories("$ENV{FBXSDK_DIR}/lib")
+    if(USE_QT) # Qt
+        include_directories("$ENV{QTSDK_DIR}/Include")
+        link_directories("$ENV{QTSDK_DIR}/Lib")
+    endif()
     
-    #dawn(webgpu)
-    set(WEBGPU_LIB_PATH, "external/dawn")
-    include_directories("${WEBGPU_LIB_PATH}/Include")
-    link_directories("${WEBGPU_LIB_PATH}/lib")
+    if(USE_FBX_SDK) # FBXSDK
+        include_directories("$ENV{FBXSDK_DIR}/Include")
+        link_directories("$ENV{FBXSDK_DIR}/lib")
+        
+        if(EXISTS ${FBX_LIB_PATH})
+          execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FBX_LIB_PATH}/x64/debug/libfbxsdk.dll ${PROJECT_BINARY_DIR} )
+        endif()
+    endif()
     
-    # Vulkan
-    include_directories("$ENV{VULKAN_SDK}/Include")
-    link_directories("$ENV{VULKAN_SDK}")
+    if(USE_WEBGPU_DAWN)
+        set(WEBGPU_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/dawn")
+        
+        if(EXISTS "${WEBGPU_LIB_PATH}")
+            message(STATUS "WebGPU Dawn found at: ${WEBGPU_LIB_PATH}")
+            
+            include_directories("${WEBGPU_LIB_PATH}/include")
+            link_directories("${WEBGPU_LIB_PATH}/bin/win/")
+            
+            execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WEBGPU_LIB_PATH}/x64/debug/webgpu.dll ${PROJECT_BINARY_DIR} )
+            # Automatically copy the DLL after every successful build.
+            # $<LOWER_CASE:$<CONFIG>> dynamically resolves to 'debug' or 'release' 
+            # based on your current build configuration.
+            # Replace 'my_target' with your actual executable/library target name.
+         
+            # add_custom_command(
+            #     TARGET my_target POST_BUILD
+            #     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            #     "${WEBGPU_LIB_PATH}/x64/$<LOWER_CASE:$<CONFIG>>/webgpu.dll"
+            #     "${PROJECT_BINARY_DIR}"
+            #     COMMENT "Copying webgpu.dll to the build directory..."
+            # )
+        else()
+            message(FATAL_ERROR "WEBGPU_LIB_PATH not found at: ${WEBGPU_LIB_PATH}")
+        endif()
+    endif()
     
-    # Dawn library for webgpu
-    include_directories("external/dawn/inc")
-    link_directories("external/dawn/bin/win")
+    if(USE_VULKAN)# Vulkan
+        include_directories("$ENV{VULKAN_SDK}/Include")
+        link_directories("$ENV{VULKAN_SDK}")
+    endif()
 
     add_definitions("-D_CRT_SECURE_NO_WARNINGS")
  
@@ -41,17 +68,8 @@ if(WIN32)
       endif()
     endforeach()
     
-    if(EXISTS ${FBX_LIB_PATH})
-      execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FBX_LIB_PATH}/x64/debug/libfbxsdk.dll ${PROJECT_BINARY_DIR} )
-    endif()
 
-    if(EXISTS ${WEBGPU_LIB_PATH})
-    message("fuckfuckfuckfuckfuckfuckfuckfuckfuck")
-    endif()
 
-   # execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FBX_LIB_PATH}/x64/debug/libfbxsdk.dll ${PROJECT_BINARY_DIR} )
-    execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WEBGPU_LIB_PATH}/x64/debug/webgpu.dll ${PROJECT_BINARY_DIR} )
-    
     # PROJECT_BINARY_DIR PROJECT_SOURCE_DIR
    # message(${PROJECT_BINARY_DIR})
 
@@ -134,8 +152,6 @@ set(SOURCES
     src/scene/scene_json.h
     src/scene/ecs.h
     src/scene/world.h
-    src/scene/render_system.cpp
-    src/scene/render_system.h
     src/json_serializer.h
     src/resource_compiler.h
     src/resource_compiler.cpp
@@ -143,14 +159,12 @@ set(SOURCES
     src/resource_loader.h
     src/resource_manager.cpp
     src/resource_manager.h
-    src/resources.h
     src/common.cpp
     src/common.h
     src/mathlib.h
     src/memmgr.cpp
     src/memmgr.h
 )
-
 
 #list(APPEND SOURCES ${SOURCES_FILES} ${HEADER_FILES} ${EXTERNAL_SRCS})
 #[[

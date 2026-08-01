@@ -11,7 +11,6 @@
 #include "../resource_manager.h"
 #include "../common.h"
 
-#include "render_system.h"
 #include "components.h"
 
 #include "ecs.h"
@@ -100,6 +99,7 @@ public:
         component_camera            = const_hash("camera"),
         component_renderer          = const_hash("renderer"),           // mesh, materials, lightmap, renderparams(cast shadow, etc), occluder
         component_decal             = const_hash("decal"),              // <-- NEW:
+        component_lightprobes       = const_hash("lightprobes"),        // 
         component_reflection_probe  = const_hash("reflection_probe"),   // <-- NEW:
         component_particle_system   = const_hash("particles"),          // <-- NEW: (VFX)
 
@@ -107,7 +107,7 @@ public:
         component_lodgroup          = const_hash("lodgroup"),           // level of details
         component_occlusion         = const_hash("occlusion"),          // occlusion data
         component_streaming         = const_hash("streaming"),          // streaming data
-        component_lightprobes       = const_hash("lightprobes"),        // 
+
         component_volume_profile    = const_hash("volume_profile"),
 
         component_collider          = const_hash("collider"),           // box, sphere, capsule, mesh, trigger
@@ -122,8 +122,10 @@ public:
         component_navobstacle       = const_hash("navobstacle"),        // pathfinding
 
         component_audio_ambient     = const_hash("audio_ambient"),      // 
-        component_audio_room        = const_hash("audio_room"),         // 
+        component_audio_geometry    = const_hash("audio_geometry"),     // room/reflector etc
         component_audio_portal      = const_hash("audio_portal"),       // 
+
+        component_audio_room        = const_hash("audio_room"),         // 
         component_audio_reflector   = const_hash("audio_reflector"),    // 
 
         component_canvas            = const_hash("canvas"),

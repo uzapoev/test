@@ -366,6 +366,7 @@ bool paged_pool_allocator::contains_address(const void* ptr)
     return find_page_for_ptr(ptr) != nullptr;
 }
 
+
 void* paged_pool_allocator::data_by_index(uint32_t index)
 {
     uint32_t page_num = index / m_allocations_per_page;
@@ -384,10 +385,42 @@ void* paged_pool_allocator::data_by_index(uint32_t index)
 
    // uint32_t mask_idx = local_index / 64;
     uint32_t bit_pos = local_index % 64;
-    if(!bitmask_value(current->bitmask, bit_pos))
+    if(!bitmask_value(current->bitmask, local_index))
         return nullptr;
 
     return current->data + (m_allocation_size * local_index);
+}
+
+int32_t paged_pool_allocator::index_by_data(const void* ptr)
+{
+    if (!ptr) return -1;
+
+    uint32_t page_idx = 0;
+    page* current = m_page_head;
+
+    while (current != nullptr) {
+        const char* page_start = current->data;
+        const char* page_end = page_start + m_page_size;
+
+        if ((const char*)ptr >= page_start && (const char*)ptr < page_end) {
+            ptrdiff_t offset = (const char*)ptr - page_start;
+
+            assert(offset % m_allocation_size == 0 && "Pointer is not aligned to block boundary!");
+
+            uint32_t local_idx = static_cast<uint32_t>(offset / m_allocation_size);
+
+            if (!bitmask_value(current->bitmask, local_idx)) {
+                return -1;
+            }
+
+            return static_cast<int32_t>(page_idx * m_allocations_per_page + local_idx);
+        }
+
+        current = current->next;
+        page_idx++;
+    }
+
+    return -1;
 }
 
 

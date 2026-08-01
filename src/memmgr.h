@@ -83,6 +83,8 @@ struct paged_pool_allocator : iallocator
 
     void *              data_by_index(uint32_t index);
 
+    int32_t             index_by_data(const void* ptr);
+
 private:
     struct page {
         page* next = nullptr;
@@ -116,18 +118,18 @@ template<class T>
 struct paged_pool_allocator_t
 {
     paged_pool_allocator_t(iallocator* memory_resource, uint32_t allocation_per_page)
-    :m_allocator(memory_resource, sizeof(T), allocation_per_page) { }
+    :m_ppallocator(memory_resource, sizeof(T), allocation_per_page) { }
 
-    inline T*       allocate()                  { return m_allocator.allocate(sizeof(T), alignof(T)); }
-    inline void     deallocate(T* ptr)          { m_allocator.deallocate(ptr);}
+    inline T*       allocate()              { return static_cast<T*>(m_ppallocator.allocate(sizeof(T), alignof(T))); }
+    inline void     deallocate(T* ptr)      { m_ppallocator.deallocate(ptr);}
 
-    inline T*       get_by_index(uint32_t idx)  { (T*)return m_allocator.data_by_index(idx); }
+    inline T*       get_by_index(uint32_t idx) noexcept { return (T*)m_ppallocator.data_by_index(idx); }
+    inline int32_t  get_index(T* t) noexcept            { return m_ppallocator.index_by_data(t); }
 
 private:
-    paged_pool_allocator                        m_allocator;
+    paged_pool_allocator                                    m_ppallocator;
 };
-
-//
+ 
 //
 //
 class staging_allocator : public iallocator
@@ -139,8 +141,8 @@ public:
     virtual void*   allocate(size_t size, size_t alignment) override;
     virtual void    deallocate(void* memory) override;
     
-    void            trim_to_initial_size();    // Forces buffer shrinking back to initial size if it is empty
-    bool            empty();                // Checks if all allocated blocks have been freed
+    void            trim_to_initial_size();     // Forces buffer shrinking back to initial size if it is empty
+    bool            empty();                    // Checks if all allocated blocks have been freed
 
 private:
     bool            reallocate_buffer(size_t new_size);
@@ -204,85 +206,5 @@ struct memory
 };
 
 typedef void    (*allocation_callback_pfn)(size_t sz, void* ptr, void* data);
-
-////////////////////////
-//
-#if 0
-
-/***************************************************************
- *        MemoryManager
- ***************************************************************/
-
-class MemoryManager
-{
-public:
-     MemoryManager();
-    ~MemoryManager();
-public:
-
-    void    initialize();
-    void    destroy();
-
-    void *  alloc( size_t size );
-    void *  alloc16( size_t size );
-
-    void    free(void *);
-    void    free16(void *);
-
-    void    dump();
-
-//private:
-
-    void Mem_ClearFrameStats( void );
-        
-    void Mem_GetFrameStats(memory_stats_t& allocs, memory_stats_t& frees );
-    void Mem_GetStats(memory_stats_t& stats );
-
-private:
-
-    static void callback(size_t sz, void* ptr, void* data);// throw();
-
-protected:
-    std::mutex        m_mutex;
-
-    struct memblock_t
-    {
-        memblock_t(size_t sz, void* p) :ptr(p), size(sz)    { memset(frames, 0, sizeof(frames)); }
-        memblock_t(const memblock_t& src)                   { size = src.size; ptr = src.ptr; memcpy(frames, src.frames, sizeof(frames)); }
-
-        static const int    k_max_stack_size = 16;
-
-        void*               ptr;
-        size_t              size;
-        intptr_t            frames[16] = {}; // replace to stack frames 
-    };
-
-
-    template<class T>
-    struct internal_allocator
-    {
-        typedef T value_type;
-
-        internal_allocator() = default;
-
-        template<class U>
-        internal_allocator(const internal_allocator <U>&) noexcept {};
-
-        inline T*   allocate(std::size_t n)     noexcept { return (T*)std::malloc(n * sizeof(T)); }
-        inline void deallocate(T* p, size_t n)  noexcept { std::free(p); }
-    };
-
-    using memblock_allocator = internal_allocator< std::pair<const intptr_t, memblock_t>>;
-    using mem_block_map      = std::unordered_map< intptr_t, memblock_t, std::hash<intptr_t>, std::equal_to<intptr_t>, memblock_allocator >;
-
-    mem_block_map   m_blocks;
-
-    template<class T, class U>
-    friend bool operator==(const MemoryManager::internal_allocator <T>&, const MemoryManager::internal_allocator <U>&) { return true; }
-
-    template<class T, class U>
-    friend bool operator!=(const MemoryManager::internal_allocator <T>&, const MemoryManager::internal_allocator <U>&) { return false; }
-};
-#endif
 
 #endif

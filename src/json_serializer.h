@@ -57,9 +57,6 @@ typedef enum field_options {
         _REFLECT_EXPAND_8, _REFLECT_EXPAND_7, _REFLECT_EXPAND_6, _REFLECT_EXPAND_5, \
         _REFLECT_EXPAND_4, _REFLECT_EXPAND_3, _REFLECT_EXPAND_2, _REFLECT_EXPAND_1)(__VA_ARGS__))
 
-
-
-
 #define ReflectObject( CLASS, ... )                 public: static auto reflection_properties() { using Type = CLASS; return std::make_tuple(__VA_ARGS__); }   
 #define ReflectObjectInherited( CLASS, BASE, ... )  public: static auto reflection_properties() { using Type = CLASS; return std::tuple_cat(std::make_tuple(__VA_ARGS__), reflection::get_properties<BASE>()); }
 #define ReflectObjectExternal( CLASS, ...)          template <> inline auto reflection_properties<CLASS>() { using Type = CLASS; return std::make_tuple(__VA_ARGS__); }
@@ -69,7 +66,7 @@ typedef enum field_options {
 #define ReflectObjectField(FIELD)                   reflection::make_property(&Type::FIELD, #FIELD)
 #define ReflectObjectFieldWithKey(KEY, FIELD)       reflection::make_property(&Type::FIELD, KEY)
 
-template<class T> inline auto                       reflection_properties() {  } // return "void", if reflection::get_reflection<TYPE>() 
+template<class T> inline auto                       reflection_properties() {  } // should be empty, if object doesn't have reflection data it will return "void"
 
 
 namespace reflection
@@ -162,7 +159,7 @@ namespace reflection
                 base_field = arg;
          });
 
-        auto field_type_index =  type_registry::get_type_index<U>();
+        auto field_type_index = type_registry::get_type_index<U>();
 
         if (base_field != nullptr && field_type_index == base_field->type_index)
         {

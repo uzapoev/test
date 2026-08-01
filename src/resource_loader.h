@@ -6,6 +6,7 @@
 
 struct render_mesh_t;
 struct mesh_pool_t;
+struct image_t;
 
 extern uint32_t read_file_data(const char* path, char** data);
 
@@ -13,6 +14,9 @@ extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size
 
 extern bool     load_mesh_from_file_path(gfx_context_t* ctx, mesh_pool_t* pool, const char* path, render_mesh_t* out_mesh);
 extern void     load_mesh_from_file_data(gfx_context_t* ctx, mesh_pool_t* pool, const char* name, char* data, uint32_t size, render_mesh_t* out_mesh);
+
+extern void     load_image_from_file_path(const char* path, image_t ** out_image);
+extern void     load_image_from_file_data(const char* name, char* data, uint32_t size, image_t ** out_image);
 
 extern void     load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_texture_t** out_texture);
 extern void     load_texture_from_file_data(gfx_context_t* ctx, const char* name, char* data, uint32_t size, gfx_texture_t** out_texture);
