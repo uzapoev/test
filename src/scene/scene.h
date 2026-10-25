@@ -19,21 +19,6 @@ constexpr uint32_t const_hash(char const* input) {
     return *input ? static_cast<uint32_t>(*input) + 33 * const_hash(input + 1) : 5381;
 }
 
-// https://github.com/suVrik/acceleration_structure_benchmark
-struct itree
-{   
-    struct node{};
-    virtual void add(aabbox box, void * userdata)       = 0;
-    virtual void rem(void* userdata)                    = 0;
-
-    virtual void query(vec4 sphere, std::vector<node*> /*component_type */)  = 0;
-    virtual void query(aabbox box,  std::vector<node*> /*component_type */)  = 0;
-    virtual void query(frustum fr,  std::vector<node*> /*component_type */)  = 0;
-};
-
-struct kdtree   : itree {};
-struct octree   : itree {};
-struct quadtree : itree {};
 
 
 struct camera : icomponent
@@ -93,13 +78,13 @@ public:
         scene_meta_data             = const_hash("meta"),
 
         component_node              = const_hash("node"),               // name, guid, tag, flags
-        component_hierarchy         = const_hash("hierarhy"),           // parent, childs;
+        component_hierarchy         = const_hash("hierarchy"),          // parent, childs;
         component_transform         = const_hash("transform"),          // 
 
         component_camera            = const_hash("camera"),
         component_renderer          = const_hash("renderer"),           // mesh, materials, lightmap, renderparams(cast shadow, etc), occluder
         component_decal             = const_hash("decal"),              // <-- NEW:
-        component_lightprobes       = const_hash("lightprobes"),        // 
+        component_lightprobes       = const_hash("lightprobes"),        // sh/sg
         component_reflection_probe  = const_hash("reflection_probe"),   // <-- NEW:
         component_particle_system   = const_hash("particles"),          // <-- NEW: (VFX)
 
@@ -122,7 +107,7 @@ public:
         component_navobstacle       = const_hash("navobstacle"),        // pathfinding
 
         component_audio_ambient     = const_hash("audio_ambient"),      // 
-        component_audio_geometry    = const_hash("audio_geometry"),     // room/reflector etc
+        component_audio_geometry    = const_hash("audio_geometry"),     // room/reflector/reverbzone etc
         component_audio_portal      = const_hash("audio_portal"),       // 
 
         component_audio_room        = const_hash("audio_room"),         // 

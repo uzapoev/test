@@ -24,7 +24,7 @@ extern void     load_texture_from_file_data(gfx_context_t* ctx, const char* name
 extern void     load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader_t** out_shader);
 extern void     load_shader_from_file_data(gfx_context_t* ctx, const char* name, char* data, uint32_t size, gfx_shader_t** out_shader);
 
-extern void     load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_instance_t** insance);
-extern void     load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_instance_t** insance);
+extern void     load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_t* insance);
+extern void     load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_t* insance);
 
 #endif 

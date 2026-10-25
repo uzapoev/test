@@ -148,7 +148,7 @@ static WGPUShaderStage gfx_shader_stage_2_webgpu(gfx_shader_stage stage)
         case gfx_shader_vertex:   return WGPUShaderStage_Vertex;
         case gfx_shader_fragment: return WGPUShaderStage_Fragment;
         case gfx_shader_compute:  return WGPUShaderStage_Compute;
-        default: return WGPUShaderStage::WGPUShaderStage_None;
+        default: return WGPUShaderStage_None;
     }
 }
 
@@ -788,7 +788,7 @@ void wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_
     if (desc->mapped /*|| desc->usage == gfx_buffer_usage_uniform*/)
         mapped = true;
 
-    WGPUBufferUsageFlags usage = WGPUBufferUsage_None;
+    WGPUBufferUsage usage = WGPUBufferUsage_None;
     switch(desc->usage) {
         case gfx_buffer_usage_staging:   usage = WGPUBufferUsage_MapWrite   | WGPUBufferUsage_CopySrc; break;
         case gfx_buffer_usage_index:     usage = WGPUBufferUsage_Index      | WGPUBufferUsage_CopyDst; break;
@@ -903,7 +903,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
         uniform_count = get_shader_uniforms((uint32_t*)desc->stages[stageIdx].data,
                                             desc->stages[stageIdx].size, uniforms, &entry);
 
-        WGPUShaderStageFlags visibility = WGPUShaderStage_None;
+        WGPUShaderStage visibility = WGPUShaderStage_None;
         switch(stage)
         {
             case gfx_shader_vertex:

@@ -24,7 +24,7 @@ enum class task_status : uint8_t {
 struct task_handle_t {
     uint32_t id = 0;
     uint32_t generation = 0; 
-}; 
+};
 
 class ThreadPool 
 {
@@ -51,13 +51,13 @@ public:
 
 private:
     struct Task {
-        std::function<void()>       fn; // todo: replace to "void (*pfn)(void* user_data);"
-        std::atomic<uint32_t>       generation = { 1 };
-        std::atomic<task_status>    status = task_status::Invalid;
-        std::atomic<uint32_t>       dependency_count = 0;
+        std::function<void()>       fn                  = []{}; // todo: replace to "void (*pfn)(void* user_data);"
+        std::atomic<uint32_t>       generation          = 1;
+        std::atomic<task_status>    status              = task_status::Invalid;
+        std::atomic<uint32_t>       dependency_count    = 0;
 
-        uint32_t                    num_continuations = 0;
-        task_handle_t                  continuations[kMaxContinuations]{};
+        uint32_t                    num_continuations   = 0;
+        task_handle_t               continuations[kMaxContinuations]{};
     };
 
 private:
@@ -73,13 +73,12 @@ private:
 
     void            execute(task_handle_t handle);
 
-
 private:
     Task                        m_tasks[kMaxTasks];
-    task_handle_t                  m_queue[kMaxTasks];
+    task_handle_t               m_queue[kMaxTasks];
     uint32_t                    m_free_list[kMaxTasks];
 
-    uint32_t                    m_free_count = 0;
+    uint32_t                    m_free_count = 0;   
     uint32_t                    m_queue_head = 0;
     uint32_t                    m_queue_tail = 0;
 

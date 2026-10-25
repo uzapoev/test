@@ -9,7 +9,7 @@
 * 
 *   gfx_surface_desc_t surface_desc = { 0 };
 *       surface_desc.label              = "main_view";
-*       surface_desc.window_handle      = handle;
+*       surface_desc.window_handle      = handle; //HWND
 *       surface_desc.vsync              = true;
 *       surface_desc.preferred_format   = gfx_pixel_format_rgba8;
 *       surface_desc.sample_count       = gfx_sample_1x;
@@ -1356,7 +1356,7 @@ typedef struct gfx_rt_geometry_desc_t {
     gfx_buffer_t*               vertex_buffer;          /**< Hardware buffer containing triangle vertex position data */
     uint32_t                    vertex_stride;          /**< Stride spacing in bytes separating vertex data rows */
     uint32_t                    vertex_count;           /**< Total number of vertices in the stream */
-    gfx_format           vertex_format;          /**< Data layout component encoding format (usually float3 or float4) */
+    gfx_format                  vertex_format;          /**< Data layout component encoding format (usually float3 or float4) */
 
     gfx_buffer_t*               index_buffer;           /**< Optional hardware buffer containing geometry indices data */
     uint32_t                    index_count;            /**< Number of indices (set to 0 for non-indexed triangle lists) */
@@ -1530,10 +1530,18 @@ gfx_api void gfx_cmd_trace_ray_query(gfx_command_buffer_t* cmd, gfx_acceleration
 // ============================================================================
 
 uint32_t            gfx_utils_thread_id();
+
 uint32_t            gfx_utils_hash(const void * data, uint32_t size, uint32_t seed = 0);
+
 gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format);
+
 gfx_api uint32_t    gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width);
+
 gfx_api uint32_t    gfx_utils_align_up(uint32_t n, uint32_t alignment);
+
+gfx_api uint64_t    gfx_make_handle(uint32_t idx, uint16_t generation, uint8_t payload0, uint8_t payload1);
+
+gfx_api void        gfx_unpak_handle(uint64_t handle, uint32_t *out_idx, uint16_t* out_generation, uint8_t* out_payload0, uint8_t* out_payload1);
 
 inline uint32_t     gfx_utils_ctz64(uint64_t x) {
     assert(x != 0);

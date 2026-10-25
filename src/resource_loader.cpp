@@ -602,7 +602,7 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
     *out_shader = gfx_shader_create(ctx, &shader_desc);
 }
 
-void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_instance_t** material)
+void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_t* material)
 {
     char* data = nullptr;
 
@@ -614,8 +614,9 @@ void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct m
     free(data);
 }
 
-void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_instance_t** out_insance)
+void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_t* out_matterial)
 {
+    if(data == nullptr || size == 0) return;
   //  (*out_insance)->
   //  std::string jstr(data, size);
   //  json::from_json<gfx_material_instance_t>(jstr);

@@ -10,9 +10,9 @@
     #define WEBGPU_AVAILABLE
     #include <emscripten/html5.h>  // js call
     #include <emscripten/html5_webgpu.h>
-#elif __has_include(<webgpu/webgpu.h>)
+#elif __has_include(<webgpu.h>)
     #define WEBGPU_AVAILABLE
-    #include <webgpu/webgpu.h>
+    #include <webgpu.h>
 #endif
 
 #ifdef WEBGPU_AVAILABLE

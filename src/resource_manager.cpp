@@ -2,6 +2,11 @@
 #include "resource_loader.h"
 #include "json_serializer.h"
 
+
+static constexpr uint16_t INVALID_SLOT_INDEX = 0xFFFF;
+static constexpr uint16_t INVALID_POOL_INDEX = 0xFFFF;
+static constexpr uint32_t INVALID_INSTANCE_ID = 0xFFFFFFFF;
+
 struct jmeta
 {
     std::string guid;
@@ -26,6 +31,17 @@ static bool is_meta_file(const char* file)
     if (ext && !strcmp(ext, ".jmeta")) return true;
 
     return false;
+}
+
+static bool need_recompile(const char* src, const char* dst, const char* meta)
+{
+    if (!std::filesystem::exists(dst)) return true;
+    if (!std::filesystem::exists(meta)) return true;
+
+    auto src_time = std::filesystem::last_write_time(src);
+    auto meta_time = std::filesystem::last_write_time(meta);
+    auto cooked_time = std::filesystem::last_write_time(dst);
+    return src_time > cooked_time || meta_time > cooked_time;
 }
 
 static asset_type deduce_asset_type(const char* file)
@@ -129,6 +145,62 @@ bool parse_name_with_guid_hand(const char* filename, char* out_name, guid_t* out
     return false;
 }
 
+bool asset_load_mesh(struct resource_manager& mgr, asset_io_blob_t& blob, asset_slot_t& slot)
+{
+ /*   render_mesh_t* mesh = mgr.m_render_meshes.allocate();
+    int32_t index = m_render_meshes.get_index(mesh);
+
+    load_mesh_from_file_data(mgr.ctx(), &m_mesh_pool, blob.asset_name, (char*)blob.cpu_data, blob.data_size, mesh);
+
+    if (mesh->index_buffer == nullptr || mesh->vertex_buffer == nullptr)
+    {
+        m_render_meshes.deallocate(mesh);
+        return false;
+    }
+
+    slot.state = asset_state::ready;
+    slot.index_in_pool = index > 0 ? index : 0;
+    */
+    return false;
+}
+
+bool asset_load_texture(struct resource_manager& mgr, asset_io_blob_t& blob, asset_slot_t& slot)
+{
+    return false;
+}
+
+asset_handle_t material_manager::create_instance(class resource_manager& m, asset_handle_t handle)
+{
+    asset_slot_t* base_slot = m.slot_validate_and_get(handle);
+    assert(base_slot && base_slot->type == asset_type_material);
+
+    auto base_material = m.get_material(handle);
+    uint16_t inst_id = 0;
+ /*   uint16_t inst_id = m_instance_pool.allocate();
+
+    material_instance_t* inst = &m_instances[inst_id];
+    inst->base_handle = base_handle;
+    inst->descriptor_set = allocate_vk_descriptor_set(base_slot);
+    */
+    asset_handle_t instance_handle = handle;
+    instance_handle.instance_id = inst_id;
+
+    return instance_handle;
+}
+
+void material_manager::destroy_instance(asset_handle_t instance_handle)
+{/*
+    if (instance_handle.instance_id == 0) return; // base material - do't unload
+
+    uint16_t inst_id = instance_handle.instance_id;
+    material_instance_t* inst = &m_instances[inst_id];
+
+    gfx_descriptor_set_destroy(inst->descriptor_set);
+
+    m_instance_pool.free(inst_id);*/
+}
+
+
 
 
 void material_manager::set_global_texture(uint64_t id, asset_handle_t texture_handle)
@@ -137,8 +209,6 @@ void material_manager::set_global_texture(uint64_t id, asset_handle_t texture_ha
 void material_manager::set_global_texture(const char* name, asset_handle_t texture_handle)
 {
 }
-
-
 
 void material_manager::set_global_data(uint64_t id, void* data, uint32_t size)
 {
@@ -171,11 +241,35 @@ void material_manager::set_global_data(const char* name, void* data, uint32_t si
     set_global_data(id, data, size);
 }
 
-void material_manager::set_texture(asset_handle_t material, uint64_t id, asset_handle_t texture_handle)
+void material_manager::set_texture(asset_handle_t material_handle, uint64_t id, asset_handle_t texture_handle)
 {
+    auto mat_instance = m_resource_manager->get_material_instance(material_handle);
+    if(!mat_instance) return;
+
+    auto texture = m_resource_manager->get_texture(texture_handle);
+    if (!texture) return;
+
+    gfx_descriptor_set_write_texture(mat_instance->descriptor_set, id, texture->texture_handle);
+
+    // get prev texture and release it
+   /* for(int i = 0; i < material->texture_count; ++i)
+    {
+        if(material->texture[i].id == id)
+        {
+            auto old_texture = material->texture[i].handle;
+            auto new_texture = texture_handle;
+
+            m_resource_manager->retain(new_texture);
+            m_resource_manager->release(old_texture);
+            material->texture[i].handle = texture_handle;
+        }
+    };*/
 }
-void material_manager::set_texture(asset_handle_t material, const char* name, asset_handle_t texture_handle)
+
+void material_manager::set_texture(asset_handle_t material_handle, const char* name, asset_handle_t texture_handle)
 {
+  //  uint64_t unfirm = gfx_uniform_location(m_gfx, name);
+  //  set_texture(material_handle, unfirm, texture_handle);
 }
 
 void material_manager::set_data(asset_handle_t material, uint64_t id, const void* data, uint32_t size)
@@ -187,16 +281,25 @@ void material_manager::set_data(asset_handle_t material, const char* name, const
 
 
 
-
-
-
 resource_manager * resource_manager::s_shared = nullptr;
 
-resource_manager* resource_manager::create_and_make_shared(gfx_context_t* ctx)
+resource_manager::resource_manager(gfx_context_t* ctx, iallocator* memory_resource)
+:m_ctx(ctx)
+,m_allocator(memory_resource)
+,m_textures(memory_resource, 1024)
+,m_render_meshes(memory_resource, 1024)
+,m_materials(memory_resource, 1024)
+,m_material_instances(memory_resource, 1024)
+,m_shaders(memory_resource, 1024)
+{ 
+    s_shared = this; 
+}
+
+resource_manager* resource_manager::create_and_make_shared(gfx_context_t* ctx, iallocator* memory_resource)
 {
     if (s_shared == nullptr) 
     {
-        s_shared = new resource_manager(ctx);
+        s_shared = new resource_manager(ctx, memory_resource);
         s_shared->init(platform_type_pc);
     }
     return s_shared;
@@ -207,19 +310,16 @@ void resource_manager::init(platform_type type, const char* cash_path)
 {
     const char * platform_name = platform_string(type);
 
-    cash_path = cash_path? cash_path : "cash";
     char cahs_dir[256] = "";
-    sprintf(cahs_dir, "%s/%s/", cash_path, platform_name);
+    sprintf(cahs_dir, "%s/%s/", cash_path ? cash_path : "cash", platform_name);
     m_cash_path.assign(cahs_dir);
 
-    m_allocator = new aligned_allocator("resource_manager");
-    m_staging_allocator = new staging_allocator(m_allocator, 4*1024*1024, true);    
+    m_staging_allocator = new staging_allocator(m_allocator, 4*1024*1024, true);
+    
     
     gfx_shader_t* test = nullptr;
     load_shader_from_file_path(m_ctx, "../data/shaders/test.hlsl", &test);
-
     load_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
-
 
   //  create_mesh_pool(m_ctx, (64)*1024*1024, (8)*1024*1024, &m_mesh_pool);
     create_mesh_pool(m_ctx, 380*1024*1024, 32*1024*1024, &m_mesh_pool);
@@ -249,14 +349,24 @@ void resource_manager::init(platform_type type, const char* cash_path)
         piplene_desc.render_states.blend.color_dst  = gfx_blend_mode_inv_src_alpha;// VK_BLEND_FACTOR_SRC_ALPHA;
     m_default_pipeline = gfx_pipeline_create(m_ctx, &piplene_desc);
 
-    //m_meshes.reserve(1024);
-    //m_textures.reserve(1024);
-
-   // m_texture_allocator = new paged_pool_allocator(m_allocator, sizeof())
+    m_slots_capacity = 16384;
+    m_slots = (asset_slot_t*)m_allocator->allocate(sizeof(asset_slot_t) * m_slots_capacity, alignof(asset_slot_t));
+    for(uint32_t i = 0; i < m_slots_capacity; ++i)
+    {
+        uint16_t idx = static_cast<uint16_t>(i);
+        
+        m_slots[idx].handle.slot_index =  (i + 1 < m_slots_capacity) ? static_cast<uint16_t>(i + 1) : INVALID_SLOT_INDEX;;
+        m_slots[idx].handle.generation = 1;
+        m_slots[idx].handle.instance_id = 0;
+        
+        m_slots[idx].state = asset_state::empty;
+        m_slots[idx].type = asset_type_unknown;
+    }
 }
 
 void resource_manager::set_assets_path(const std::string & dir)
 {
+    measure ms("resource_manager::set_assets_path");
     if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir) || (m_dirs.find(dir) != m_dirs.end()) ) {
         return;
     }
@@ -286,12 +396,22 @@ void resource_manager::set_assets_path(const std::string & dir)
         if (relative_parent == ".")
             relative_parent = "";
 
+        char guid_str_buf[64] = "";
         char cooked_filename[256] = "";
         const char * extension = compiled_asset_extension(type);
         extension = extension ? extension : ext.c_str();
-        make_cooked_filename_buf(stem.c_str(), asset_guid, type, extension, cooked_filename, sizeof(cooked_filename));
+        //make_cooked_filename_buf(stem.c_str(), asset_guid, type, extension, cooked_filename, sizeof(cooked_filename));
+        if(type == asset_type_scene) {
+            sprintf(cooked_filename, "%s%s", stem.c_str(), extension);
+        } else {
+            sprintf(cooked_filename, "%s%s", uuid::guid_to_str(asset_guid, guid_str_buf), extension);
+        }
 
         char cooked_filepath[256] = "";
+      //  !m_cash_path.empty()?strcat(cooked_filepath, m_cash_path.c_str()):"";
+      //  !relative_parent.empty()?strcat(cooked_filepath, relative_parent.c_str()):"";
+      //  strcat(cooked_filepath, cooked_filename);
+
         snprintf(cooked_filepath, sizeof(cooked_filepath), "%s/%s/%s",
             m_cash_path.c_str(), relative_parent.c_str(), cooked_filename);
 
@@ -299,9 +419,8 @@ void resource_manager::set_assets_path(const std::string & dir)
         
         if(need_recompile(u8path.c_str(), cooked_filepath, meta_path.c_str()))
         {
-            auto asset_compiler = m_compilers[type];
-            if(asset_compiler != nullptr){
-                asset_compiler(u8path.c_str(), cooked_filepath, meta_path.c_str(), m_platform_type, this);
+            if(m_compilers[type] != nullptr){
+                m_compilers[type](u8path.c_str(), cooked_filepath, meta_path.c_str(), m_platform_type, this);
             } else {
                 debug::log_error("no compiler for resource: %s", u8path.c_str());
             }
@@ -312,18 +431,18 @@ void resource_manager::set_assets_path(const std::string & dir)
             return;
         }
 
-        char guid_str[33] = "";
-        m_path_to_guid.emplace(u8path.c_str(), asset_guid);
+       // char guid_str[33] = "";
+        m_path_2_guid.emplace(u8path.c_str(), asset_guid);
         m_guid_2_path.emplace(asset_guid, std::filesystem::path(cooked_filepath));
-        m_guid_to_guid.emplace(uuid::guid_to_str(asset_guid, guid_str), asset_guid);
 
         file_info_t info        = {};
         info.type               = type;
-        info.guid               = uuid::runtime_guid(asset_guid);
+        info.guid_rt            = uuid::runtime_guid(asset_guid);
+        info.guid               = asset_guid;
         info.size               = (uint32_t)std::filesystem::file_size(cooked_filepath);
         info.compressed_size    = info.size;
         info.path               = interned_string(cooked_filepath).c_str();
-        m_file_infos.emplace(info.guid, info);
+        m_file_infos.emplace(info.guid_rt, info);
     });
 }
 
@@ -367,44 +486,6 @@ std::vector<char> resource_manager::file_data(const std::string_view & path)
     
     return data;
 }
-
-
-std::shared_ptr<material_t> resource_manager::load_material(const char * name, gfx_shader_t* shader)
-{
-    auto instance = load_material_instance(name);
-    if(instance == nullptr)
-        return nullptr;
-
-    auto material = std::make_shared<material_t>();
-    material->instance = instance;
-    material->descriptor_set = gfx_descriptor_set_create(m_ctx, instance->shader, 0);
-    
-    for(size_t i = 0; i < _countof(instance->textures); ++i)
-    {
-        uint64_t handle = gfx_uniform_location(instance->shader, instance->textures[i].key.c_str());
-        if(handle && instance->textures[i].value)
-            gfx_descriptor_set_write_texture(material->descriptor_set, handle, instance->textures[i].value);
-    }
-
-    for (size_t i = 0; i < _countof(instance->vectorsf); ++i)
-    {
-        uint64_t handle = gfx_uniform_location(instance->shader, instance->vectorsf[i].key.c_str());
-        if (handle)
-            gfx_descriptor_set_write_buffer_data(material->descriptor_set, handle, &instance->vectorsf[i].value, sizeof(vec4));
-    }
-
-    m_materials.push_back(material);
-    
-    return material;
-}
-
-
-/*
-texture* resource_manager::load_texture(const char* name)
-{
-    return m_texture_manager.load(name, false, nullptr);
-}*/
-
 
 
 material_instance_t* resource_manager::load_material_instance(const std::string_view& guid)
@@ -469,10 +550,8 @@ guid_t resource_manager::get_or_create_guid(const char* path, const char * meta_
 
     if(meta_path && std::filesystem::exists(meta_path))
     {
-        char* data = nullptr;
-        size_t size = read_file_data(meta_path, &data);
-        auto meta = json::from_json_string<jmeta>(size, data);
-        if(data) free(data);
+        auto data = file_data(meta_path);
+        auto meta = json::from_json_string<jmeta>(data.size(), data.data());
         if(uuid::is_guid_str(meta.guid.c_str()))
             return uuid::str_to_guid(meta.guid.c_str());
         else
@@ -493,16 +572,6 @@ guid_t resource_manager::get_or_create_guid(const char* path, const char * meta_
     return uuid::generate_from_seed(path_hash);
 }
 
-bool resource_manager::need_recompile(const char* src, const char* compiled, const char* meta)
-{
-    if(!std::filesystem::exists(compiled)) return true;
-    if(!std::filesystem::exists(meta)) return true;
-
-    auto src_time = std::filesystem::last_write_time(src);
-    auto meta_time = std::filesystem::last_write_time(meta);
-    auto cooked_time = std::filesystem::last_write_time(compiled);
-    return src_time > cooked_time || meta_time > cooked_time;
-}
 
 void resource_manager::set_compiler(asset_type type, asset_compile_func_t func)
 {
@@ -518,74 +587,112 @@ asset_handle_t resource_manager::load(const char* path, load_params_t* params)
     return load(guid, params);
 }
 
+
 asset_handle_t resource_manager::load(guid_t guid, load_params_t* param)
 {
+    if(guid == 0) return INVALID_ASSET_HANDLE;
+
     uint64_t fileid = uuid::runtime_guid(guid);
 
-    if (fileid == 0) {
-        //  debug::log_error("no file at path: %d", path);
-        return INVALID_ASSET_HANDLE;
-    }
-    char guidstr[33] = "";
-    uuid::guid_to_str(guid, guidstr);
-
     if(asset_slot_t* slot = get_slot(fileid)) {
+        if(slot->type == asset_type_material)
+        {
+            auto instance = create_material_instance(slot->handle);
+            debug::log_warning("");
+        }
         slot->ref_count++;
         return slot->handle;
     }
 
     if(file_info_t* file = get_file_info(fileid)) {
-        asset_slot_t slot = {};
+
+        
+        auto handle2 = slot_allocate(fileid, file->type);
+        auto slot = slot_validate_and_get(handle2);
+
+        auto loader = m_loaders[(uint32_t)file->type];
+
 
         const char * dbg_name = strrchr(file->path, '/');
-        slot.guid = fileid;
-        slot.state = asset_state::loading;
-        slot.type = file->type;
-
-        slot.handle.generation++;
-        slot.handle.slot_index = (uint32_t)m_slots.size();
-
+        slot->state = asset_state::loading;
         auto blob = read_asset_blob(file);
 
-        if(slot.type == asset_type_mesh) 
+        if(slot->type == asset_type_mesh) 
         {
-            render_mesh_t mesh = {};
-            load_mesh_from_file_data(m_ctx, &m_mesh_pool, dbg_name, (char*)blob.cpu_data, blob.data_size, &mesh);
-            //load_mesh_from_file_path(m_ctx, &m_mesh_pool, file->debug_path, &mesh);
-            slot.state = asset_state::ready;
+            render_mesh_t *mesh = m_render_meshes.allocate();
+            int32_t index = m_render_meshes.get_index(mesh);
+            load_mesh_from_file_data(m_ctx, &m_mesh_pool, dbg_name, (char*)blob.cpu_data, blob.data_size, mesh);
 
-            m_render_meshes.emplace_back(mesh);
-            slot.index_in_pool = (uint32_t)m_render_meshes.size() - 1;
+            if(mesh->index_buffer == nullptr || mesh->vertex_buffer == nullptr)
+            {
+                m_render_meshes.deallocate(mesh);
+                free_asset_blob(&blob);
+                return {};
+            }
+
+            slot->state = asset_state::ready;
+            slot->index_in_pool = index > 0 ? index : 0;
         }
-        if(slot.type == asset_type_texture)
+        if(slot->type == asset_type_texture)
         {
-            gfx_texture_t * texture_handlde = nullptr;
-            load_texture_from_file_data(m_ctx, dbg_name, (char*)blob.cpu_data, blob.data_size, &texture_handlde);
+            gfx_texture_t * texture_handle = nullptr;
+            load_texture_from_file_data(m_ctx, dbg_name, (char*)blob.cpu_data, blob.data_size, &texture_handle);
 
-            slot.state = asset_state::ready;
-
-            texture_t texture = { texture_handlde };
-            m_textures_new.emplace_back(texture);
-            slot.index_in_pool = (uint32_t)m_textures_new.size();
+            if(texture_handle != nullptr)
+            {
+                slot->state = asset_state::ready;
+                auto texture = m_textures.allocate();
+                auto index = m_textures.get_index(texture);
+                texture->texture_handle = texture_handle;
+                slot->index_in_pool = index;
+            }
+            
         }
-        if (slot.type == asset_type_material) 
+        if (slot->type == asset_type_material)
         {
-            assert(false);
+            material_t material = {};
+            load_material_from_file_data(m_ctx, (char*)blob.cpu_data, blob.data_size, &material);
+            material.manager = this;
+            material.pipeline = m_default_pipeline;
+            material.shader = m_default_shader;
+            /*m_material_instances_new.emplace_back(instance);
+
+            material_instance_t material = {};
+            material.instance = &base_material;
+            auto set = gfx_descriptor_set_create(m_ctx, m_default_shader, 0);
+            m_materials_new.emplace_back(material);
+
+            slot->index_in_pool = (uint32_t)m_materials_new.size();*/
         }
 
         free_asset_blob(&blob);
         // job_system_push_io_request(slot->guid, handle.id, desired_mip);
 
-        m_guid_to_loaded_asset_slots.emplace(fileid, slot);
-        m_slots.emplace_back(slot);
+        m_guid_2_slots.emplace(fileid, slot);
 
-        return slot.handle;
+        return slot->handle;
     }
 
     return {0};
 }
 
+void resource_manager::release(asset_handle_t handle)
+{
+    asset_slot_t* slot = slot_validate_and_get(handle);
+    if(!slot) return;
 
+    if (slot->ref_count > 0 && ((--slot->ref_count) == 0))
+    {
+        slot_free(handle);
+
+        switch (slot->type)
+        {
+            case asset_type_texture:    break;
+            case asset_type_material:   break;
+            case asset_type_mesh:       break;
+        }
+    }
+}
 
 void resource_manager::set_cash_path(const char* path)
 {
@@ -608,18 +715,113 @@ void resource_manager::set_cash_path(const char* path)
 
 void resource_manager::set_dlc_path(const char* path)
 {
+    debug::log_error("resource_manager::set_dlc_path() - not implemented");
 }
 
 asset_slot_t* resource_manager::get_slot(uint64_t runtime_guid)
 {
-    auto it = m_guid_to_loaded_asset_slots.find(runtime_guid);
-    return it != m_guid_to_loaded_asset_slots.end() ? &it->second : nullptr;
+    auto it = m_guid_2_slots.find(runtime_guid);
+    return it != m_guid_2_slots.end() ? it->second : nullptr;
 }
 
 file_info_t* resource_manager::get_file_info(uint64_t runtime_guid)
 {
     auto it = m_file_infos.find(runtime_guid);
     return it != m_file_infos.end() ? &it->second : nullptr;
+}
+
+void resource_manager::update()
+{
+    gc_process();
+    perform_resource_uploading();
+}
+
+void resource_manager::wait(asset_handle_t handle)
+{
+    debug::log_error("resource_manager::wait no implemented");
+
+    const uint32_t idx = handle.slot_index;
+    if (idx >= m_slots_capacity) return;
+
+    asset_slot_t& slot = m_slots[idx];
+    if (slot.handle.generation != handle.generation) return;
+
+    if (slot.state == asset_state::ready) return;
+
+
+    if(slot.state == asset_state::loading)
+    {
+       //auto request = job_steal_request(slot.guid);
+       // load_internal(request.guid);
+
+       // slot.state = asset_state::ready;
+    }
+}
+
+
+
+asset_handle_t  resource_manager::slot_allocate(uint64_t guid_rt, asset_type type)
+{
+    if (m_first_free_slot == INVALID_SLOT_INDEX) {
+        return INVALID_ASSET_HANDLE;
+    }
+
+    const uint16_t slot_idx = m_first_free_slot;
+    asset_slot_t* slot = &m_slots[slot_idx];
+
+    m_first_free_slot = slot->handle.slot_index;
+
+    slot->handle.slot_index = slot_idx;
+    slot->handle.instance_id = 0;
+
+    slot->guid_rt = guid_rt;
+    slot->index_in_pool = INVALID_POOL_INDEX;
+    slot->ref_count = 1;
+    slot->type = type;
+    slot->state = asset_state::queued;
+
+    m_allocated_count++;
+
+    return slot->handle;
+}
+
+void resource_manager::slot_free(asset_handle_t handle)
+{
+    asset_slot_t* slot = slot_validate_and_get(handle);
+    if (!slot) return;
+
+    uint16_t next_gen = slot->handle.generation + 1;
+    if (next_gen == 0) next_gen = 1;
+    slot->handle.generation = next_gen;
+
+    slot->guid_rt = 0;
+    slot->ref_count = 0;
+    slot->type = asset_type_unknown;
+    slot->state = asset_state::empty;
+    slot->index_in_pool = INVALID_POOL_INDEX;
+
+    slot->handle.slot_index = m_first_free_slot;
+    m_first_free_slot = handle.slot_index; 
+
+    m_allocated_count--;
+}
+
+
+asset_handle_t resource_manager::create_material_instance(asset_handle_t handle)
+{
+    asset_slot_t* slot = slot_validate_and_get(handle);
+    if(slot->type != asset_type_material)
+        return INVALID_ASSET_HANDLE;
+
+    //debug::breakpoint();
+    return INVALID_ASSET_HANDLE;
+    //m_material_mananget
+}
+
+void resource_manager::gc_process()
+{
+    if(m_gc_handles.empty()) return;
+
 }
 
 asset_io_blob_t resource_manager::read_asset_blob(file_info_t* info)
@@ -643,6 +845,12 @@ void resource_manager::free_asset_blob(asset_io_blob_t* blob)
         m_staging_allocator->deallocate(blob->cpu_data);
         memset(blob, 0, sizeof(asset_io_blob_t));
     }
+}
+
+
+asset_handle_t resource_manager::load_material(asset_io_blob_t & blob)
+{
+    return INVALID_ASSET_HANDLE;
 }
 
 
