@@ -21,10 +21,9 @@ enum class task_status : uint8_t {
     Done
 };
 
-struct task_handle_t {
-    uint32_t id = 0;
-    uint32_t generation = 0; 
-};
+// opaque: low 32 bits - slot index, high 32 bits - generation (0 is never a valid generation)
+typedef uint64_t task_handle_t;
+constexpr task_handle_t kInvalidTask = 0;
 
 class ThreadPool 
 {

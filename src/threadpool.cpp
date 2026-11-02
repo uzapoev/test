@@ -1,6 +1,9 @@
-#include "threads.h"
+#include "threadpool.h"
 #include <cassert>
 
+static inline task_handle_t make_handle(uint32_t id, uint32_t generation) { return (uint64_t(generation) << 32) | id; }
+static inline uint32_t      handle_id(task_handle_t h)                    { return uint32_t(h & 0xFFFFFFFFull); }
+static inline uint32_t      handle_gen(task_handle_t h)                   { return uint32_t(h >> 32); }
 
 ThreadPool::ThreadPool(uint32_t worker_count) 
 {
@@ -16,7 +19,7 @@ ThreadPool::ThreadPool(uint32_t worker_count)
     for (uint32_t i = 0; i < worker_count; ++i) {
         m_workers.emplace_back([this] { 
             while (!m_shutdown.load()) {
-                if (task_handle_t h; try_pop(&h)) {
+                if (task_handle_t h = kInvalidTask; try_pop(&h)) {
                     execute(h);
                     continue;
                 }
@@ -75,7 +78,7 @@ bool ThreadPool::try_submit(std::function<void()> fn, task_handle_t* out_handle)
 
 void ThreadPool::yield()
 {
-    if (task_handle_t h; try_pop(&h))
+    if (task_handle_t h = kInvalidTask; try_pop(&h))
         execute(h);
     else            
         std::this_thread::yield();
@@ -84,8 +87,8 @@ void ThreadPool::yield()
 // todo: DAG check
 void ThreadPool::add_dependency(task_handle_t child, task_handle_t parent) 
 {
-    if (child.generation == 0 || parent.generation == 0) return;
-    if (child.id == parent.id && child.generation == parent.generation) return;
+    if (handle_gen(child) == 0 || handle_gen(parent) == 0) return;
+    if (child == parent) return;
 
     std::lock_guard lock(m_mutex);
 
@@ -104,7 +107,7 @@ void ThreadPool::add_dependency(task_handle_t child, task_handle_t parent)
 // todo: prevent submit with same handles
 void ThreadPool::submit(task_handle_t handle) 
 {
-    if (handle.generation == 0) return;
+    if (handle_gen(handle) == 0) return;
 
     std::lock_guard lock(m_mutex);
     Task* task = get_task(handle);
@@ -118,14 +121,17 @@ void ThreadPool::submit(task_handle_t handle)
 
 task_status ThreadPool::status(task_handle_t handle) const 
 {
-    if (handle.generation == 0 || handle.id >= kMaxTasks) {
+    const uint32_t id  = handle_id(handle);
+    const uint32_t gen = handle_gen(handle);
+
+    if (gen == 0 || id >= kMaxTasks) {
         return task_status::Invalid;
     }
 
-    const Task& task = m_tasks[handle.id];
+    const Task& task = m_tasks[id];
     const uint32_t current_gen = task.generation.load(std::memory_order_acquire);
 
-    if (current_gen == handle.generation) {
+    if (current_gen == gen) {
         return task.status.load(std::memory_order_relaxed);
     }
 
@@ -150,9 +156,10 @@ void ThreadPool::wait_for_all() {
 // Internal
 // ------------------------------------------------------------------
 ThreadPool::Task* ThreadPool::get_task(task_handle_t h) {
-    if (h.id >= kMaxTasks) return nullptr;
-    Task& t = m_tasks[h.id];
-    if (t.generation.load(std::memory_order_acquire) != h.generation) {
+    const uint32_t id = handle_id(h);
+    if (id >= kMaxTasks) return nullptr;
+    Task& t = m_tasks[id];
+    if (t.generation.load(std::memory_order_acquire) != handle_gen(h)) {
         return nullptr;
     }
     return &t;
@@ -173,13 +180,14 @@ task_handle_t ThreadPool::allocate_unlocked(std::function<void()> fn) {
 
     m_live.fetch_add(1, std::memory_order_relaxed);
 
-    return task_handle_t{ id, gen };
+    return make_handle(id, gen);
 }
 
 void ThreadPool::free_unlocked(task_handle_t h) {
-    Task& task = m_tasks[h.id];
+    const uint32_t id = handle_id(h);
+    Task& task = m_tasks[id];
 
-    uint32_t next = h.generation + 1;
+    uint32_t next = handle_gen(h) + 1;
     if (next == 0) next = 1;
     task.generation.store(next, std::memory_order_release);
 
@@ -188,7 +196,7 @@ void ThreadPool::free_unlocked(task_handle_t h) {
     task.dependency_count.store(0, std::memory_order_relaxed);
     task.status.store(task_status::Invalid, std::memory_order_relaxed);
 
-    m_free_list[m_free_count++] = h.id;
+    m_free_list[m_free_count++] = id;
 
     m_live.fetch_sub(1, std::memory_order_relaxed);
 }
@@ -224,7 +232,7 @@ bool ThreadPool::try_pop(task_handle_t * handle) {
 void ThreadPool::execute(task_handle_t handle) 
 { 
     std::function<void()> fn;
-    task_handle_t conts[kMaxContinuations];
+    task_handle_t conts[kMaxContinuations] = {};
     uint32_t cont_count = 0;
     uint32_t gen = 0;
 
@@ -239,7 +247,7 @@ void ThreadPool::execute(task_handle_t handle)
         for (uint32_t i = 0; i < cont_count; ++i) {
             conts[i] = task->continuations[i];
         }
-        gen = handle.generation;
+        gen = handle_gen(handle);
     }
 
     if (fn) {
