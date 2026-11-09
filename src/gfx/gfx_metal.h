@@ -64,6 +64,7 @@ typedef struct metal_command_buffer_t {
     id<MTLCommandBuffer>            cmd_buffer;
     id<MTLRenderCommandEncoder>     encoder;
     id<MTLComputeCommandEncoder>    compute_encoder;
+    id<MTLComputePipelineState>     bound_compute_pso;
 
     // Optional swapchain targets (filled by frame_begin for default pass)
     id<MTLTexture>                  default_color;
@@ -1249,6 +1250,36 @@ static void metal_pipeline_compute_create(gfx_context_t* ctx, gfx_compute_pipeli
     *out_pipeline = &mp->handle;
 }
 
+static void metal_cmd_begin_compute_pass(gfx_command_buffer_t* cmd) {
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    if (!mcmd) return;
+    if (mcmd->encoder || mcmd->compute_encoder) {
+        mcmd->mctx->dbglog(gfx_msg_error, "metal: begin_compute_pass while another pass is active");
+        return;
+    }
+    mcmd->compute_encoder = [mcmd->cmd_buffer computeCommandEncoder];
+    mcmd->bound_compute_pso = nil;
+}
+
+static void metal_cmd_end_compute_pass(gfx_command_buffer_t* cmd) {
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    if (!mcmd || !mcmd->compute_encoder) return;
+    [mcmd->compute_encoder endEncoding];
+    mcmd->compute_encoder = nil;
+    mcmd->bound_compute_pso = nil;
+}
+
+static void metal_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline) {
+    metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
+    metal_pipeline_compute_t* mp = (metal_pipeline_compute_t*)pipeline;
+    if (!mcmd || !mp || !mcmd->compute_encoder) {
+        if (mcmd) mcmd->mctx->dbglog(gfx_msg_error, "metal: bind_compute_pipeline outside compute pass");
+        return;
+    }
+    mcmd->bound_compute_pso = mp->pipeline;
+    [mcmd->compute_encoder setComputePipelineState:mp->pipeline];
+}
+
 static void metal_pipeline_compute_destroy(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline) {
     (void)ctx;
     metal_pipeline_compute_t* mp = (metal_pipeline_compute_t*)pipeline;
@@ -1658,10 +1689,15 @@ static void metal_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffe
 
 static void metal_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z) {
     metal_command_buffer_t* mcmd = (metal_command_buffer_t*)cmd;
-    if (!mcmd) return;
-    // Full compute path needs bound compute PSO; stub until bind_compute is added to public API
-    (void)x; (void)y; (void)z;
-    gfx_stub_not_implemented(mcmd->mctx ? mcmd->mctx->dbglog : nullptr, "metal_cmd_dispatch_compute");
+    if (!mcmd || !mcmd->compute_encoder || !mcmd->bound_compute_pso) {
+        if (mcmd && mcmd->mctx) mcmd->mctx->dbglog(gfx_msg_error, "metal: dispatch needs active compute pass and bound pipeline");
+        return;
+    }
+    // TODO: threadgroup size should come from shader reflection (numthreads); this is a placeholder
+    // matching the pipeline's SIMD width, and only correct if the shader declares the same local size.
+    NSUInteger w = mcmd->bound_compute_pso.threadExecutionWidth;
+    [mcmd->compute_encoder dispatchThreadgroups:MTLSizeMake(x, y, z)
+                          threadsPerThreadgroup:MTLSizeMake(w, 1, 1)];
 }
 
 static void metal_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker) {
@@ -1808,6 +1844,9 @@ void gfx_init_metal(gfx_api_pfn* func_table) {
 
     func_table->pfn_cmd_begin_pass   = metal_cmd_begin_pass;
     func_table->pfn_cmd_end_pass     = metal_cmd_end_pass;
+    func_table->pfn_cmd_begin_compute_pass    = metal_cmd_begin_compute_pass;
+    func_table->pfn_cmd_end_compute_pass      = metal_cmd_end_compute_pass;
+    func_table->pfn_cmd_bind_compute_pipeline = metal_cmd_bind_compute_pipeline;
     func_table->pfn_cmd_scissor      = metal_cmd_scissor;
     func_table->pfn_cmd_viewport     = metal_cmd_viewport;
     func_table->pfn_cmd_bind_pipeline        = metal_cmd_bind_pipeline;

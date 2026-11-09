@@ -19,7 +19,7 @@
 #endif
 
 
-#ifdef VULKAN_AVAILABLE
+#ifdef VULKAN_AVAILABLE 
 
 #include <vulkan/vulkan.h>
 
@@ -131,6 +131,7 @@ typedef struct vk_context_t
     PFN_vkCmdBuildAccelerationStructuresKHR     vkCmdBuildAccelerationStructuresKHR = nullptr;
     PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
     PFN_vkCmdTraceRaysKHR                       vkCmdTraceRaysKHR = nullptr;
+    PFN_vkWaitSemaphoresKHR                     vkWaitSemaphoresKHR = nullptr;
 
 } vk_context_t;
 
@@ -153,9 +154,11 @@ typedef struct vk_surface_t {
     VkRenderPass                        render_pass;
     VkSampleCountFlags                  vk_msaa_samples;
 
-    VkFence                             fences[GFX_MAX_FRAME_IN_FLIGHT];                        // CPU-GPU frame execution fences
-    VkSemaphore                         semaphore_image_available[GFX_MAX_FRAME_IN_FLIGHT];     // Wait Semaphores
-    VkSemaphore                         semaphore_rendering_finished[GFX_MAX_FRAME_IN_FLIGHT];  // Signal Semaphores
+    VkSemaphore                         timeline;                                               // CPU-GPU frame timeline (replaces per-frame fences)
+    uint64_t                            timeline_value;                                         // last value submitted to the timeline
+    uint64_t                            frame_values[GFX_MAX_FRAME_IN_FLIGHT];                  // timeline value that marks completion of each frame slot
+    VkSemaphore                         semaphore_image_available[GFX_MAX_FRAME_IN_FLIGHT];     // Wait Semaphores (binary, required by WSI)
+    VkSemaphore                         semaphore_rendering_finished[GFX_MAX_FRAME_IN_FLIGHT];  // Signal Semaphores (binary, required by WSI)
 
     uint32_t                            current_frame;          // Index of the current CPU frame (0 to MAX_FRAME_IN_FLIGHT - 1)
     uint32_t                            swapchain_image_index;  // Index of the acquired swapchain image
@@ -309,6 +312,10 @@ typedef struct vk_command_buffer_t {
     uint32_t                            user_bound_mask;
     VkDescriptorSet                     bound_sets[GFX_MAX_DESCRIPTOR_SETS];
 
+    VkPipelineBindPoint                 bind_point          = VK_PIPELINE_BIND_POINT_GRAPHICS; // used by bind_descriptor_set
+    bool                                in_render_pass      = false;
+    bool                                in_compute_pass     = false;
+
     // replace to struct begin+end+name
     VkQueryPool                         time_query_pool     = VK_NULL_HANDLE;
     uint32_t                            time_query_index    = 0;
@@ -396,6 +403,9 @@ gfx_api void vk_cmd_end(gfx_command_buffer_t* cmd);
 gfx_api void vk_cmd_submit(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options);
 
 
+gfx_api void vk_cmd_begin_compute_pass(gfx_command_buffer_t* cmd);
+gfx_api void vk_cmd_end_compute_pass(gfx_command_buffer_t* cmd);
+gfx_api void vk_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline);
 gfx_api void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass);
              
 gfx_api void vk_cmd_end_pass(gfx_command_buffer_t* cmd);

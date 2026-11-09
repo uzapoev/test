@@ -232,6 +232,9 @@ gfx_api [[deprecatred]] void     wgpu_submit_cmd(gfx_context_t* ctx, gfx_command
 
 gfx_api void     wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
 gfx_api void     wgpu_cmd_end_pass(gfx_command_buffer_t* cmd);
+gfx_api void     wgpu_cmd_begin_compute_pass(gfx_command_buffer_t* cmd);
+gfx_api void     wgpu_cmd_end_compute_pass(gfx_command_buffer_t* cmd);
+gfx_api void     wgpu_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline);
                  
 gfx_api void     wgpu_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 gfx_api void     wgpu_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);

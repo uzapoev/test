@@ -757,7 +757,8 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     };
 
 
-    VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, nullptr };
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline_features         = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES, nullptr };
+    VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, &timeline_features };
     VkPhysicalDeviceDescriptorIndexingFeatures  bindless_features       = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,  &dynamic_rendering_features  };
     VkPhysicalDeviceMeshShaderFeaturesEXT       mesh_features           = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,  &bindless_features };
 
@@ -793,7 +794,20 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
     const char* device_extensions[32] = {};
     device_extensions[extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     
-    // Enable bindless 
+    // Timeline semaphores (frame synchronization)
+    VkPhysicalDeviceTimelineSemaphoreFeatures active_timeline = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES };
+    if (timeline_features.timelineSemaphore) {
+        active_timeline.timelineSemaphore = VK_TRUE;
+        device_extensions[extension_count++] = VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME;
+
+        *pnext_chain_tail = &active_timeline;
+        pnext_chain_tail = &active_timeline.pNext;
+    }
+    else {
+        gfx_default_log(gfx_msg_error, "Vk: timelineSemaphore feature is not supported by device");
+    }
+
+    // Enable bindless
     if (bindless_features.shaderSampledImageArrayNonUniformIndexing &&
         bindless_features.descriptorBindingSampledImageUpdateAfterBind &&
         bindless_features.descriptorBindingPartiallyBound)
@@ -880,14 +894,10 @@ static VkDevice _vk_create_device(VkPhysicalDevice physdevice, VkSurfaceKHR surf
 
 static VkSemaphore _vk_create_semaphore(VkDevice device, bool istimeline = false)
 {
-    int num_frames = 2;
-    const uint64_t initial_value = (num_frames - 1);
-
     VkSemaphoreTypeCreateInfo timeline_create_info = { VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO };
-    timeline_create_info.sType          = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
     timeline_create_info.pNext          = nullptr;
     timeline_create_info.semaphoreType  = VK_SEMAPHORE_TYPE_TIMELINE;
-    timeline_create_info.initialValue   = initial_value;
+    timeline_create_info.initialValue   = 0;
 
     VkSemaphore semaphore = VK_NULL_HANDLE;
     VkSemaphoreCreateInfo create_info   = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
@@ -1195,6 +1205,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     vctx->vkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(vctx->vk_device, "vkCmdBuildAccelerationStructuresKHR");
     vctx->vkGetAccelerationStructureBuildSizesKHR = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(vctx->vk_device, "vkGetAccelerationStructureBuildSizesKHR");
     vctx->vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR) vkGetDeviceProcAddr(vctx->vk_device, "vkCmdTraceRaysKHR");
+    vctx->vkWaitSemaphoresKHR = (PFN_vkWaitSemaphoresKHR)vkGetDeviceProcAddr(vctx->vk_device, "vkWaitSemaphoresKHR");
 
     vkGetPhysicalDeviceFeatures(vctx->vk_physical_device, &vctx->device_features);
     vkGetPhysicalDeviceProperties(vctx->vk_physical_device, &vctx->device_properties);
@@ -1506,16 +1517,15 @@ void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface
     uint64_t handle = 0;
     vk_surface_t * surface = (vk_surface_t*)gfx_handle_pool_allocate_data(vctx->surface_pool, &handle);
 
-    // create semaphores and fences
+    // create timeline semaphore (frame sync) and binary semaphores (swapchain acquire/present)
+    surface->timeline = _vk_create_semaphore(vctx->vk_device, true);
+    surface->timeline_value = 0;
     for (int i = 0; i < GFX_MAX_FRAME_IN_FLIGHT; ++i)
     {
-        VkFenceCreateInfo fence_ci = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT };
-        vkCreateFence(vctx->vk_device, &fence_ci, nullptr, &surface->fences[i]);
-
+        surface->frame_values[i] = 0; // 0 == already signaled (initial value)
         surface->semaphore_image_available[i] = _vk_create_semaphore(vctx->vk_device);
         surface->semaphore_rendering_finished[i] = _vk_create_semaphore(vctx->vk_device);
     }
-   // vkResetFences(vctx->device, MAX_FRAME_IN_FLIGHT, surface->fences);
 
     VkFormat depth_formats[] = { VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT };
 
@@ -1559,6 +1569,14 @@ void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* _surface)
         }
         _destroy_vk_texture(vctx, &target->depth_attachments);
     }
+
+    vkDeviceWaitIdle(vctx->vk_device);
+    for (int i = 0; i < GFX_MAX_FRAME_IN_FLIGHT; ++i) {
+        vkDestroySemaphore(vctx->vk_device, surface->semaphore_image_available[i], nullptr);
+        vkDestroySemaphore(vctx->vk_device, surface->semaphore_rendering_finished[i], nullptr);
+    }
+    vkDestroySemaphore(vctx->vk_device, surface->timeline, nullptr);
+    surface->timeline = VK_NULL_HANDLE;
 
     if (surface->swapchain != VK_NULL_HANDLE)
         vkDestroySwapchainKHR(vctx->vk_device, surface->swapchain, nullptr);
@@ -1628,9 +1646,12 @@ void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t**
 
     uint32_t frame_idx = surface->current_frame;
 
-    VkFence fence = surface->fences[frame_idx];
-    vkWaitForFences(vctx->vk_device, 1, &fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(vctx->vk_device, 1, &fence);
+    // wait until the GPU has finished the previous use of this frame slot
+    VkSemaphoreWaitInfo wait_info   = { VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO };
+        wait_info.semaphoreCount    = 1;
+        wait_info.pSemaphores       = &surface->timeline;
+        wait_info.pValues           = &surface->frame_values[frame_idx];
+    vctx->vkWaitSemaphoresKHR(vctx->vk_device, &wait_info, UINT64_MAX);
 
     VkSemaphore image_available_sem = surface->semaphore_image_available[frame_idx];
 
@@ -1680,19 +1701,32 @@ void vk_frame_end(gfx_frame_t* frame)
     // 
     uint32_t frame_idx = frame->frame_index;
 
-    VkFence fence = surface->fences[frame_idx];
     VkSemaphore image_available_semaphore = surface->semaphore_image_available[frame_idx];
     VkSemaphore rendering_finished_semaphore = surface->semaphore_rendering_finished[frame_idx];
 
-    VkSubmitInfo submit             = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    // binary semaphores ignore the timeline values (0), timeline gets the new frame value
+    uint64_t signal_value = ++surface->timeline_value;
+    surface->frame_values[frame_idx] = signal_value;
+
+    VkSemaphore signal_semaphores[]     = { rendering_finished_semaphore, surface->timeline };
+    uint64_t    signal_values[]         = { 0, signal_value };
+    uint64_t    wait_values[]           = { 0 };
+
+    VkTimelineSemaphoreSubmitInfo timeline_info = { VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO };
+        timeline_info.waitSemaphoreValueCount   = 1;
+        timeline_info.pWaitSemaphoreValues      = wait_values;
+        timeline_info.signalSemaphoreValueCount = 2;
+        timeline_info.pSignalSemaphoreValues    = signal_values;
+
+    VkSubmitInfo submit             = { VK_STRUCTURE_TYPE_SUBMIT_INFO, &timeline_info };
         submit.commandBufferCount   = 1;
         submit.pCommandBuffers      = &vcmd->cmd;
         submit.pWaitDstStageMask    = stages;
         submit.waitSemaphoreCount   = 1;
-        submit.pWaitSemaphores      = &image_available_semaphore;   // 
-        submit.signalSemaphoreCount = 1;
-        submit.pSignalSemaphores    = &rendering_finished_semaphore; // 
-    if (auto result = vkQueueSubmit(vctx->graphics_queue.queue, 1, &submit, fence)) {
+        submit.pWaitSemaphores      = &image_available_semaphore;
+        submit.signalSemaphoreCount = 2;
+        submit.pSignalSemaphores    = signal_semaphores;
+    if (auto result = vkQueueSubmit(vctx->graphics_queue.queue, 1, &submit, VK_NULL_HANDLE)) {
         vctx->dbg_log(gfx_msg_error, "vkQueueSubmit failed!(%s)", string_VkResult(result));
     }
 
@@ -2381,6 +2415,7 @@ uint64_t vk_uniform_location(gfx_shader_t* shader, const char* name)
 
 void vk_shader_destroy(gfx_context_t* ctx, gfx_shader_t* _shader)
 {
+    if(_shader == nullptr) return;
     vk_context_t* vkctx = from_ctx(ctx);
 
     vk_shader_t * shader = (vk_shader_t*)gfx_handle_pool_map(vkctx->shaders_pool, _shader->idx);
@@ -3310,7 +3345,13 @@ void vk_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
         info.renderArea         = render_area;
         info.clearValueCount    = clear_value_count;
         info.pClearValues       = clear_values;
+    if (vcmd->in_render_pass || vcmd->in_compute_pass) {
+        vctx->dbg_log(gfx_msg_error, "vk_cmd_begin_pass: another pass is already active");
+        return;
+    }
     vkCmdBeginRenderPass(vcmd->cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
+    vcmd->in_render_pass = true;
+    vcmd->bind_point     = VK_PIPELINE_BIND_POINT_GRAPHICS;
 
     vk_cmd_viewport(cmd, 0, 0, vk_target->extent.width, vk_target->extent.height);
     vk_cmd_scissor(cmd, 0, 0, vk_target->extent.width, vk_target->extent.height);
@@ -3321,8 +3362,56 @@ void vk_cmd_end_pass(gfx_command_buffer_t* cmd)
     if (cmd == nullptr) return;
     vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
 
+    if (!vcmd->in_render_pass) {
+        vcmd->ctx->dbg_log(gfx_msg_error, "vk_cmd_end_pass: no active render pass");
+        return;
+    }
     vkCmdEndRenderPass(vcmd->cmd);
-//  vkCmdEndRendering(vk_cmd->cmd);
+    vcmd->in_render_pass = false;
+}
+
+void vk_cmd_begin_compute_pass(gfx_command_buffer_t* cmd)
+{
+    if (cmd == nullptr) return;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+
+    if (vcmd->in_render_pass || vcmd->in_compute_pass) {
+        vcmd->ctx->dbg_log(gfx_msg_error, "vk_cmd_begin_compute_pass: another pass is already active");
+        return;
+    }
+    // Vulkan needs no explicit compute encoder; this only tracks state to catch API misuse.
+    vcmd->in_compute_pass = true;
+    vcmd->bind_point      = VK_PIPELINE_BIND_POINT_COMPUTE;
+}
+
+void vk_cmd_end_compute_pass(gfx_command_buffer_t* cmd)
+{
+    if (cmd == nullptr) return;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+
+    if (!vcmd->in_compute_pass) {
+        vcmd->ctx->dbg_log(gfx_msg_error, "vk_cmd_end_compute_pass: no active compute pass");
+        return;
+    }
+    vcmd->in_compute_pass = false;
+    vcmd->bind_point      = VK_PIPELINE_BIND_POINT_GRAPHICS;
+}
+
+void vk_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline)
+{
+    if (cmd == nullptr || pipeline == nullptr) return;
+    vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+
+    if (!vcmd->in_compute_pass) {
+        vcmd->ctx->dbg_log(gfx_msg_error, "vk_cmd_bind_compute_pipeline: call gfx_cmd_begin_compute_pass first");
+        return;
+    }
+    vk_compute_pipeline_t* vkpipeline = (vk_compute_pipeline_t*)gfx_handle_pool_map(vcmd->ctx->compute_pipeline_pool, pipeline->idx);
+    if (vkpipeline == nullptr) {
+        vcmd->ctx->dbg_log(gfx_msg_error, "vk_cmd_bind_compute_pipeline: invalid pipeline handle");
+        return;
+    }
+    vkCmdBindPipeline(vcmd->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vkpipeline->pipeline);
 }
 
 void vk_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
@@ -3384,7 +3473,7 @@ void vk_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_de
     VkPipelineLayout pipeline_layout = set->shader->pipeline_layout;
 
     uint32_t dynamic_offset = set->ubo_offset;
-    vkCmdBindDescriptorSets(vcmd->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, slot, 1u, &descriptor_set, 1, &dynamic_offset);
+    vkCmdBindDescriptorSets(vcmd->cmd, vcmd->bind_point, pipeline_layout, slot, 1u, &descriptor_set, 1, &dynamic_offset);
 }
 
 void vk_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
@@ -3427,6 +3516,10 @@ void vk_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffe
 void vk_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z)
 {
     vk_command_buffer_t* vcmd = (vk_command_buffer_t*)cmd;
+    if (!vcmd->in_compute_pass) {
+        vcmd->ctx->dbg_log(gfx_msg_error, "vk_cmd_dispatch_compute: must be called inside gfx_cmd_begin_compute_pass/end");
+        return;
+    }
     vkCmdDispatch(vcmd->cmd, x, y, z);
 }
 

@@ -1714,6 +1714,32 @@ void wgpu_cmd_end_pass(gfx_command_buffer_t* cmd)
 }
 
 
+void wgpu_cmd_begin_compute_pass(gfx_command_buffer_t* cmd)
+{
+    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
+    if (wgpu_cmd->pass || wgpu_cmd->compute_pass) return; // another pass is active
+    WGPUComputePassDescriptor desc = {};
+    wgpu_cmd->compute_pass = wgpuCommandEncoderBeginComputePass(wgpu_cmd->encoder, &desc);
+}
+
+
+void wgpu_cmd_end_compute_pass(gfx_command_buffer_t* cmd)
+{
+    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
+    if (!wgpu_cmd->compute_pass) return;
+    wgpuComputePassEncoderEnd(wgpu_cmd->compute_pass);
+    wgpuComputePassEncoderRelease(wgpu_cmd->compute_pass);
+    wgpu_cmd->compute_pass = nullptr;
+}
+
+
+void wgpu_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline)
+{
+    // TODO: depends on wgpu_create_compute_pipeline, which is not implemented yet.
+    (void)cmd; (void)pipeline;
+}
+
+
 void wgpu_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;

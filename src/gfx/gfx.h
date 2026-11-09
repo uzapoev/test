@@ -50,7 +50,16 @@
 
 typedef enum gfx_result {
     gfx_ok,                                 /**< Operation completed successfully */
-    gfx_error                               /**< Generic execution error */
+
+    gfx_timeout,                            /**< not an arror, can retry */
+    gfx_not_ready,                          /**<> */
+
+    gfx_error,                              /**< Generic execution error */
+    gfx_error_out_of_memory,
+    gfx_error_device_lost,
+    gfx_error_not_supported,
+    gfx_error_initialization_failed,
+    gfx_error_invalid_parameter,
 } gfx_result;
 
 
@@ -58,6 +67,11 @@ typedef enum gfx_options {
     gfx_options_debug       = 1 << 0,       /**< Enable validation layers and graphics debugging features */
     gfx_options_verbose     = 1 << 1,       /**< Enable detailed verbose log output */
     gfx_options_callstack   = 1 << 2,       /**< Dump callstack on critical errors or validation failures */
+
+    gfx_feature_bindless    = 1 << 3,
+    gfx_feature_ray_tracing = 1 << 4,
+    gfx_feature_ray_query   = 1 << 5,
+    gfx_feature_mesh_shader = 1 << 6,
 } gfx_options;
 
 
@@ -82,14 +96,6 @@ typedef enum gfx_backend {
     gfx_backend_webgpu,                     /**< WebGPU backend */
 } gfx_backend;
 
-typedef enum gfx_feature {
-    gfx_feature_classic         = 0,
-    gfx_feature_bindless        = 1 << 0,
-    gfx_feature_mesh_shaders    = 1 << 1,
-    gfx_feature_ray_tracing     = 1 << 2,
-    gfx_feature_ray_query       = 1 << 3,
-    gfx_feature_all             = gfx_feature_bindless | gfx_feature_mesh_shaders | gfx_feature_ray_tracing | gfx_feature_ray_query
-} gfx_feature;
 
 typedef enum gfx_shader_format_flags {
     gfx_shader_format_unknown   = 0,
@@ -1189,6 +1195,27 @@ gfx_api void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* desc
  * @param cmd Active command buffer token recording graphic draw state sequences tokens.
  */
 gfx_api void gfx_cmd_end_pass(gfx_command_buffer_t* cmd);
+
+/**
+ * @brief Opens a compute pass. Must not be nested inside a render pass.
+ *        Dispatches, compute pipeline binds and compute descriptor binds are only valid between begin/end.
+ * @param cmd Active command buffer.
+ */
+gfx_api void gfx_cmd_begin_compute_pass(gfx_command_buffer_t* cmd);
+
+/**
+ * @brief Closes the active compute pass.
+ * @param cmd Active command buffer.
+ */
+gfx_api void gfx_cmd_end_compute_pass(gfx_command_buffer_t* cmd);
+
+/**
+ * @brief Binds a compute pipeline inside an active compute pass.
+ *        Subsequent gfx_cmd_bind_descriptor_set calls target the compute bind point.
+ * @param cmd Active command buffer.
+ * @param pipeline Compute pipeline created by gfx_compute_pipeline_create.
+ */
+gfx_api void gfx_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline);
 
 // ============================================================================
 // --- Dynamic States, Bindings & Draw Dispatches ---

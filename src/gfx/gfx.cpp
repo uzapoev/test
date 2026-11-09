@@ -868,6 +868,9 @@ intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32
      // COMMAND BUFFER
      void     (*pfn_cmd_begin_pass)              (gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
      void     (*pfn_cmd_end_pass)                (gfx_command_buffer_t* cmd);
+     void     (*pfn_cmd_begin_compute_pass)      (gfx_command_buffer_t* cmd);
+     void     (*pfn_cmd_end_compute_pass)        (gfx_command_buffer_t* cmd);
+     void     (*pfn_cmd_bind_compute_pipeline)   (gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline);
 
      void     (*pfn_cmd_scissor) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
      void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
@@ -1168,6 +1171,18 @@ void gfx_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* info) {
 void gfx_cmd_end_pass(gfx_command_buffer_t* cmd) {
     g_tbl->pfn_cmd_end_pass(cmd);
 }
+void gfx_cmd_begin_compute_pass(gfx_command_buffer_t* cmd) {
+    if (!g_tbl || !g_tbl->pfn_cmd_begin_compute_pass) { gfx_stub_not_implemented(nullptr, "gfx_cmd_begin_compute_pass"); return; }
+    g_tbl->pfn_cmd_begin_compute_pass(cmd);
+}
+void gfx_cmd_end_compute_pass(gfx_command_buffer_t* cmd) {
+    if (!g_tbl || !g_tbl->pfn_cmd_end_compute_pass) { gfx_stub_not_implemented(nullptr, "gfx_cmd_end_compute_pass"); return; }
+    g_tbl->pfn_cmd_end_compute_pass(cmd);
+}
+void gfx_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline) {
+    if (!g_tbl || !g_tbl->pfn_cmd_bind_compute_pipeline) { gfx_stub_not_implemented(nullptr, "gfx_cmd_bind_compute_pipeline"); return; }
+    g_tbl->pfn_cmd_bind_compute_pipeline(cmd, pipeline);
+}
 void gfx_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     g_tbl->pfn_cmd_scissor(cmd, x, y, w, h);
 }
@@ -1318,6 +1333,9 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     // COMMAND BUFFER
     func_table->pfn_cmd_begin_pass          = vk_cmd_begin_pass;
     func_table->pfn_cmd_end_pass            = vk_cmd_end_pass;
+    func_table->pfn_cmd_begin_compute_pass  = vk_cmd_begin_compute_pass;
+    func_table->pfn_cmd_end_compute_pass    = vk_cmd_end_compute_pass;
+    func_table->pfn_cmd_bind_compute_pipeline = vk_cmd_bind_compute_pipeline;
 
     func_table->pfn_cmd_scissor             = vk_cmd_scissor;
     func_table->pfn_cmd_viewport            = vk_cmd_viewport;
@@ -1396,6 +1414,9 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
     // COMMAND BUFFER
     func_table->pfn_cmd_begin_pass          = wgpu_cmd_begin_pass;
     func_table->pfn_cmd_end_pass            = wgpu_cmd_end_pass;
+    func_table->pfn_cmd_begin_compute_pass  = wgpu_cmd_begin_compute_pass;
+    func_table->pfn_cmd_end_compute_pass    = wgpu_cmd_end_compute_pass;
+    func_table->pfn_cmd_bind_compute_pipeline = wgpu_cmd_bind_compute_pipeline;
 
     func_table->pfn_cmd_scissor               = wgpu_cmd_scissor;
     func_table->pfn_cmd_viewport              = wgpu_cmd_viewport;
