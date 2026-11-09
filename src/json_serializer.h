@@ -60,6 +60,8 @@ typedef enum field_options {
 #define ReflectObject( CLASS, ... )                 public: static auto reflection_properties() { using Type = CLASS; return std::make_tuple(__VA_ARGS__); }   
 #define ReflectObjectInherited( CLASS, BASE, ... )  public: static auto reflection_properties() { using Type = CLASS; return std::tuple_cat(std::make_tuple(__VA_ARGS__), reflection::get_properties<BASE>()); }
 #define ReflectObjectExternal( CLASS, ...)          template <> inline auto reflection_properties<CLASS>() { using Type = CLASS; return std::make_tuple(__VA_ARGS__); }
+
+#define ReflectObject2( CLASS, ... )                public: static auto reflection_properties() { using Type = CLASS; return std::make_tuple(_REFLECT_EXPAND_FIELDS(__VA_ARGS__)); }   
 #define ReflectObjectExternal2( CLASS, ... )        template <> inline auto reflection_properties<CLASS>() { using Type = CLASS; return std::make_tuple(_REFLECT_EXPAND_FIELDS(__VA_ARGS__)); }
 
 
@@ -308,7 +310,10 @@ namespace json
                 {
                     deserialize_sajson(object.*arg->member, value);
                 }
-               // debug::log_error("unknmown type");
+                else
+                {
+                    debug::log_error("[json_serializer]:unknmown type \'%s\'", typeid(member_type).name());
+                }
             }); // for_each
         }
     }
