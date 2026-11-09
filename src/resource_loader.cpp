@@ -130,16 +130,21 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
     mesh_header_t* header = (mesh_header_t*)curent_ptr;
     curent_ptr += sizeof(mesh_header_t);
 
-    submesh_t * submeshes = (submesh_t*)curent_ptr;
-    curent_ptr += sizeof(submesh_t) * header->submesh_count;
-
     char* vertex_data_ptr = curent_ptr;
     curent_ptr += header->vertex_stride * header->vertex_count;
 
     char* index_data_ptr = curent_ptr;
     curent_ptr += header->index_stride * header->index_count;
 
-    //int* submeshes = (int*)curent_ptr;
+    submesh_t* submeshes = (submesh_t*)curent_ptr;
+    curent_ptr += sizeof(submesh_t) * header->submesh_count;
+
+    assert(header->index_stride > 0 && header->index_count > 0);
+    assert(header->vertex_stride > 0 && header->vertex_count > 0);
+    for(int i = 0; i < header->submesh_count; ++i) {
+        assert(submeshes[i].index_start < header->index_count);
+        assert(submeshes[i].index_count <= header->index_count);
+    }
 
     int32_t vertex_buffer_size = gfx_utils_align_up(header->vertex_stride * header->vertex_count, 32);
     int32_t index_buffer_size = gfx_utils_align_up(header->index_stride * header->index_count, 32);
@@ -204,8 +209,8 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
     out_mesh->vertex_count  = header->vertex_count;
     out_mesh->index_count   = header->index_count;
 
-    out_mesh->bounds.extend(header->bbox_max);
-    out_mesh->bounds.extend(header->bbox_min);
+    out_mesh->bounds.extend(math::make_vec3(header->bbox_max));
+    out_mesh->bounds.extend(math::make_vec3(header->bbox_min));
 
     for (uint32_t i = 0; i < header->submesh_count; ++i){
         out_mesh->submeshes[i].index_start = submeshes[i].index_start;
@@ -304,7 +309,9 @@ void load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_textu
 }
 
 
-void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * data, uint32_t size, gfx_texture_t **out_texture)
+// Fills desc from dds/ktx/astc/png header. desc.data points to the mip0 payload inside `data`
+// (or to a stb buffer when *out_owns_data == true, caller must stbi_image_free it).
+bool parse_texture_data(const char* name, char* data, uint32_t size, gfx_texture_desc_t* out_desc, bool* out_owns_data)
 {
     uint32_t magik = *(uint32_t*)data;
 
@@ -394,7 +401,7 @@ void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * d
                 case 0x9274: desc.format = gfx_pixel_format_etc1;           break;
                 case 0x9276: desc.format = gfx_pixel_format_etc2_rgb8a1;    break;
                 case 0x9278: desc.format = gfx_pixel_format_etc2_rgba8;     break; // GL_COMPRESSED_RGBA8_ETC2_EAC
-                default: return;
+                default: return false;
             }
             
             uint32_t offset = 4;
@@ -424,6 +431,19 @@ void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * d
             free_stbi_buffer = desc.data != nullptr;
         };
     }
+
+    desc.type = gfx_texture2d;
+    *out_desc = desc;
+    *out_owns_data = free_stbi_buffer;
+    return desc.data != nullptr;
+}
+
+
+void load_texture_from_file_data(gfx_context_t * ctx, const char* name, char * data, uint32_t size, gfx_texture_t **out_texture)
+{
+    gfx_texture_desc_t desc = {};
+    bool free_stbi_buffer = false;
+    parse_texture_data(name, data, size, &desc, &free_stbi_buffer);
 
     if(desc.data != nullptr)
     {
@@ -561,7 +581,6 @@ void load_shader_from_file_data(gfx_context_t* ctx, const char * name, char* dat
 
           stage_data[i] = { stg,   (uint32_t*)ptr, (uint32_t)stage_size };
           ptr += stage_size;
-
 
           gfx_shader_reflection2((char*)stage_data[i].data, stage_data[i].size, &uniforms[uniform_count], &uniform_count);
         }

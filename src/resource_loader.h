@@ -18,13 +18,14 @@ extern void     load_mesh_from_file_data(gfx_context_t* ctx, mesh_pool_t* pool, 
 extern void     load_image_from_file_path(const char* path, image_t ** out_image);
 extern void     load_image_from_file_data(const char* name, char* data, uint32_t size, image_t ** out_image);
 
+extern bool     parse_texture_data(const char* name, char* data, uint32_t size, gfx_texture_desc_t* out_desc, bool* out_owns_data);
 extern void     load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_texture_t** out_texture);
 extern void     load_texture_from_file_data(gfx_context_t* ctx, const char* name, char* data, uint32_t size, gfx_texture_t** out_texture);
 
 extern void     load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader_t** out_shader);
 extern void     load_shader_from_file_data(gfx_context_t* ctx, const char* name, char* data, uint32_t size, gfx_shader_t** out_shader);
 
-extern void     load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_t* insance);
-extern void     load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_t* insance);
+extern void     load_material_from_file_path(gfx_context_t* ctx, const char* path, struct material_t* material);
+extern void     load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_t* material);
 
 #endif 
