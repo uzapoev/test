@@ -1,5 +1,7 @@
 #include "common.h"
 #include <stdarg.h>
+#include <ctype.h>
+#include <random>
 #include <filesystem>
 
 #ifdef _WIN32
@@ -18,9 +20,6 @@
     #define sys_mkdir(path) mkdir(path, S_IRWXU)
 #endif
 
-std::unordered_set <std::string>interned_string::s_interned;
-
-int measure::intend = 0;
 auto s_prev = std::chrono::high_resolution_clock::now();
 
 
@@ -42,11 +41,8 @@ void Time::tick()
 {
     auto curr = std::chrono::high_resolution_clock::now();
     
-    auto diff_ms = std::chrono::duration_cast<std::chrono::milliseconds>(curr - s_prev);
-    auto diff_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(curr - s_prev);
+    s_dt = std::chrono::duration<float>(curr - s_prev).count();   // seconds (was ms/100 -> 10x too large)
     s_prev = curr;
-
-    s_dt = diff_ms.count()/100.0f;
     s_elapsed_time += s_dt;
 }
 
@@ -819,9 +815,20 @@ bool uuid::is_guid_str(const char *buf)
 
 guid_t uuid::generate_uuid_v4()
 {
-    static std::atomic<uint32_t> g_counter;
-    g_counter.fetch_add(1, std::memory_order_relaxed);
-    return generate_from_seed(clock() + g_counter);
+    // splitmix64, per-thread state seeded from random_device: no global srand/rand,
+    // no repeating sequence between runs, no 32-bit seed limit
+    static thread_local uint64_t s = ((uint64_t)std::random_device{}() << 32) ^ std::random_device{}() ^ (uint64_t)clock();
+    auto next = []() {
+        uint64_t z = (s += 0x9E3779B97F4A7C15ull);
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        return z ^ (z >> 31);
+    };
+
+    guid_t g = { next(), next() };
+    g.high = (g.high & ~0xF000ull) | 0x4000ull;                          // version 4
+    g.low  = (g.low  & 0x3FFFFFFFFFFFFFFFull) | 0x8000000000000000ull;   // variant 10xx
+    return g;
 }
 
 guid_t uuid::str_to_guid(const char* str)
@@ -852,6 +859,9 @@ char* uuid::guid_to_str(guid_t g, char* buff)
         buff[i] = _guid_digits[g.low & 0x0F];
         g.low >>= 4;
     }
+    buff[32] = 0;
+    //    char buffer[33] = "";
+    //return interned_string(buffer).c_str()
     return buff;
 }
 

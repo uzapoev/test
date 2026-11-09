@@ -9,8 +9,10 @@
 #include <time.h>   // time
 
 #include <string>
+#include <vector>
 #include <chrono>
 #include <mutex>
+#include <type_traits>
 #include <functional>
 #include <unordered_set>
 
@@ -92,7 +94,7 @@ struct uuid
 inline bool operator==(const guid_t& a, std::nullptr_t) { return (a.high | a.low) == 0; }
 inline bool operator!=(const guid_t& a, std::nullptr_t) { return (a.high | a.low) != 0; }
 inline bool operator==(const guid_t& a, const guid_t& b) { return a.high == b.high && a.low == b.low; }
-inline bool operator!=(const guid_t& a, const guid_t& b) { return a.high != b.high && a.low != b.low; }
+inline bool operator!=(const guid_t& a, const guid_t& b) { return !(a == b); }   // was '&&': guids differing in one half compared as equal
 
 template<> struct std::hash<guid_t> {
     std::size_t operator()(const guid_t& g) const noexcept { 
@@ -106,7 +108,7 @@ public:
     interned_string() { clear(); }
     interned_string(const char* str) { m_ptr = make_intern(str); }
     interned_string(const std::string& str) { m_ptr = make_intern(str.data()); }
-    interned_string(const std::string_view& str) { m_ptr = make_intern(str.data()); }
+    interned_string(const std::string_view& str) { m_ptr = make_intern(std::string(str)); } // string_view is not NUL-terminated
 
     void                clear() { m_ptr = ""; }
     inline size_t       length() const { return strlen(m_ptr); }
@@ -119,17 +121,22 @@ public:
 
     static size_t msize()
     {
+        std::lock_guard<std::mutex> lock(pool_mutex());
         size_t s = 0;
-        for (auto it = s_interned.begin(); it != s_interned.end(); ++it)
+        for (auto it = pool().begin(); it != pool().end(); ++it)
             s += it->size();
         return s;
     }
 
 private:
-    static std::unordered_set <std::string> s_interned;
+    // function-local statics: no definition in .cpp (stb-style), no static init order issues
+    static std::unordered_set<std::string>& pool()       { static std::unordered_set<std::string> s; return s; }
+    static std::mutex&                      pool_mutex() { static std::mutex m; return m; }
+
     static const char* make_intern(const std::string& value)
     {
-        return s_interned.insert(value).first->c_str();
+        std::lock_guard<std::mutex> lock(pool_mutex());
+        return pool().insert(value).first->c_str();   // node-based set: c_str() pointers stay valid after rehash
     }
     const char * m_ptr = "";
     //std::string_view  m_str;
@@ -145,17 +152,13 @@ template <> struct std::hash<interned_string>
 };
 
 struct binary_writer {
-    uint32_t    size() const { return current_size;    }
-    const void* data() const { return buffer;    }
+    uint32_t    size() const { return (uint32_t)buffer.size(); }
+    const void* data() const { return buffer.data(); }
+    void        clear()      { buffer.clear(); }
 
     void    write(uint32_t size, const void* data) {
-        if (current_size + size > 512) {
-            debug::log_error("Error: buffer overflow");
-            return;
-        }
-
-        memcpy(buffer + current_size, data, size);
-        current_size += size;
+        const char* p = (const char*)data;
+        buffer.insert(buffer.end(), p, p + size);       // grows as needed (was fixed 512 bytes, silently dropped overflow)
     }
 
     template<class T> void write(const T& v) {
@@ -164,8 +167,7 @@ struct binary_writer {
     }
 
 private:
-    char        buffer[512] = { 0 };
-    uint32_t    current_size = 0;
+    std::vector<char> buffer;
 };
 
 struct filestream
@@ -185,27 +187,27 @@ struct filestream
     inline T            read() { T res = {}; read(sizeof(T), &res); return res; }
 
     template<class T>
-    inline void         write(T v) { static_assert(std::is_pod_v<T>); write(sizeof(T), &v); }
-
-    template<> 
-    inline void write(interned_string str) {
-        write((uint16_t)str.length());
-        write((uint32_t)str.length(), str.data());
-    }
-
-    template<>
-    inline interned_string  read() {
-        char buffer[2048] = "";
-        uint16_t len = read<uint16_t>();
-        assert(len < sizeof(buffer));
-        read(len, buffer);
-        return interned_string(buffer);
-    }
+    inline void         write(T v) { static_assert(std::is_trivially_copyable_v<T>); write(sizeof(T), &v); }
 
 private:
     filestream(struct stream_impl*);
     struct stream_impl* m_impl;
 };
+
+template<>
+inline void filestream::write<interned_string>(interned_string str) {
+    write((uint16_t)str.length());
+    write((uint32_t)str.length(), str.data());
+}
+
+template<>
+inline interned_string filestream::read<interned_string>() {
+    char buffer[2048] = "";
+    uint16_t len = read<uint16_t>();
+    assert(len < sizeof(buffer));
+    read(len, buffer);
+    return interned_string(buffer);
+}
 
 class measure
 {
@@ -221,15 +223,14 @@ public:
         intend--;
         m_end = std::chrono::high_resolution_clock::now();
         auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(m_end - m_start);
-        float ms = (float)(((double)diff.count())/1000.0);
+        double ms = std::chrono::duration<double, std::milli>(m_end - m_start).count();
 
-       // printf(R"("%*s%s: %lldms)", intend*4, " ", m_msg, (long long)diff.count());
-        printf(R"("%*s%s: %.3f)", intend*4, " ", m_msg, ms);
+        printf("%*s%s: %.3f ms\n", intend*4, "", m_msg, ms);
     }
 
 private:
     const char * m_msg = "";
-    static int intend;
+    static inline int intend = 0;
     std::chrono::high_resolution_clock::time_point m_start;
     std::chrono::high_resolution_clock::time_point m_end;
 };
