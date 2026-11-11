@@ -538,6 +538,19 @@ static void metal_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface) {
     free(s);
 }
 
+static gfx_result metal_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t* surface, bool vsync) {
+    (void)ctx;
+    metal_surface_t* s = (metal_surface_t*)surface;
+    if (!s) return gfx_error_invalid_handle;
+    s->vsync = vsync;
+    if (s->layer) {
+        if (@available(macOS 10.13, iOS 11.0, *)) {
+            s->layer.displaySyncEnabled = vsync;
+        }
+    }
+    return gfx_ok;
+}
+
 static void metal_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame) {
     metal_context_t* mctx = from_ctx(ctx);
     metal_surface_t* msurface = (metal_surface_t*)surface;
@@ -1802,6 +1815,7 @@ void gfx_init_metal(gfx_api_pfn* func_table) {
 
     func_table->pfn_surface_create  = metal_surface_create;
     func_table->pfn_surface_destroy = metal_surface_destroy;
+    func_table->pfn_surface_set_vsync = metal_surface_set_vsync;
     func_table->pfn_frame_begin     = metal_frame_begin;
     func_table->pfn_frame_end       = metal_frame_end;
 

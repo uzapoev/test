@@ -94,6 +94,7 @@ typedef struct vk_context_t
     gfx_buffer_t*                       default_storage_buffer  = nullptr;
 
     VkRenderPass                        vk_default_renderpass      = nullptr; //fuuuuu!
+    VkSampleCountFlagBits               vk_default_samples         = VK_SAMPLE_COUNT_1_BIT;   // sample count of vk_default_renderpass, pipelines are created for it
 
     gfx_offset_allocator_t*             uniform_buffer_allocator = nullptr;
 
@@ -160,7 +161,10 @@ typedef struct vk_surface_t {
     VkDeviceMemory                      depth_memory;
     VkImageView                         depth_view;
     VkRenderPass                        render_pass;
-    VkSampleCountFlags                  vk_msaa_samples;
+    VkSampleCountFlags                  vk_msaa_samples;    // the sample count actually used (one VkSampleCountFlagBits value; 1 = no MSAA)
+    VkImage                             msaa_image;     // multisampled color target, resolved into the swapchain image at the end of the pass (MSAA only)
+    VkDeviceMemory                      msaa_memory;
+    VkImageView                         msaa_view;
 
     VkSemaphore                         timeline;                                               // CPU-GPU frame timeline (replaces per-frame fences)
     uint64_t                            timeline_value;                                         // last value submitted to the timeline

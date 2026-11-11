@@ -900,6 +900,14 @@ gfx_api gfx_surface_t gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t*
 gfx_api void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface);
 
 /**
+ * @brief Switches vertical synchronization of a surface while it is in use (an options menu, for example).
+ * true: capped at the display refresh rate. false: uncapped (mailbox or immediate, whatever the device supports).
+ * Takes effect from the next frame; the swapchain is recreated lazily.
+ * @return gfx_ok, gfx_error_invalid_handle for a bad surface, gfx_error_not_supported if the backend can't change it after creation.
+ */
+gfx_api gfx_result gfx_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t surface, bool vsync);
+
+/**
  * @brief Begins a new frame cycle, acquiring the next available swapchain image.
  * @param ctx Reference to the active graphics context.
  * @param surface Pointer to the presentation surface bound to the current frame thread.

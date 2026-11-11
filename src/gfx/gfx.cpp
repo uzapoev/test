@@ -817,6 +817,7 @@ intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32
      // SWAPCHAIN / SURFACE
      void     (*pfn_surface_create)  (gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
      void     (*pfn_surface_destroy) (gfx_context_t* ctx, gfx_surface_t* surface);
+     gfx_result (*pfn_surface_set_vsync) (gfx_context_t* ctx, gfx_surface_t* surface, bool vsync);    // optional (null = not supported)
 
      void     (*pfn_frame_begin)     (gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
      void     (*pfn_frame_end)       (gfx_frame_t* frame);
@@ -989,6 +990,13 @@ gfx_surface_t gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc)
 void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface)
 {
     g_tbl->pfn_surface_destroy(ctx, &surface);
+}
+
+gfx_result gfx_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t surface, bool vsync)
+{
+    if (!g_tbl->pfn_surface_set_vsync)
+        return gfx_error_not_supported;
+    return g_tbl->pfn_surface_set_vsync(ctx, &surface, vsync);
 }
 
 gfx_frame_t*  gfx_begin_frame(gfx_context_t* ctx, gfx_surface_t * surface)
@@ -1285,6 +1293,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     // SURFACE
     assign_extern(func_table->pfn_surface_create,  void, vk_surface_create, (gfx_context_t * ctx, gfx_surface_desc_t * desc, gfx_surface_t ** out_surface) );
     assign_extern(func_table->pfn_surface_destroy, void, vk_surface_destroy, (gfx_context_t * ctx, gfx_surface_t * surface) );
+    assign_extern(func_table->pfn_surface_set_vsync, gfx_result, vk_surface_set_vsync, (gfx_context_t * ctx, gfx_surface_t * surface, bool vsync) );
 
     // CONTEXT
     assign_extern(func_table->pfn_frame_begin,  void, vk_frame_begin, (gfx_context_t * ctx, gfx_surface_t * in_surface, gfx_frame_t * *out_frame));

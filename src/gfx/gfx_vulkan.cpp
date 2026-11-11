@@ -1438,6 +1438,13 @@ static void _vk_destroy_surface_targets(vk_context_t* ctx, vk_surface_t* surface
     surface->depth_view = VK_NULL_HANDLE;
     surface->depth_image = VK_NULL_HANDLE;
     surface->depth_memory = VK_NULL_HANDLE;
+
+    if (surface->msaa_view != VK_NULL_HANDLE)   vkDestroyImageView(ctx->vk_device, surface->msaa_view, nullptr);
+    if (surface->msaa_image != VK_NULL_HANDLE)  vkDestroyImage(ctx->vk_device, surface->msaa_image, nullptr);
+    if (surface->msaa_memory != VK_NULL_HANDLE) vkFreeMemory(ctx->vk_device, surface->msaa_memory, nullptr);
+    surface->msaa_view = VK_NULL_HANDLE;
+    surface->msaa_image = VK_NULL_HANDLE;
+    surface->msaa_memory = VK_NULL_HANDLE;
 }
 
 // (Re)creates the swapchain, the depth buffer and the framebuffers for the current size of the window.
@@ -1463,7 +1470,7 @@ static bool _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
 
     // the render pass doesn't depend on the size, so it exists even while the window is minimized
     if (surface->render_pass == VK_NULL_HANDLE)
-        _vk_create_renderpass(ctx, surface_format.format, surface->depth_format, VK_SAMPLE_COUNT_1_BIT, &surface->render_pass);
+        _vk_create_renderpass(ctx, surface_format.format, surface->depth_format, (VkSampleCountFlagBits)surface->vk_msaa_samples, &surface->render_pass);
 
     VkSurfaceCapabilitiesKHR capabilities = { 0 };
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->vk_physical_device, surface->surface, &capabilities);
@@ -1539,10 +1546,18 @@ static bool _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
 
     // depth attachment, shared by every swapchain image
     VkExtent3D extend = { surface->width, surface->height, 1 };
-    vk_texture_t depth_target = _vk_create_target_texture(ctx, extend, surface->depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_SAMPLE_COUNT_1_BIT);
+    const VkSampleCountFlagBits samples = (VkSampleCountFlagBits)surface->vk_msaa_samples;
+    vk_texture_t depth_target = _vk_create_target_texture(ctx, extend, surface->depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, samples);
     surface->depth_image  = depth_target.image;
     surface->depth_memory = depth_target.memory;
     surface->depth_view   = depth_target.view;
+
+    if (samples != VK_SAMPLE_COUNT_1_BIT) {
+        vk_texture_t msaa_target = _vk_create_target_texture(ctx, extend, surface_format.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, samples);
+        surface->msaa_image  = msaa_target.image;
+        surface->msaa_memory = msaa_target.memory;
+        surface->msaa_view   = msaa_target.view;
+    }
 
     // color attachments: one target (view + framebuffer) per swapchain image
     uint32_t image_count = GFX_MAX_SWAPCHAIN_IMAGES;
@@ -1561,14 +1576,17 @@ static bool _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
 
         VkImageView color_view = _vk_create_image_view(ctx, VK_IMAGE_VIEW_TYPE_2D, images[i], surface_format.format, 1);
 
+        // MSAA: [multisampled color, depth, swapchain image (resolve target)]; otherwise [swapchain image, depth]
+        const bool msaa = surface->msaa_view != VK_NULL_HANDLE;
         VkImageView  attachments [] = {
-            color_view,
-            surface->depth_view
+            msaa ? surface->msaa_view : color_view,
+            surface->depth_view,
+            color_view
         };
 
         VkFramebufferCreateInfo fb_info = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
         fb_info.renderPass         = surface->render_pass;
-        fb_info.attachmentCount    = _countof(attachments);
+        fb_info.attachmentCount    = msaa ? 3 : 2;
         fb_info.pAttachments       = attachments;
         fb_info.width              = surface->width;
         fb_info.height             = surface->height;
@@ -1613,15 +1631,43 @@ void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface
     surface->window_handle  = desc->window_handle;
     surface->vsync          = desc->vsync;
     surface->format         = desc->preferred_format;
-    surface->sample_count   = desc->sample_count;
+    {
+        // the requested count is lowered to what the device supports for both color and depth attachments
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(vctx->vk_physical_device, &props);
+        const VkSampleCountFlags supported = props.limits.framebufferColorSampleCounts & props.limits.framebufferDepthSampleCounts;
+        uint32_t want = (uint32_t)desc->sample_count;
+        if (want < 1) want = 1;
+        if (want > 16) want = 16;
+        while (want > 1 && !(supported & want)) want >>= 1;
+        if (want != (uint32_t)desc->sample_count && desc->sample_count > gfx_sample_1x)
+            vctx->dbg_log(gfx_msg_warning, "MSAA %ux is not supported by the device, using %ux", (unsigned)desc->sample_count, (unsigned)want);
+        surface->vk_msaa_samples = (VkSampleCountFlags)want;
+        surface->sample_count = (gfx_sample_count)want;
+    }
     surface->depth_format   = _vk_find_supported_format(vctx, depth_formats, _countof(depth_formats), VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
     surface->surface        = _vk_create_surface(vctx->vk_instance, desc->window_handle);
     surface->needs_reset    = !_vk_reset_surface(vctx, surface);       // stays true when the window is minimized at start, frame_begin retries
 
     vctx->vk_default_renderpass = surface->render_pass;
+    vctx->vk_default_samples    = (VkSampleCountFlagBits)surface->vk_msaa_samples;
     
     surface->handle = { handle };
     *out_surface = &surface->handle;
+}
+
+// The present mode is picked when the swapchain is (re)created, so only mark the surface: vk_frame_begin rebuilds it before the next frame.
+gfx_result vk_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t* in_surface, bool vsync)
+{
+    vk_context_t* vctx = from_ctx(ctx);
+    vk_surface_t* surface = in_surface ? (vk_surface_t*)gfx_handle_pool_map(vctx->surface_pool, in_surface->idx) : nullptr;
+    if (surface == nullptr)
+        return gfx_error_invalid_handle;
+    if ((surface->vsync != VK_FALSE) != vsync) {
+        surface->vsync = vsync ? VK_TRUE : VK_FALSE;
+        surface->needs_reset = true;
+    }
+    return gfx_ok;
 }
 
 void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* _surface)
@@ -1908,16 +1954,24 @@ void _vk_create_renderpass(vk_context_t* vctx, VkFormat colorformat, VkFormat de
     resolve_attachment.finalLayout      = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
 
+    // MSAA: attachment 0 is the multisampled color (not stored, only resolved), attachment 2 is the swapchain image the
+    // resolve goes to. Without MSAA attachment 0 is the swapchain image itself.
+    const bool msaa = samples != VK_SAMPLE_COUNT_1_BIT;
+    if (msaa) {
+        color_attachment.storeOp     = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color_attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
+
     VkAttachmentReference attachment_refs[] = {
         {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
         {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
-   //     {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL }
+        {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL }
     };
 
     VkAttachmentDescription attachment_descs[] = {
         color_attachment,
         depth_attachment,
-     //   resolve_attachment
+        resolve_attachment
     };
 
     VkSubpassDescription subpass = {};
@@ -1925,11 +1979,11 @@ void _vk_create_renderpass(vk_context_t* vctx, VkFormat colorformat, VkFormat de
     subpass.colorAttachmentCount    = 1;
     subpass.pColorAttachments       = &attachment_refs[0];
     subpass.pDepthStencilAttachment = &attachment_refs[1];
-//    subpass.pResolveAttachments     = &attachment_refs[2];
+    if (msaa) subpass.pResolveAttachments = &attachment_refs[2];
 
     VkRenderPassCreateInfo renderPassInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
     renderPassInfo.pAttachments     = attachment_descs;
-    renderPassInfo.attachmentCount  = _countof(attachment_descs);
+    renderPassInfo.attachmentCount  = msaa ? 3 : 2;
     renderPassInfo.subpassCount     = 1;
     renderPassInfo.pSubpasses       = &subpass;
 
@@ -3255,7 +3309,7 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
 
     VkPipelineMultisampleStateCreateInfo multisampling = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
     multisampling.sampleShadingEnable       = VK_FALSE;//vctx->msaa_samples != VK_SAMPLE_COUNT_1_BIT;
-    multisampling.rasterizationSamples      = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples      = vctx->vk_default_samples;     // must match the render pass the pipeline is used in
   //  multisampling.sampleShadingEnable       = VK_TRUE; // enable sample shading in the pipeline
   //  multisampling.minSampleShading          = .2f; //
 
