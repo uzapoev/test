@@ -174,8 +174,8 @@ uint32_t gfx_utils_thread_id()
     static thread_local const uint32_t s_unique_id = []() {
         static std::atomic<uint32_t> s_counter = 1;
         return s_counter.fetch_add(1, std::memory_order_relaxed);
-        }();
-        return s_unique_id;
+    }();
+    return s_unique_id;
 }
 
 

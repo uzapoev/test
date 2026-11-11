@@ -785,7 +785,7 @@ void wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_
     void* data_ptr = nullptr;
     bool mapped = desc->data != nullptr && desc->size > 0;
 
-    if (desc->mapped /*|| desc->usage == gfx_buffer_usage_uniform*/)
+    if (desc->memory_hint == gfx_memory_cpu_to_gpu || desc->memory_hint == gfx_memory_gpu_to_cpu /*|| desc->usage == gfx_buffer_usage_uniform*/)
         mapped = true;
 
     WGPUBufferUsage usage = WGPUBufferUsage_None;
@@ -994,7 +994,7 @@ void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_
 
     gfx_buffer_desc_t buffer_desc = {};
         buffer_desc.usage = gfx_buffer_usage_uniform;
-        buffer_desc.mapped = true;
+        buffer_desc.memory_hint = gfx_memory_cpu_to_gpu;
         buffer_desc.size = buffer_size;  //
     wgpu_create_buffer(ctx, &buffer_desc, &wgpu_shader->buffer);
 

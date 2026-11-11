@@ -51,15 +51,25 @@
 typedef enum gfx_result {
     gfx_ok,                                 /**< Operation completed successfully */
 
-    gfx_timeout,                            /**< not an arror, can retry */
-    gfx_not_ready,                          /**<> */
+    gfx_timeout,                            /**< Not an error, can retry */
+    gfx_not_ready,                          /**< Not an error, the result is not available yet, try again later */
+    gfx_out_of_date,                        /**< Not an error: the swapchain no longer matches the surface (resize), recreate it and retry */
 
     gfx_error,                              /**< Generic execution error */
-    gfx_error_out_of_memory,
-    gfx_error_device_lost,
-    gfx_error_not_supported,
+    gfx_error_out_of_memory,                /**< Host or device memory exhausted */
+    gfx_error_device_lost,                  /**< The GPU was reset or removed */
+    gfx_error_not_supported,                /**< Feature or extension is not available on this device / backend */
     gfx_error_initialization_failed,
-    gfx_error_invalid_parameter,
+    gfx_error_invalid_parameter,            /**< A value in a descriptor or argument is wrong (zero size, null data, bad enum ...) */
+
+    gfx_error_invalid_state,                /**< Call made at the wrong time: pass already active / not active, compute inside a render pass, draw outside a pass ... */
+    gfx_error_invalid_handle,               /**< Null, destroyed, stale or foreign (other shader / context) handle */
+    gfx_error_out_of_range,                 /**< Index or offset outside its valid range (binding, set, bindless slot, buffer region) */
+    gfx_error_pool_exhausted,               /**< A fixed capacity ran out: descriptor / handle pool, uniform or staging buffer */
+    gfx_error_shader_invalid,               /**< Shader blob is broken or incomplete: not SPIR-V, no entry point, missing stage, no compute stage */
+    gfx_error_shader_compile,               /**< Compiling the shader source (Slang) failed */
+    gfx_error_surface_lost,                 /**< The window surface is gone */
+    gfx_error_format_not_supported,         /**< Pixel format / usage / blit is not supported by the device for this resource */
 } gfx_result;
 
 
@@ -119,11 +129,25 @@ typedef enum gfx_buffer_usage {
 } gfx_buffer_usage;
 
 
+/**
+ * @brief Where a buffer lives and how the CPU may touch it. This replaces the old `mapped` flag: the hint says what you
+ *        intend to do with the buffer, the backend picks the memory type and decides whether to map it.
+ *
+ * Persistent mapping: the `cpu_to_gpu` and `gpu_to_cpu` buffers are allocated in host-visible, host-coherent memory and
+ * stay mapped for their whole lifetime (the pointer is obtained once and kept, there is no map/unmap per update).
+ * gfx_buffer_update_data() on such a buffer is a plain memcpy into that pointer: no staging buffer, no command buffer,
+ * no wait for the GPU. That makes it the right choice for data rewritten every frame (particles, dynamic geometry,
+ * uniforms). The price is that the GPU reads the data over the bus / from system memory (it is not in dedicated VRAM
+ * on discrete cards), and that nothing synchronises the write with frames still in flight: if the GPU may still be
+ * reading last frame's contents, rotate between several buffers (one per frame in flight) instead of overwriting one.
+ * Buffers that are written once and drawn many times should use `gpu_only` (or `auto`) so they end up in VRAM and are
+ * filled through the staging path.
+ */
 typedef enum gfx_memory_hint {
-    gfx_memory_auto,                        /**< Automatically determine optimal memory placement based on usage */
-    gfx_memory_gpu_only,                    /**< VRAM allocation, inaccessible by CPU, maximum performance */
-    gfx_memory_cpu_to_gpu,                  /**< Host-visible memory mapped for fast CPU writes to GPU */
-    gfx_memory_gpu_to_cpu,                  /**< Host-visible memory optimized for reading data back from the GPU to CPU */
+    gfx_memory_auto,                        /**< Backend decides from the usage: staging and uniform buffers are host-visible and persistently mapped, vertex / index / storage / indirect buffers are device-local */
+    gfx_memory_gpu_only,                    /**< VRAM, not accessible by the CPU, filled through staging; fastest for the GPU, for static data */
+    gfx_memory_cpu_to_gpu,                  /**< Host-visible, persistently mapped, written by the CPU often (memcpy updates, see above) */
+    gfx_memory_gpu_to_cpu,                  /**< Host-visible, persistently mapped, optimized for reading data back from the GPU on the CPU */
 } gfx_memory_hint;
 
 
@@ -587,7 +611,6 @@ typedef struct gfx_buffer_desc_t {
     const char*             label;              /**< Optional debug metadata string literal identifier */
     gfx_memory_hint         memory_hint;        /**< Explicit hardware memory allocation priority placement suggestion */
     gfx_buffer_usage        usage;              /**< Target pipeline hardware binding role mask configuration */
-    bool                    mapped;             /**< Flag enabling persistent mapping of host memory for fast writes */
     uint32_t                size;               /**< Total capacity boundaries allocated measured in bytes */
     void*                   data;               /**< Optional host pointer used to clone initial data directly into allocation */
 } gfx_buffer_desc_t;
@@ -1642,6 +1665,7 @@ struct gfx_offset_allocator_t;
 
 gfx_api void        gfx_offset_allocator_create(uint32_t size, uint32_t block_size, gfx_offset_allocator_t** allocator);
 gfx_api void        gfx_offset_allocator_destroy(gfx_offset_allocator_t* allocator);
+
 gfx_api intptr_t    gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32_t size);
 gfx_api void        gfx_offset_allocator_free(gfx_offset_allocator_t* allocator, intptr_t offset);
 

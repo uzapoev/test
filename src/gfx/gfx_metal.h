@@ -644,7 +644,7 @@ static void metal_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx
             break;
     }
     // Uniforms prefer shared for CPU updates
-    if (desc->usage == gfx_buffer_usage_uniform || desc->mapped)
+    if (desc->usage == gfx_buffer_usage_uniform)
         options = MTLResourceStorageModeShared;
 
     id<MTLBuffer> buffer = nil;
@@ -1330,7 +1330,6 @@ static void metal_create_descriptor_set_pool(metal_context_t* mctx, metal_shader
     gfx_buffer_desc_t bdesc = {};
     bdesc.usage = gfx_buffer_usage_uniform;
     bdesc.memory_hint = gfx_memory_cpu_to_gpu;
-    bdesc.mapped = true;
     bdesc.size = ubo_size * capacity;
     metal_buffer_create(&mctx->handle, &bdesc, &pool->ubo);
     metal_buffer_t* mbuffer = (metal_buffer_t*)pool->ubo;

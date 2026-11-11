@@ -1240,7 +1240,6 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     gfx_buffer_desc_t ubo_descriptor = {};
         ubo_descriptor.label                = "unifrom_buffer_object";
         ubo_descriptor.memory_hint          = gfx_memory_cpu_to_gpu;
-        ubo_descriptor.mapped               = true;
         ubo_descriptor.size                 = cfg->limits.uniform_buffer_size;
         ubo_descriptor.usage                = gfx_buffer_usage_uniform;
     vk_buffer_create(&vctx->handle, &ubo_descriptor, &uniform_buffer);
@@ -1250,7 +1249,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     gfx_buffer_t* staging_buffer = nullptr;
     gfx_buffer_desc_t staging_descriptor    = {};
         staging_descriptor.label            = "staging_buffer";
-        staging_descriptor.mapped           = true;
+        staging_descriptor.memory_hint      = gfx_memory_cpu_to_gpu;
         staging_descriptor.size             = cfg->limits.staging_buffer_size;
         staging_descriptor.usage            = gfx_buffer_usage_staging;
     vk_buffer_create(&vctx->handle, &staging_descriptor, &staging_buffer);
@@ -1835,7 +1834,10 @@ void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
 {
     vk_context_t * vctx = from_ctx(ctx);
 
-    bool mapped = desc->mapped;
+    // memory_hint decides the memory type: cpu_to_gpu / gpu_to_cpu = host visible + persistently mapped (updates are a
+    // memcpy); staging and uniform buffers are always like that; everything else is device local (see gfx_memory_hint)
+    const bool host_visible = desc->memory_hint == gfx_memory_cpu_to_gpu || desc->memory_hint == gfx_memory_gpu_to_cpu;
+    bool mapped = host_visible;
 
     VkBufferUsageFlags usage_flag = 0;
     VkMemoryPropertyFlags memory_flag = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -1868,6 +1870,12 @@ void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
         case gfx_buffer_usage_indirect:
             usage_flag = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
             break;
+    }
+    if (host_visible)
+    {
+        memory_flag = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        if (desc->memory_hint == gfx_memory_gpu_to_cpu)
+            usage_flag |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;     // read back by copying into it / out of it
     }
 
     uint64_t handle = 0;
@@ -2493,6 +2501,10 @@ void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
 
     // 
     uint32_t bindings_hash = (uint32_t)_descriptor_set_layout_hash(vk_shader->set_bindings[set_idx], vk_shader->set_binding_count[set_idx]);
+    // Pools must not be shared between different shaders even when the bindings look the same: every set of a pool gets a
+    // slice of the uniform buffer sized for the shader that created the pool, so a shader with a bigger uniform block
+    // would write past its slice (and read zeros beyond the bound range).
+    bindings_hash ^= vk_shader->hash32 * 2654435761u;
     vk_descriptor_pool_t* pool = _get_or_create_descriptor_set_pool(vctx, vk_shader, set_idx, bindings_hash);
 
     for (uint32_t i = 0; i < pool->bitset_word_count; ++i)
@@ -2505,6 +2517,9 @@ void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
 
             pool->free_set_count--;
             pool->descriptor_sets[pos].index_in_pool = pos;
+            // pools are shared by every shader with the same binding layout: a set must belong to the shader it was
+            // requested for (uniform lookup and the "handle from another shader" check use it)
+            pool->descriptor_sets[pos].shader = vk_shader;
             *out_set = &pool->descriptor_sets[pos].handle;
             return;
         }
@@ -3157,8 +3172,8 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
 
     // depth
     VkPipelineDepthStencilStateCreateInfo depth_stencil = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
-    depth_stencil.depthTestEnable           = VK_TRUE;
-    depth_stencil.depthWriteEnable          = VK_TRUE;
+    depth_stencil.depthTestEnable           = desc->render_states.depth.enable ? VK_TRUE : VK_FALSE;   // flags were ignored before (defaults are true/true)
+    depth_stencil.depthWriteEnable          = desc->render_states.depth.write  ? VK_TRUE : VK_FALSE;
     depth_stencil.depthCompareOp            = gfx_cmp_2_vk(desc->render_states.depth.mode);// VK_COMPARE_OP_LESS;
     depth_stencil.depthBoundsTestEnable     = VK_FALSE;
     depth_stencil.stencilTestEnable         = VK_FALSE;
