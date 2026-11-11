@@ -102,6 +102,11 @@ namespace math
 
     template<class T> MATH_INLINE T lerp(const T& a, const T& b, float t)   { return a + ((b - a) * t); }
 
+    // frame-rate independent exponential approach of `current` to `target` (rate in 1/s)
+    MATH_INLINE float               damp(float current, float target, float rate, float dt) {
+        return current + (target - current) * (1.0f - expf(-rate * dt));
+    }
+
     MATH_INLINE float               remap(float s, float a1, float a2, float b1, float b2) { 
         return b1 + (s - a1) * (b2 - b1) / (a2 - a1); 
     }
@@ -155,7 +160,7 @@ namespace math
     MATH_INLINE float distance_sq(const vec4& a, const vec4& b) { return (a.x * b.x) + (a.y * b.y) + (a.z * b.z); }
 
     MATH_INLINE vec2 normalize(const vec2& a)                   { float l = length(a); return { a.x / l, a.y / l }; }
-    MATH_INLINE vec3 normalize(const vec3& a)                   { float l = length(a); return { a.x / l, a.y / l, a.z / l }; }
+    MATH_INLINE vec3 normalize(const vec3& a)                   { float l = length(a); return l > 1e-8f ? vec3{ a.x / l, a.y / l, a.z / l } : vec3{ 0.0f, 0.0f, 0.0f }; }  // null vector stays null
     MATH_INLINE vec4 normalize(const vec4& a)                   { float l = length(a); return { a.x / l, a.y / l, a.z / l, a.w }; }
 
     MATH_INLINE vec3 reflect(const vec3& v, const vec3& n)      { return v - 2.0f * dot(n, v) * n; }
@@ -993,7 +998,7 @@ namespace math
         return mat4(xs,  0.0f, 0.0f, 0.0f,     // m[0] = xs;      ret.m[1] = 0.0f;    ret.m[2] = 0.0f;  ret.m[3] = 0.0f;
                     0.0f, ys,  0.0f, 0.0f,     // m[4] = 0.0f;    ret.m[5] = ys;      ret.m[6] = 0.0f;  ret.m[7] = 0.0f;
                     0.0f, 0.0f, f,   n,        // m[8] = 0.0f;    ret.m[9] = 0.0f;    ret.m[10] = f;    ret.m[11] = z;
-                    0.0f, 0.0f, z,   1.0f);    // m[12] = 0.0f;   ret.m[13] = 0.0f;   ret.m[14] = n;    ret.m[15] = 0.0f;
+                    0.0f, 0.0f, z,   0.0f);    // m[12] = 0.0f;   ret.m[13] = 0.0f;   ret.m[14] = n;    ret.m[15] = 0.0f;
     }
 
     MATH_INLINE quat euler_to_quat(float roll, float pitch, float yaw)
@@ -1197,6 +1202,120 @@ namespace math
 
         return q;
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shader-style (GLSL/HLSL) helpers: component-wise operators, builtins, constructors and swizzles.
+// vec2/vec3/vec4 are aggregates (no constructors), so "vec3(a, b)" style construction is make_vec*().
+// Builtins live in namespace math and are called qualified (math::floor, math::mix ...), which keeps them from
+// clashing with <math.h>. Used by games/saltline to compile the original's procedural texture generators.
+// ---------------------------------------------------------------------------------------------
+
+// component-wise operators (vector op vector, vector op scalar, scalar op vector)
+MATH_INLINE vec2 operator*(const vec2& a, const vec2& b)   { return { a.x * b.x, a.y * b.y }; }
+MATH_INLINE vec2 operator/(const vec2& a, const vec2& b)    { return { a.x / b.x, a.y / b.y }; }
+MATH_INLINE vec2 operator/(const vec2& a, float f)          { return { a.x / f, a.y / f }; }
+MATH_INLINE vec2 operator/(float f, const vec2& a)          { return { f / a.x, f / a.y }; }
+MATH_INLINE vec2 operator+(const vec2& a, float f)          { return { a.x + f, a.y + f }; }
+MATH_INLINE vec2 operator+(float f, const vec2& a)          { return { f + a.x, f + a.y }; }
+MATH_INLINE vec2 operator-(const vec2& a, float f)          { return { a.x - f, a.y - f }; }
+MATH_INLINE vec2 operator-(float f, const vec2& a)          { return { f - a.x, f - a.y }; }
+MATH_INLINE void operator-=(vec2& v, const vec2& b)         { v.x -= b.x; v.y -= b.y; }
+
+MATH_INLINE vec3 operator*(const vec3& a, const vec3& b)    { return { a.x * b.x, a.y * b.y, a.z * b.z }; }
+MATH_INLINE vec3 operator/(const vec3& a, const vec3& b)    { return { a.x / b.x, a.y / b.y, a.z / b.z }; }
+MATH_INLINE vec3 operator/(const vec3& a, float f)          { return { a.x / f, a.y / f, a.z / f }; }
+MATH_INLINE vec3 operator/(float f, const vec3& a)          { return { f / a.x, f / a.y, f / a.z }; }
+MATH_INLINE vec3 operator+(const vec3& a, float f)          { return { a.x + f, a.y + f, a.z + f }; }
+MATH_INLINE vec3 operator+(float f, const vec3& a)          { return { f + a.x, f + a.y, f + a.z }; }
+MATH_INLINE vec3 operator-(const vec3& a, float f)          { return { a.x - f, a.y - f, a.z - f }; }
+MATH_INLINE vec3 operator-(float f, const vec3& a)          { return { f - a.x, f - a.y, f - a.z }; }
+MATH_INLINE void operator-=(vec3& v, const vec3& b)         { v.x -= b.x; v.y -= b.y; v.z -= b.z; }
+MATH_INLINE void operator*=(vec3& v, const vec3& b)         { v.x *= b.x; v.y *= b.y; v.z *= b.z; }
+
+MATH_INLINE vec4 operator*(const vec4& a, const vec4& b)    { return { a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w }; }
+MATH_INLINE vec4 operator/(const vec4& a, const vec4& b)    { return { a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w }; }
+MATH_INLINE vec4 operator/(const vec4& a, float f)          { return { a.x / f, a.y / f, a.z / f, a.w / f }; }
+MATH_INLINE vec4 operator+(const vec4& a, float f)          { return { a.x + f, a.y + f, a.z + f, a.w + f }; }
+MATH_INLINE vec4 operator+(float f, const vec4& a)          { return { f + a.x, f + a.y, f + a.z, f + a.w }; }
+MATH_INLINE vec4 operator-(const vec4& a, float f)          { return { a.x - f, a.y - f, a.z - f, a.w - f }; }
+MATH_INLINE vec4 operator-(float f, const vec4& a)          { return { f - a.x, f - a.y, f - a.z, f - a.w }; }
+MATH_INLINE void operator-=(vec4& v, const vec4& b)         { v.x -= b.x; v.y -= b.y; v.z -= b.z; v.w -= b.w; }
+
+namespace math
+{
+    // ---- constructors (the missing overloads next to make_vec3/make_vec4 above) ----
+    MATH_INLINE vec2 make_vec2(float x, float y)                    { return { x, y }; }
+    MATH_INLINE vec2 make_vec2(float s)                             { return { s, s }; }
+    MATH_INLINE vec3 make_vec3(float s)                             { return { s, s, s }; }
+    MATH_INLINE vec3 make_vec3(const vec2& a, float z)              { return { a.x, a.y, z }; }
+    MATH_INLINE vec3 make_vec3(float x, const vec2& b)              { return { x, b.x, b.y }; }
+    MATH_INLINE vec4 make_vec4(float s)                             { return { s, s, s, s }; }
+    MATH_INLINE vec4 make_vec4(const vec3& a, float w)              { return { a.x, a.y, a.z, w }; }
+    MATH_INLINE vec4 make_vec4(const vec2& a, const vec2& b)        { return { a.x, a.y, b.x, b.y }; }
+    MATH_INLINE vec4 make_vec4(const vec2& a, float z, float w)     { return { a.x, a.y, z, w }; }
+    MATH_INLINE vec4 make_vec4(float x, float y, const vec2& b)     { return { x, y, b.x, b.y }; }
+
+    // ---- swizzles ----
+    MATH_INLINE vec2 xy(const vec2& v)  { return v; }
+    MATH_INLINE vec2 xy(const vec3& v)  { return { v.x, v.y }; }
+    MATH_INLINE vec2 xy(const vec4& v)  { return { v.x, v.y }; }
+    MATH_INLINE vec2 zw(const vec4& v)  { return { v.z, v.w }; }
+    MATH_INLINE vec2 xx(const vec2& v)  { return { v.x, v.x }; }
+    MATH_INLINE vec2 yx(const vec2& v)  { return { v.y, v.x }; }
+    MATH_INLINE vec3 xyz(const vec4& v) { return { v.x, v.y, v.z }; }
+    MATH_INLINE vec3 rgb(const vec3& v) { return v; }
+    MATH_INLINE vec3 rgb(const vec4& v) { return { v.x, v.y, v.z }; }
+
+    // ---- scalar builtins (named like GLSL; call them qualified) ----
+    MATH_INLINE float abs(float a)                      { return fabsf(a); }
+    MATH_INLINE float floor(float a)                    { return floorf(a); }
+    MATH_INLINE float fract(float a)                    { return a - floorf(a); }
+    MATH_INLINE float sqrt(float a)                     { return sqrtf(a); }
+    MATH_INLINE float sin(float a)                      { return sinf(a); }
+    MATH_INLINE float cos(float a)                      { return cosf(a); }
+    MATH_INLINE float sign(float a)                     { return (float)((a > 0.0f) - (a < 0.0f)); }
+    MATH_INLINE float pow(float a, float b)             { return powf(a, b); }
+    MATH_INLINE float min(float a, float b)             { return a < b ? a : b; }
+    MATH_INLINE float max(float a, float b)             { return a > b ? a : b; }
+    MATH_INLINE float mod(float a, float b)             { return a - b * floorf(a / b); }       // GLSL mod (floored)
+    MATH_INLINE float mix(float a, float b, float t)    { return a + (b - a) * t; }
+    MATH_INLINE float step(float edge, float a)         { return a < edge ? 0.0f : 1.0f; }
+    MATH_INLINE float smoothstep(float e0, float e1, float x)
+    {
+        float t = clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+    MATH_INLINE float dot(const vec2& a, const vec2& b) { return a.x * b.x + a.y * b.y; }
+
+    // ---- component-wise vector builtins ----
+#define MATHLIB_LIFT1(fn)                                                                                        \
+    MATH_INLINE vec2 fn(const vec2& a) { return { fn(a.x), fn(a.y) }; }                                          \
+    MATH_INLINE vec3 fn(const vec3& a) { return { fn(a.x), fn(a.y), fn(a.z) }; }                                 \
+    MATH_INLINE vec4 fn(const vec4& a) { return { fn(a.x), fn(a.y), fn(a.z), fn(a.w) }; }
+    MATHLIB_LIFT1(abs) MATHLIB_LIFT1(floor) MATHLIB_LIFT1(fract) MATHLIB_LIFT1(sqrt)
+    MATHLIB_LIFT1(sin) MATHLIB_LIFT1(cos) MATHLIB_LIFT1(sign)
+
+#define MATHLIB_LIFT2(fn)                                                                                        \
+    MATH_INLINE vec2 fn(const vec2& a, const vec2& b) { return { fn(a.x, b.x), fn(a.y, b.y) }; }                 \
+    MATH_INLINE vec2 fn(const vec2& a, float b)       { return { fn(a.x, b), fn(a.y, b) }; }                     \
+    MATH_INLINE vec3 fn(const vec3& a, const vec3& b) { return { fn(a.x, b.x), fn(a.y, b.y), fn(a.z, b.z) }; }   \
+    MATH_INLINE vec3 fn(const vec3& a, float b)       { return { fn(a.x, b), fn(a.y, b), fn(a.z, b) }; }         \
+    MATH_INLINE vec4 fn(const vec4& a, const vec4& b) { return { fn(a.x, b.x), fn(a.y, b.y), fn(a.z, b.z), fn(a.w, b.w) }; } \
+    MATH_INLINE vec4 fn(const vec4& a, float b)       { return { fn(a.x, b), fn(a.y, b), fn(a.z, b), fn(a.w, b) }; }
+    MATHLIB_LIFT2(min) MATHLIB_LIFT2(max) MATHLIB_LIFT2(mod) MATHLIB_LIFT2(pow)
+
+    MATH_INLINE vec2 clamp(const vec2& a, float lo, float hi) { return { clamp(a.x, lo, hi), clamp(a.y, lo, hi) }; }
+    MATH_INLINE vec3 clamp(const vec3& a, float lo, float hi) { return { clamp(a.x, lo, hi), clamp(a.y, lo, hi), clamp(a.z, lo, hi) }; }
+    MATH_INLINE vec4 clamp(const vec4& a, float lo, float hi) { return { clamp(a.x, lo, hi), clamp(a.y, lo, hi), clamp(a.z, lo, hi), clamp(a.w, lo, hi) }; }
+    MATH_INLINE vec2 mix(const vec2& a, const vec2& b, float t) { return { mix(a.x, b.x, t), mix(a.y, b.y, t) }; }
+    MATH_INLINE vec3 mix(const vec3& a, const vec3& b, float t) { return { mix(a.x, b.x, t), mix(a.y, b.y, t), mix(a.z, b.z, t) }; }
+    MATH_INLINE vec4 mix(const vec4& a, const vec4& b, float t) { return { mix(a.x, b.x, t), mix(a.y, b.y, t), mix(a.z, b.z, t), mix(a.w, b.w, t) }; }
+    MATH_INLINE vec3 mix(const vec3& a, const vec3& b, const vec3& t) { return { mix(a.x, b.x, t.x), mix(a.y, b.y, t.y), mix(a.z, b.z, t.z) }; }
+    MATH_INLINE vec2 smoothstep(float e0, float e1, const vec2& a) { return { smoothstep(e0, e1, a.x), smoothstep(e0, e1, a.y) }; }
+    MATH_INLINE vec3 smoothstep(float e0, float e1, const vec3& a) { return { smoothstep(e0, e1, a.x), smoothstep(e0, e1, a.y), smoothstep(e0, e1, a.z) }; }
+    MATH_INLINE vec2 step(float e, const vec2& a) { return { step(e, a.x), step(e, a.y) }; }
+    MATH_INLINE vec3 step(float e, const vec3& a) { return { step(e, a.x), step(e, a.y), step(e, a.z) }; }
 }
 
 #endif  // __MATHLIB_H__
