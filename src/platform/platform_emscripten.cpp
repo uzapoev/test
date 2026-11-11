@@ -65,6 +65,29 @@ static EM_BOOL _touch_cb(int event_type, const EmscriptenTouchEvent * touch_even
     return true;
 }
 
+static int  g_target_fps = 0;
+static bool g_loop_running = false;
+
+// 0: requestAnimationFrame (display rate); > 0: setTimeout based loop at the requested rate (the browser clamps it to >= ~4 ms)
+static void _apply_loop_timing()
+{
+    if (!g_loop_running) return;
+    if (g_target_fps > 0) emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT, 1000 / g_target_fps);
+    else                  emscripten_set_main_loop_timing(EM_TIMING_RAF, 1);
+}
+
+void platform_set_target_fps(int fps)
+{
+    g_target_fps = fps;
+    _apply_loop_timing();
+}
+
+// The browser doesn't tell the refresh rate; callers get the common value.
+int platform_get_max_fps(void)
+{
+    return 60;
+}
+
 int platform_get_monitors(monitor_info_t* infos)
 {
     return 0;
@@ -99,12 +122,13 @@ int main(int argc, char ** argv)
 
     printf("emscripten_set_main_loop\n");
     emscripten_set_main_loop([](){
+        if (!g_loop_running) { g_loop_running = true; _apply_loop_timing(); }   // the main loop exists now, timing can be set
         double wh = 0.0, hh = 0.0;
         emscripten_get_element_css_size(canvas, &wh, &hh);
         
         //printf("emscripten_get_element_css_size %.3f   %.3f\n", wh, hh);
         platform_tick(nullptr); 
-    }, 10, 1);
+    }, 0, 1);      // fps 0: requestAnimationFrame
 
     return 0;
 }

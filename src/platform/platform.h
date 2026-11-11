@@ -116,9 +116,20 @@ int                     platform_get_monitors(monitor_info_t * infos);
 rect_t                  platform_get_window_size(uintptr_t handle);
 void                    platform_set_window_size(rect_t rect, bool fullscreen);
 
-//void                  platform_notification_add(long secondsToDate, const char* message, const char* id);
-//void                  platform_notification_update(long secondsToDate, const char* message, const char* id);
-//void                  platform_notification_remove(const char* id);
+// Frame rate hint for the platform tick loop. fps <= 0 means "the display's native rate" (vsync driven), which is also
+// the default. It is a hint, not a promise: Apple/Android pick the closest rate the display supports (e.g. 30/40/60/80/120,
+// never 45), vsync can't go above the refresh rate, and the real rate drifts, so game logic must keep using Time::dt().
+// Safe to call before platform_main() returns and at any time later, from the main thread.
+void                    platform_set_target_fps(int fps);
+// Highest refresh rate of the main display in Hz (60 when unknown). Use it to decide which fps options to offer.
+int                     platform_get_max_fps(void);
+
+// Local notifications, implemented on iOS and Android only (other platforms don't define them, don't call them there).
+// secondsToDate: delay in seconds from now. id: caller chosen identifier, add/update with an existing id replaces the pending
+// notification, remove cancels it (and clears it from the notification center if it was already shown).
+void                    platform_notification_add(long secondsToDate, const char* message, const char* id);
+void                    platform_notification_update(long secondsToDate, const char* message, const char* id);
+void                    platform_notification_remove(const char* id);
 
 static void             input_push_event(input_event_t event);
 static int              input_pop_event(input_event_t* event);

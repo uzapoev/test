@@ -12,6 +12,7 @@
 
 
 static bool is_window_active = false;
+static int  g_target_fps = 0;       // <= 0: no limiter, vsync decides
 
 platform_ctx_t *g_platform_ctx = nullptr;
 /*
@@ -58,6 +59,37 @@ static void _fetch_monitors_info()
         DisplayConfigGetDeviceInfo(&name.header);
         printf("");
     }
+}
+
+// Frame limiter for platform_set_target_fps: sleeps (high resolution waitable timer when the OS has one) until the next
+// frame deadline, then spins for the last bit, because Sleep() alone is only accurate to ~1-15 ms.
+static void _limit_frame_rate(LARGE_INTEGER& deadline)
+{
+    LARGE_INTEGER freq, now;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+
+    if (g_target_fps <= 0) { deadline.QuadPart = 0; return; }
+
+    const LONGLONG period = freq.QuadPart / g_target_fps;
+    if (deadline.QuadPart == 0 || now.QuadPart - deadline.QuadPart > period * 4)    // first frame / long stall: don't catch up
+        deadline.QuadPart = now.QuadPart;
+    deadline.QuadPart += period;
+
+    static HANDLE timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    const LONGLONG spin = freq.QuadPart / 2000;                                     // spin the last 0.5 ms
+    LONGLONG left = deadline.QuadPart - now.QuadPart - spin;
+    if (left > 0) {
+        if (timer) {
+            LARGE_INTEGER due;
+            due.QuadPart = -(left * 10000000LL / freq.QuadPart);                    // 100 ns units, negative = relative
+            SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE);
+            WaitForSingleObject(timer, INFINITE);
+        } else {
+            Sleep((DWORD)(left * 1000 / freq.QuadPart));
+        }
+    }
+    do { QueryPerformanceCounter(&now); } while (now.QuadPart < deadline.QuadPart);
 }
 
 int main(int argc, char ** argv)
@@ -120,6 +152,7 @@ int main(int argc, char ** argv)
     platform_main((uintptr_t)hwnd, argc, argv);
 
     bool exit = false;
+    LARGE_INTEGER frame_deadline = {};
     while(!exit)
     {
         MSG msg = {};
@@ -199,6 +232,8 @@ int main(int argc, char ** argv)
 
             g_platform_ctx->g_point_states[0].dx = 0;
             g_platform_ctx->g_point_states[0].dy = 0;
+
+            _limit_frame_rate(frame_deadline);
         }
     }
 
@@ -211,6 +246,19 @@ rect_t platform_get_window_size(uintptr_t handle)
     RECT rect = {};
     GetWindowRect((HWND)handle, &rect);
     return { (int16_t)rect.left, (int16_t)rect.top, (int16_t)rect.right, (int16_t)rect.bottom };
+}
+
+void platform_set_target_fps(int fps)
+{
+    g_target_fps = fps;
+}
+
+int platform_get_max_fps(void)
+{
+    DEVMODE mode = { sizeof(DEVMODE) };
+    if (EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
+        return (int)mode.dmDisplayFrequency;
+    return 60;
 }
 
 #endif
