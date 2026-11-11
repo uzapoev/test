@@ -82,7 +82,13 @@ macro(append_linker_flags FLAGS)
 endmacro()
 
 if (EMSCRIPTEN)
+    add_compile_options(-pthread)
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
+
+    append_linker_flags("-pthread")
+    append_linker_flags("-sSHARED_MEMORY=1")
+    append_linker_flags("-sPTHREAD_POOL_SIZE=NAVIGATOR_HARDWARE_CONCURRENCY")
+    append_linker_flags("-sPROXY_TO_PTHREAD=1")
     
     append_linker_flags("-sFULL_ES3=1")
     append_linker_flags("-sUSE_WEBGPU=1")
@@ -161,6 +167,8 @@ set(SOURCES
     src/resource_manager.h
     src/common.cpp
     src/common.h
+    src/threadpool.cpp
+    src/threadpool.h
     src/mathlib.h
     src/memmgr.cpp
     src/memmgr.h
@@ -174,6 +182,13 @@ elseif(APPLE)
 endif()
 ]]
 
+if(APPLE)
+    # macOS + iOS platform layer (Objective-C++, ARC)
+    enable_language(OBJCXX)
+    list(APPEND SOURCES src/platform/platform_apple.mm)
+    set_source_files_properties(src/platform/platform_apple.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+endif()
+
 make_source_group(${SOURCES})
 message(${PROJECT_BINARY_DIR})
 add_executable(${PROJECT_NAME} ${SOURCES} )
@@ -181,6 +196,13 @@ add_executable(${PROJECT_NAME} ${SOURCES} )
 
 if(WIN32)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FBX_LIB_PATH}/x64/release/libfbxsdk.dll" "${PROJECT_BINARY_DIR}" VERBATIM)
+elseif (APPLE)
+    target_link_libraries(${PROJECT_NAME} PRIVATE "-framework Foundation" "-framework QuartzCore" "-framework Metal")
+    if(IOS)
+        target_link_libraries(${PROJECT_NAME} PRIVATE "-framework UIKit" "-framework UserNotifications")
+    else()
+        target_link_libraries(${PROJECT_NAME} PRIVATE "-framework Cocoa")
+    endif()
 elseif (EMSCRIPTEN)
     set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "--preload-file ../data")
-endif()
+endif()
