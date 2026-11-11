@@ -1408,33 +1408,110 @@ static vk_texture_t _vk_create_target_texture(vk_context_t* ctx, VkExtent3D exte
     return result;
 }
 
-void _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
+// Destroys everything that depends on the swapchain images: framebuffers, color views and the shared depth buffer.
+// The GPU must be done with them (the caller waits for idle). The render target objects themselves stay, they are refilled.
+static void _vk_destroy_surface_targets(vk_context_t* ctx, vk_surface_t* surface)
+{
+    for (uint32_t i = 0; i < GFX_MAX_SWAPCHAIN_IMAGES; ++i)
+    {
+        vk_render_target_t* target = surface->targets[i];
+        if (target == nullptr)
+            continue;
+
+        if (target->framebuffer != VK_NULL_HANDLE)
+            vkDestroyFramebuffer(ctx->vk_device, target->framebuffer, nullptr);
+        target->framebuffer = VK_NULL_HANDLE;
+
+        // the images belong to the swapchain, only the views are ours
+        for (uint32_t j = 0; j < target->color_attachment_count; ++j)
+        {
+            if (target->color_attachments[j].view != VK_NULL_HANDLE)
+                vkDestroyImageView(ctx->vk_device, target->color_attachments[j].view, nullptr);
+            target->color_attachments[j].view = VK_NULL_HANDLE;
+        }
+        target->color_attachment_count = 0;
+    }
+
+    if (surface->depth_view != VK_NULL_HANDLE)     vkDestroyImageView(ctx->vk_device, surface->depth_view, nullptr);
+    if (surface->depth_image != VK_NULL_HANDLE)    vkDestroyImage(ctx->vk_device, surface->depth_image, nullptr);
+    if (surface->depth_memory != VK_NULL_HANDLE)   vkFreeMemory(ctx->vk_device, surface->depth_memory, nullptr);
+    surface->depth_view = VK_NULL_HANDLE;
+    surface->depth_image = VK_NULL_HANDLE;
+    surface->depth_memory = VK_NULL_HANDLE;
+}
+
+// (Re)creates the swapchain, the depth buffer and the framebuffers for the current size of the window.
+// Returns false when the surface can't be rendered to right now: the window is minimized (zero size) or the swapchain
+// couldn't be created. The old swapchain stays untouched then, the caller skips the frame and tries again next frame.
+static bool _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
 {
     uint32_t format_count = 0;
     VkSurfaceFormatKHR formats[32] = {};
     vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->vk_physical_device, surface->surface, &format_count, NULL);
+    if (format_count > _countof(formats)) format_count = _countof(formats);
     vkGetPhysicalDeviceSurfaceFormatsKHR(ctx->vk_physical_device, surface->surface, &format_count, formats);
+    if (format_count == 0)
+        return false;
 
-    uint32_t present_mode_count = 0;
-    VkPresentModeKHR present_modes[8] = {};
-    vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->vk_physical_device, surface->surface, &present_mode_count, NULL);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->vk_physical_device, surface->surface, &present_mode_count, present_modes);
+    // later swapchains keep the format of the first one, the render pass (and every pipeline made for it) depends on it
+    VkSurfaceFormatKHR surface_format = formats[0];
+    if (surface->color_format != VK_FORMAT_UNDEFINED) {
+        for (uint32_t i = 0; i < format_count; ++i)
+            if (formats[i].format == surface->color_format) { surface_format = formats[i]; break; }
+    }
+    surface->color_format = surface_format.format;
+
+    // the render pass doesn't depend on the size, so it exists even while the window is minimized
+    if (surface->render_pass == VK_NULL_HANDLE)
+        _vk_create_renderpass(ctx, surface_format.format, surface->depth_format, VK_SAMPLE_COUNT_1_BIT, &surface->render_pass);
 
     VkSurfaceCapabilitiesKHR capabilities = { 0 };
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->vk_physical_device, surface->surface, &capabilities);
 
-    uint32_t image_count = GFX_MAX_FRAME_IN_FLIGHT;
-    surface->width = capabilities.currentExtent.width;
-    surface->height = capabilities.currentExtent.height;
+    // currentExtent == 0xFFFFFFFF means "the swapchain decides" (Wayland and others): keep the previous size within the limits
+    VkExtent2D extent = capabilities.currentExtent;
+    if (extent.width == 0xFFFFFFFFu) {
+        extent.width  = surface->width  ? surface->width  : capabilities.minImageExtent.width;
+        extent.height = surface->height ? surface->height : capabilities.minImageExtent.height;
+        extent.width  = gfx_min(gfx_max(extent.width,  capabilities.minImageExtent.width),  capabilities.maxImageExtent.width);
+        extent.height = gfx_min(gfx_max(extent.height, capabilities.minImageExtent.height), capabilities.maxImageExtent.height);
+    }
+    if (extent.width == 0 || extent.height == 0)
+        return false;                                       // minimized
+
+    // vsync: FIFO (always supported). Without vsync: MAILBOX (latest image wins, no tearing), else IMMEDIATE, else FIFO.
+    uint32_t present_mode_count = 0;
+    VkPresentModeKHR present_modes[16] = {};
+    vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->vk_physical_device, surface->surface, &present_mode_count, NULL);
+    if (present_mode_count > _countof(present_modes)) present_mode_count = _countof(present_modes);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->vk_physical_device, surface->surface, &present_mode_count, present_modes);
+
+    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
+    if (!surface->vsync) {
+        for (uint32_t i = 0; i < present_mode_count; ++i) {
+            if (present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR)        { present_mode = VK_PRESENT_MODE_MAILBOX_KHR; break; }
+            if (present_modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR)      present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        }
+    }
+
+    uint32_t min_images = gfx_max((uint32_t)GFX_MAX_FRAME_IN_FLIGHT, capabilities.minImageCount);
+    if (present_mode == VK_PRESENT_MODE_MAILBOX_KHR)
+        min_images = gfx_max(min_images, capabilities.minImageCount + 1);
+    if (capabilities.maxImageCount > 0)
+        min_images = gfx_min(min_images, capabilities.maxImageCount);
+    min_images = gfx_min(min_images, (uint32_t)GFX_MAX_SWAPCHAIN_IMAGES);
+
+    // Nothing may still use the old swapchain, its views, framebuffers or the depth buffer: another frame slot can be in flight.
+    vkDeviceWaitIdle(ctx->vk_device);
 
     VkSwapchainKHR prev_swapchain = surface->swapchain;
-    VkSurfaceFormatKHR surface_format = formats[0];
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkSwapchainCreateInfoKHR info   = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
         info.surface                = surface->surface;
-        info.minImageCount          = image_count;
+        info.minImageCount          = min_images;
         info.imageFormat            = surface_format.format;
         info.imageColorSpace        = surface_format.colorSpace;
-        info.imageExtent            = capabilities.currentExtent;
+        info.imageExtent            = extent;
         info.imageArrayLayers       = 1;
         info.imageUsage             = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;// | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         info.imageSharingMode       = VK_SHARING_MODE_EXCLUSIVE;
@@ -1442,60 +1519,63 @@ void _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
         info.pQueueFamilyIndices    = NULL;
         info.preTransform           = capabilities.currentTransform; //VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
         info.compositeAlpha         = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        info.presentMode            = surface->vsync? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_IMMEDIATE_KHR;
-        info.presentMode            = VK_PRESENT_MODE_MAILBOX_KHR;
+        info.presentMode            = present_mode;
         info.clipped                = VK_TRUE;
         info.oldSwapchain           = prev_swapchain;
-    VkResult result = vkCreateSwapchainKHR(ctx->vk_device, &info, NULL, &surface->swapchain);
-
-    // destroy old swapchain and attachment if resized
-    if (prev_swapchain != VK_NULL_HANDLE){
-        vkDestroySwapchainKHR(ctx->vk_device, prev_swapchain, nullptr);
-        for(uint32_t i = 0; i < image_count; ++i) {
-            
-            vk_render_target_t * target = surface->targets[i];
-            _destroy_vk_texture(ctx, &target->depth_attachments);
-            _destroy_vk_texture(ctx, &target->resolve_attachments);
-
-            vkDestroyFramebuffer(ctx->vk_device, target->framebuffer, nullptr);
-
-            for(uint32_t j = 0; j < target->color_attachment_count; ++j)
-                _destroy_vk_texture(ctx, &target->color_attachments[j]);
-         }
+    VkResult result = vkCreateSwapchainKHR(ctx->vk_device, &info, NULL, &swapchain);
+    if (result != VK_SUCCESS)
+    {
+        ctx->dbg_log(gfx_msg_error, "vkCreateSwapchainKHR failed!(%s)", string_VkResult(result));
+        return false;                                       // the old swapchain and targets are still intact
     }
 
-    //depth attachment
+    // the new swapchain exists, release everything that belonged to the old one
+    _vk_destroy_surface_targets(ctx, surface);
+    if (prev_swapchain != VK_NULL_HANDLE)
+        vkDestroySwapchainKHR(ctx->vk_device, prev_swapchain, nullptr);
+    surface->swapchain = swapchain;
+    surface->width     = extent.width;
+    surface->height    = extent.height;
+
+    // depth attachment, shared by every swapchain image
     VkExtent3D extend = { surface->width, surface->height, 1 };
-    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
-    auto depth_target = _vk_create_target_texture(ctx, extend, surface->depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, samples);
+    vk_texture_t depth_target = _vk_create_target_texture(ctx, extend, surface->depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_SAMPLE_COUNT_1_BIT);
+    surface->depth_image  = depth_target.image;
+    surface->depth_memory = depth_target.memory;
+    surface->depth_view   = depth_target.view;
 
-    // render pass
-    if (surface->render_pass == VK_NULL_HANDLE)
-        _vk_create_renderpass(ctx, surface_format.format, surface->depth_format, VK_SAMPLE_COUNT_1_BIT, &surface->render_pass);
-
-    // color attachments
-    VkImage images[8] = {};
-    vkGetSwapchainImagesKHR(ctx->vk_device, surface->swapchain, &image_count, NULL);
+    // color attachments: one target (view + framebuffer) per swapchain image
+    uint32_t image_count = GFX_MAX_SWAPCHAIN_IMAGES;
+    VkImage images[GFX_MAX_SWAPCHAIN_IMAGES] = {};
     vkGetSwapchainImagesKHR(ctx->vk_device, surface->swapchain, &image_count, images);
+    surface->image_count = image_count;
     for (uint32_t i = 0; i < image_count; ++i)
     {
+        if (surface->targets[i] == nullptr)
+        {
+            uint64_t target_handle = 0;
+            surface->targets[i] = (vk_render_target_t*)gfx_handle_pool_allocate_data(ctx->render_target_pool, &target_handle);
+            surface->targets[i]->handle = { target_handle };
+        }
         vk_render_target_t* target = surface->targets[i];
 
         VkImageView color_view = _vk_create_image_view(ctx, VK_IMAGE_VIEW_TYPE_2D, images[i], surface_format.format, 1);
 
-        VkImageView  attachments [] = { 
-            color_view, 
-            depth_target.view
+        VkImageView  attachments [] = {
+            color_view,
+            surface->depth_view
         };
 
-        VkFramebufferCreateInfo info = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-        info.renderPass         = surface->render_pass;
-        info.attachmentCount    = _countof(attachments);
-        info.pAttachments       = attachments;
-        info.width              = extend.width;
-        info.height             = extend.height;
-        info.layers             = 1;
-        result = vkCreateFramebuffer(ctx->vk_device, &info, nullptr, &target->framebuffer);
+        VkFramebufferCreateInfo fb_info = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+        fb_info.renderPass         = surface->render_pass;
+        fb_info.attachmentCount    = _countof(attachments);
+        fb_info.pAttachments       = attachments;
+        fb_info.width              = surface->width;
+        fb_info.height             = surface->height;
+        fb_info.layers             = 1;
+        result = vkCreateFramebuffer(ctx->vk_device, &fb_info, nullptr, &target->framebuffer);
+        if (result != VK_SUCCESS)
+            ctx->dbg_log(gfx_msg_error, "vkCreateFramebuffer failed!(%s)", string_VkResult(result));
 
         target->renderpass = surface->render_pass;
         target->extent = { surface->width, surface->height };
@@ -1506,7 +1586,9 @@ void _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
         target->color_attachments[0].view = color_view;
         target->color_attachments[0].format = surface_format.format;
     }
-    //target->depth_attachments = depth_target;
+
+    surface->needs_reset = false;
+    return true;
 }
 
 void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface)
@@ -1534,13 +1616,7 @@ void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface
     surface->sample_count   = desc->sample_count;
     surface->depth_format   = _vk_find_supported_format(vctx, depth_formats, _countof(depth_formats), VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
     surface->surface        = _vk_create_surface(vctx->vk_instance, desc->window_handle);
-    for(int i = 0; i < GFX_MAX_FRAME_IN_FLIGHT; ++i) {
-
-        uint64_t target_handle = 0;
-        surface->targets[i] = (vk_render_target_t*)gfx_handle_pool_allocate_data(vctx->render_target_pool, &target_handle);
-        surface->targets[i]->handle = { target_handle };
-    }
-    _vk_reset_surface(vctx, surface);
+    surface->needs_reset    = !_vk_reset_surface(vctx, surface);       // stays true when the window is minimized at start, frame_begin retries
 
     vctx->vk_default_renderpass = surface->render_pass;
     
@@ -1553,23 +1629,15 @@ void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* _surface)
     vk_context_t* vctx = from_ctx(ctx);
     vk_surface_t* surface = (vk_surface_t*)gfx_handle_pool_map(vctx->surface_pool, _surface->idx);
 
+    vkDeviceWaitIdle(vctx->vk_device);
+
+    _vk_destroy_surface_targets(vctx, surface);
     for (size_t i = 0; i < _countof(surface->targets); i++) {
-        vk_render_target_t* target = surface->targets[i];
-        if(target == nullptr)
-            continue;
-
-        if (target->framebuffer != VK_NULL_HANDLE)
-            vkDestroyFramebuffer(vctx->vk_device, surface->targets[i]->framebuffer, nullptr);
-        surface->targets[i] = VK_NULL_HANDLE;
-
-        for (size_t j = 0; j < _countof(target->color_attachments); j++) {
-            if(surface->targets[i] != nullptr)
-                _destroy_vk_texture(vctx, &surface->targets[i]->color_attachments[i]);
-        }
-        _destroy_vk_texture(vctx, &target->depth_attachments);
+        if (surface->targets[i] != nullptr)
+            gfx_handle_pool_free(vctx->render_target_pool, surface->targets[i]->handle.idx);
+        surface->targets[i] = nullptr;
     }
 
-    vkDeviceWaitIdle(vctx->vk_device);
     for (int i = 0; i < GFX_MAX_FRAME_IN_FLIGHT; ++i) {
         vkDestroySemaphore(vctx->vk_device, surface->semaphore_image_available[i], nullptr);
         vkDestroySemaphore(vctx->vk_device, surface->semaphore_rendering_finished[i], nullptr);
@@ -1580,6 +1648,10 @@ void vk_surface_destroy(gfx_context_t* ctx, gfx_surface_t* _surface)
     if (surface->swapchain != VK_NULL_HANDLE)
         vkDestroySwapchainKHR(vctx->vk_device, surface->swapchain, nullptr);
     surface->swapchain = VK_NULL_HANDLE;
+
+    if (surface->surface != VK_NULL_HANDLE)
+        vkDestroySurfaceKHR(vctx->vk_instance, surface->surface, nullptr);
+    surface->surface = VK_NULL_HANDLE;
 
     gfx_handle_pool_free(vctx->surface_pool, _surface->idx);
     _surface->idx = 0;
@@ -1638,10 +1710,27 @@ void __vk_cmd_begin_frame(gfx_command_buffer_t* cmd)
     vk_cmd_begin(cmd);
 }
 
+// Returns with *out_frame == nullptr when there is nothing to render to this frame (window minimized, swapchain can't be
+// rebuilt yet, lost surface); the caller skips the frame and must not call vk_frame_end for it.
 void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t** out_frame)
 {
     vk_context_t* vctx = from_ctx(ctx);
     vk_surface_t* surface = (vk_surface_t*)gfx_handle_pool_map(vctx->surface_pool, in_surface->idx);
+
+    *out_frame = nullptr;
+    if (surface->suboptimal_cooldown > 0)
+        --surface->suboptimal_cooldown;
+
+    // Some drivers never report a resize through VK_ERROR_OUT_OF_DATE_KHR, so compare the window size every frame too.
+    if (!surface->needs_reset)
+    {
+        VkSurfaceCapabilitiesKHR caps = {};
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vctx->vk_physical_device, surface->surface, &caps);
+        if (caps.currentExtent.width != 0xFFFFFFFFu && (caps.currentExtent.width != surface->width || caps.currentExtent.height != surface->height))
+            surface->needs_reset = true;
+    }
+    if (surface->needs_reset && !_vk_reset_surface(vctx, surface))
+        return;                                         // minimized or not recreatable yet, try again next frame
 
     uint32_t frame_idx = surface->current_frame;
 
@@ -1654,17 +1743,31 @@ void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t**
 
     VkSemaphore image_available_sem = surface->semaphore_image_available[frame_idx];
 
+    // OUT_OF_DATE: no image was acquired (the semaphore is not signaled), rebuild and try again, a few times at most.
+    // SUBOPTIMAL: the image IS acquired and usable, so render this frame and rebuild afterwards.
     uint32_t img_idx = 0;
-    while (auto result = vkAcquireNextImageKHR(vctx->vk_device, surface->swapchain, UINT64_MAX, image_available_sem, VK_NULL_HANDLE, &img_idx))
+    VkResult result = VK_ERROR_OUT_OF_DATE_KHR;
+    for (int attempt = 0; attempt < 3 && result == VK_ERROR_OUT_OF_DATE_KHR; ++attempt)
     {
-        if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
-            _vk_reset_surface(vctx, surface);
-            continue;
-        }
-        else {
-            vctx->dbg_log(gfx_msg_error, "vk_acquire_img failed with %s error", string_VkResult(result));
+        result = vkAcquireNextImageKHR(vctx->vk_device, surface->swapchain, UINT64_MAX, image_available_sem, VK_NULL_HANDLE, &img_idx);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR && !_vk_reset_surface(vctx, surface))
             return;
+    }
+    if (result == VK_SUBOPTIMAL_KHR) {
+        if (surface->suboptimal_cooldown == 0) {
+            surface->needs_reset = true;
+            surface->suboptimal_cooldown = 30;          // some platforms report SUBOPTIMAL forever (e.g. rotated display), don't rebuild every frame
         }
+    }
+    else if (result != VK_SUCCESS) {
+        vctx->dbg_log(gfx_msg_error, "vk_acquire_img failed with %s error", string_VkResult(result));
+        if (result == VK_ERROR_SURFACE_LOST_KHR)
+            surface->needs_reset = true;
+        return;
+    }
+    if (img_idx >= surface->image_count) {
+        vctx->dbg_log(gfx_msg_error, "vk_frame_begin : acquired image %u, but the swapchain has %u images", img_idx, surface->image_count);
+        return;
     }
 
     gfx_frame_t* frame = &surface->frames[frame_idx];
@@ -1672,9 +1775,9 @@ void vk_frame_begin(gfx_context_t* ctx, gfx_surface_t* in_surface, gfx_frame_t**
 
     frame->ctx = ctx;
     frame->surface = in_surface;
-    frame->frame_index = frame_idx;    
-    frame->swapchain_image_index = img_idx;      
-    frame->target = &surface->targets[img_idx]->handle; 
+    frame->frame_index = frame_idx;
+    frame->swapchain_image_index = img_idx;
+    frame->target = &surface->targets[img_idx]->handle;
 
     surface->swapchain_image_index = img_idx;
 
@@ -1736,8 +1839,17 @@ void vk_frame_end(gfx_frame_t* frame)
         present_info.swapchainCount     = 1;
         present_info.pSwapchains        = &surface->swapchain;
         present_info.pImageIndices      = &frame->swapchain_image_index;
-    if (auto result = vkQueuePresentKHR(vctx->present_queue.queue, &present_info)) {
-        vctx->dbg_log(gfx_msg_error, "vkQueuePresentKHR failed!(%s)", string_VkResult(result));
+    // OUT_OF_DATE / SUBOPTIMAL are normal while resizing: rebuild the swapchain at the start of the next frame
+    VkResult present_result = vkQueuePresentKHR(vctx->present_queue.queue, &present_info);
+    if (present_result == VK_ERROR_OUT_OF_DATE_KHR || (present_result == VK_SUBOPTIMAL_KHR && surface->suboptimal_cooldown == 0)) {
+        surface->needs_reset = true;
+        if (present_result == VK_SUBOPTIMAL_KHR)
+            surface->suboptimal_cooldown = 30;
+    }
+    else if (present_result != VK_SUCCESS && present_result != VK_SUBOPTIMAL_KHR) {
+        vctx->dbg_log(gfx_msg_error, "vkQueuePresentKHR failed!(%s)", string_VkResult(present_result));
+        if (present_result == VK_ERROR_SURFACE_LOST_KHR)
+            surface->needs_reset = true;
     }
 
     // 

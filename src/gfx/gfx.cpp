@@ -1000,6 +1000,8 @@ gfx_frame_t*  gfx_begin_frame(gfx_context_t* ctx, gfx_surface_t * surface)
 
 gfx_result gfx_end_frame(gfx_frame_t* frame)
 {
+    if (!frame)
+        return gfx_not_ready;       // gfx_begin_frame gave no frame (window minimized, swapchain not ready): nothing to submit
     g_tbl->pfn_frame_end(frame);
     return gfx_ok;
 }

@@ -29,6 +29,7 @@ extern "C" {
 #endif
 
 #define     GFX_MAX_FRAME_IN_FLIGHT             (2)
+#define     GFX_MAX_SWAPCHAIN_IMAGES            (8)     // the driver may give more images than frames in flight (usually 2-4)
 
 #define     GFX_MAX_DESCRIPTOR_SETS             (8)
 
@@ -151,6 +152,13 @@ typedef struct vk_surface_t {
 
     VkSurfaceKHR                        surface;
     VkSwapchainKHR                      swapchain;
+    VkFormat                            color_format;   // swapchain format, fixed after the first swapchain (the render pass is built for it)
+    uint32_t                            image_count;    // number of swapchain images (targets[0..image_count-1] are valid)
+    bool                                needs_reset;    // swapchain must be recreated before the next frame (resize, out of date, minimized)
+    uint32_t                            suboptimal_cooldown;    // frames during which VK_SUBOPTIMAL_KHR doesn't trigger a rebuild
+    VkImage                             depth_image;    // depth buffer shared by all swapchain targets
+    VkDeviceMemory                      depth_memory;
+    VkImageView                         depth_view;
     VkRenderPass                        render_pass;
     VkSampleCountFlags                  vk_msaa_samples;
 
@@ -165,7 +173,7 @@ typedef struct vk_surface_t {
     
     gfx_frame_t                         frames[GFX_MAX_FRAME_IN_FLIGHT];
 
-    struct vk_render_target_t*          targets[GFX_MAX_FRAME_IN_FLIGHT];
+    struct vk_render_target_t*          targets[GFX_MAX_SWAPCHAIN_IMAGES];     // one per swapchain image, indexed by the acquired image index
 } vk_surface_t;
 
 

@@ -1673,7 +1673,7 @@ gfx_api void        gfx_offset_allocator_free(gfx_offset_allocator_t* allocator,
 //
 #define             gfx_max(a, b) (((a) > (b)) ? (a) : (b))
 #define             gfx_min(a, b) (((a) < (b)) ? (a) : (b))
-#define             gfx_clamp(x, lo, hi)  gfx_min(hi, gfx_max(x, lo));
+#define             gfx_clamp(x, lo, hi)  gfx_min(hi, gfx_max(x, lo))
 
 
 static uint32_t     gfx_fourcc(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
