@@ -23,14 +23,15 @@ enum class task_status : uint8_t {
 
 // opaque: low 32 bits - slot index, high 32 bits - generation (0 is never a valid generation)
 typedef uint64_t task_handle_t;
+
 constexpr task_handle_t kInvalidTask = 0;
 
-class ThreadPool 
+class thread_pool 
 {
 public:
 
-    ThreadPool(uint32_t worker_count = std::thread::hardware_concurrency());
-    ~ThreadPool();
+    thread_pool(uint32_t worker_count = std::thread::hardware_concurrency());
+    ~thread_pool();
 
     bool            try_allocate(std::function<void()> fn, task_handle_t* out_handle);
 
