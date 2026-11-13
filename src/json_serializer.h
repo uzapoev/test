@@ -247,7 +247,15 @@ namespace json
             auto [ptr, ec] = std::to_chars(local_buf, local_buf + sizeof(local_buf), value);
             write_str_raw(local_buf, ptr - local_buf);
         }
+
+        // array / list element separator: call before every element written without add_key()
+        void next_element() {
+            if (!first_element) write_char(',');
+            first_element = false;
+        }
     };
+
+    template<class T> inline void serialize_json(T& object, json_writer& writer);
 
     namespace detail
     {
@@ -293,7 +301,12 @@ namespace json
                 {
                     object.*arg->member = (member_type)value.get_number_value();
                 }
-                else if constexpr (std::is_integral_v<member_type>)             // bool, int, int16m int32...
+                else if constexpr (std::is_same_v<member_type, bool>)           // json true/false (a number is accepted too)
+                {
+                    object.*arg->member = value.get_type() == sajson::TYPE_TRUE ||
+                                          (value.get_type() == sajson::TYPE_INTEGER && value.get_integer_value() != 0);
+                }
+                else if constexpr (std::is_integral_v<member_type>)             // int, int16m int32...
                 {
                     object.*arg->member = (member_type)value.get_integer_value();
                 }
@@ -318,25 +331,71 @@ namespace json
         }
     }
 
+    namespace detail
+    {
+        // one value of a json array (vector element): string, guid (as text), number, bool or a reflected struct
+        template<class T> inline void write_element(const T& value, json_writer& writer)
+        {
+            writer.next_element();
+            if constexpr (std::is_same_v<T, bool>) {
+                if (value) writer.write_str_raw("true", 4); else writer.write_str_raw("false", 5);
+            } else if constexpr (std::is_same_v<T, guid_t>) {
+                char buf[64] = {};
+                uuid::guid_to_str(value, buf);
+                writer.write_string_value(buf);
+            } else if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, interned_string>) {
+                writer.write_string_value(value.c_str());
+            } else if constexpr (std::is_floating_point_v<T>) {
+                writer.write_float_value((float)value);
+            } else if constexpr (std::is_integral_v<T>) {
+                writer.write_int_value((int32_t)value);
+            } else {
+                T copy = value;
+                serialize_json(copy, writer);   // writer state is restored by start_object/end_object
+            }
+        }
+    }
+
+    // Writes the reflected fields of `object` as a json object: bool, integers, floats, strings, guids (as text), vectors
+    // and nested reflected structs. (Vectors are written as json arrays, what deserialize_sajson reads back for reflected elements.)
     template<class T>
     inline void serialize_json(T& object,  json_writer & writer)
-    { 
-        if constexpr (!std::is_same_v<decltype(detail::get_properties<T>()), void>)
+    {
+        if constexpr (!std::is_same_v<decltype(reflection::get_properties<T>()), void>)
         {
-            detail::tuple_for_each(detail::get_properties<T>(), [&](size_t idx, auto* arg) {
+            writer.start_object();
+            reflection::for_each(reflection::get_properties<T>(), [&](size_t idx, auto* arg) {
 
                 using member_type = std::decay_t<decltype(object.*arg->member)>;
 
-                writer.add_key(arg->name);
-                if constexpr (std::is_assignable_v<member_type, std::string>) {
-                    writer.write_string_value(object.*arg->member.c_str());
+                if constexpr (std::is_same_v<member_type, bool>) {
+                    writer.add_key(arg->name);
+                    if (object.*arg->member) writer.write_str_raw("true", 4); else writer.write_str_raw("false", 5);
+                } else if constexpr (std::is_assignable_v<member_type&, std::string>) {
+                    writer.add_key(arg->name);
+                    writer.write_string_value((object.*arg->member).c_str());
                 } else if constexpr (std::is_floating_point_v<member_type>) {
-                    writer.write_float_value(object.*arg->member);
-                } else {
-                    writer.write_string_value("!!!!error");
-                    debug::breakpoint();
+                    writer.add_key(arg->name);
+                    writer.write_float_value((float)(object.*arg->member));
+                } else if constexpr (std::is_integral_v<member_type>) {
+                    writer.add_key(arg->name);
+                    writer.write_int_value((int32_t)(object.*arg->member));
+                } else if constexpr (std::is_same_v<member_type, guid_t>) {
+                    char buf[64] = {};
+                    uuid::guid_to_str(object.*arg->member, buf);
+                    writer.add_key(arg->name);
+                    writer.write_string_value(buf);
+                } else if constexpr (detail::is_vector<member_type>::value) {
+                    writer.add_key(arg->name);
+                    writer.start_array();
+                    for (const auto& e : object.*arg->member) detail::write_element(e, writer);
+                    writer.end_array();
+                } else if constexpr (!std::is_same_v<decltype(reflection::get_properties<member_type>()), void>) {
+                    writer.add_key(arg->name);
+                    serialize_json(object.*arg->member, writer);
                 }
             });
+            writer.end_object();
         }
     }
 
@@ -367,12 +426,9 @@ namespace json
     template<class T>
     inline std::string to_json_string(T& object)
     {
-        json_writer writer;
-        std::string jdata;
-        tuple_for_each(T::properties(), [&](size_t idx, auto* arg) { 
-            json::detail::jsonwrite(jdata, arg->name, object.*(arg->member)); 
-        });
-        return std::move(jdata);
+        json_writer writer(1024);
+        serialize_json(object, writer);
+        return std::string(writer.buffer.begin(), writer.buffer.end());
     }
 }
 
