@@ -46,7 +46,6 @@ struct path
 {
     static int copy_file(const char* src_path, const char* dest_path);
     static int ensure_directory_exists(char* canonical_dir_path);
-    static uint32_t canonicalize_resource_path(const char* src_path, char* out_canonical, uint32_t max_size);
 };
 
 struct debug

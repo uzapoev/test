@@ -352,34 +352,6 @@ int path::copy_file(const char* src_path, const char* dest_path)
     return success;
 }
 
-uint32_t path::canonicalize_resource_path(const char* src_path, char* out_canonical, uint32_t max_size)
-{
-    if (!src_path || src_path[0] == '\0') {
-        out_canonical[0] = '\0';
-        return 0;
-    }
-    
-    uint32_t dst_idx = 0;   
-    uint32_t src_idx = 0;
-    while (src_path[src_idx] != '\0' && dst_idx < max_size - 1) {
-        char c = src_path[src_idx];
-    
-        if (c == '\\') {
-            c = '/';
-        }
-        else if (c >= 'A' && c <= 'Z') {
-            c = c + ('a' - 'A');
-        }
-    
-        out_canonical[dst_idx] = c;
-        dst_idx++;
-        src_idx++;
-    }
-    
-    out_canonical[dst_idx] = '\0';
-    return dst_idx;
-}
-
 
 bool utf8::is_ascii(const char* data, size_t size)
 {
@@ -748,8 +720,10 @@ filestream::filestream(stream_impl* imp)
 
 filestream::~filestream()
 {
-    if(m_impl)
+    if(m_impl) {
+        m_impl->flush();
         delete m_impl;
+    }
 }
 
 
