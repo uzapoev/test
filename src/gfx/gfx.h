@@ -32,7 +32,7 @@
 #define __gfx_h__
 
 #include <assert.h>
-#include <stdbool.h>
+//#include <stdbool.h>
 #include <stdint.h> // uintXX_t 
 #include <stdlib.h> // uintXX_t 
 
@@ -569,6 +569,61 @@ typedef struct gfx_caps_t {
 
 
 // ============================================================================
+// --- Runtime Statistics (resource counts & memory) ---
+// ============================================================================
+
+/**
+ * @brief Memory split by residency. Values are ESTIMATES computed by gfx from descriptors
+ *        (w*h*bpp*layers*mips*samples, buffer size, ...); real driver usage is in gfx_stats_t::device.
+ *        On unified-memory devices (gfx_caps_t::has_unified_memory) everything is counted in gpu_ram.
+ */
+typedef struct gfx_memory_status_t {
+    uint64_t                cpu_ram;                            /**< Bytes resident in host (system) memory */
+    uint64_t                gpu_ram;                            /**< Bytes resident in device (VRAM) memory */
+} gfx_memory_status_t;
+
+/** @brief Live object count together with the pool capacity it is taken from (0 = unbounded). */
+typedef struct gfx_pool_usage_t {
+    uint32_t                count;                              /**< Currently alive objects */
+    uint32_t                peak;                               /**< Highest value of count since gfx_init */
+    uint32_t                capacity;                           /**< Max objects (see gfx_settings_t::limits), 0 if not limited */
+} gfx_pool_usage_t;
+
+/**
+ * @brief Snapshot of gfx resource usage. Persistent state only (alive objects + memory);
+ *        per-frame data such as draw calls is intentionally NOT tracked here (upper-level task).
+ */
+typedef struct gfx_stats_t {
+    // --- Memory (estimated, owned by gfx) ---
+    gfx_memory_status_t     textures_memory;                    /**< Textures incl. render targets / depth / MSAA / swapchain images */
+    gfx_memory_status_t     buffers_memory;                     /**< User buffers (vertex/index/uniform/storage/indirect) */
+    gfx_memory_status_t     internal_memory;                    /**< Staging + uniform ring, descriptor pools, acceleration structures, etc. */
+    gfx_memory_status_t     total_memory;                       /**< Sum of the three above */
+
+    // --- Object counters ---
+    gfx_pool_usage_t        textures;
+    gfx_pool_usage_t        buffers;
+    gfx_pool_usage_t        samplers;
+    gfx_pool_usage_t        shaders;
+    gfx_pool_usage_t        pipelines;                          /**< Graphics + mesh pipelines */
+    gfx_pool_usage_t        compute_pipelines;
+    gfx_pool_usage_t        raytrace_pipelines;
+    gfx_pool_usage_t        descriptor_sets;
+    gfx_pool_usage_t        render_targets;
+    gfx_pool_usage_t        acceleration_structures;
+    uint32_t                descriptor_pools;                   /**< Backend descriptor pools / heaps allocated (VkDescriptorPool, D3D12 heaps) */
+    uint32_t                surfaces;
+
+    // --- Driver / OS reported (optional, 0 if backend can't query; refreshed at most once per second) ---
+    struct {
+        uint64_t            gpu_budget;                         /**< Bytes the OS lets this process use (DXGI budget / VK_EXT_memory_budget) */
+        uint64_t            gpu_usage;                          /**< Bytes the process really occupies on device, includes driver overhead */
+        uint64_t            process_ram;                        /**< Process working set (host RAM) */
+    } device;
+} gfx_stats_t;
+
+
+// ============================================================================
 // --- Core Resource Descriptors ---
 // ============================================================================
 
@@ -804,6 +859,7 @@ typedef struct gfx_compute_pipeline_desc_t {
  * @brief Configuration payload reserved for modern next-gen geometry mesh shading pipeline state machine structures.
  * @todo Implement data layouts matching mesh/amplification shaders combinations.
  */
+
 typedef struct gfx_mesh_pipeline_desc_t{
     const char*                 label;                  /**< Optional debug metadata string literal identifier */
     gfx_shader_t*               shader;                 /**< Pointer to the compiled shader containing gfx_shader_mesh (and optionally gfx_shader_amplify) */
@@ -884,6 +940,13 @@ gfx_api void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
  * @param[out] caps Pointer to the structure that will be populated with device capabilities.
  */
 gfx_api void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
+
+/**
+ * @brief Copies a consistent snapshot of the current resource statistics. Cheap, thread-safe, safe to call every frame.
+ * @param ctx Reference to the active graphics context.
+ * @param[out] stats Structure that will be filled with the counters.
+ */
+gfx_api void gfx_get_stats(gfx_context_t* ctx, gfx_stats_t* stats);
 
 /**
  * @brief Creates an OS-tied presentation surface viewport.
@@ -1719,6 +1782,4 @@ static inline void gfx_stub_not_implemented(gfx_callback dbglog, const char* wha
 }
 
 
-
-
-#endif // __gfx_webgpu_h__
+#endif // __gfx_h__
