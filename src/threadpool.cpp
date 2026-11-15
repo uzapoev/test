@@ -5,6 +5,13 @@ static inline task_handle_t make_handle(uint32_t id, uint32_t generation) { retu
 static inline uint32_t      handle_id(task_handle_t h)                    { return uint32_t(h & 0xFFFFFFFFull); }
 static inline uint32_t      handle_gen(task_handle_t h)                   { return uint32_t(h >> 32); }
 
+
+thread_pool* thread_pool::shared()
+{
+    static thread_pool pool(std::thread::hardware_concurrency() - 1);
+    return &pool;
+}
+
 thread_pool::thread_pool(uint32_t worker_count) 
 {
     worker_count = std::max(1u, std::min(worker_count, std::thread::hardware_concurrency()));

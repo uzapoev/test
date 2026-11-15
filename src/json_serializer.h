@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <set>
 #include <charconv>
 
 #include <json/sajson.h>
@@ -257,6 +258,13 @@ namespace json
 
     template<class T> inline void serialize_json(T& object, json_writer& writer);
 
+    // Context of a read: whatever the caller wants to be handed down to every object being read (world, scene, ...).
+    // `no_ctx` for a caller that has none: deserialize_sajson(object, value) is deserialize_sajson(object, value, no_ctx{}).
+    struct no_ctx {};
+
+    template<class T, class Ctx>
+    inline void deserialize_sajson(T& object, const sajson::value& jvalue, Ctx& ctx);
+
     namespace detail
     {
         template<class T>
@@ -265,27 +273,39 @@ namespace json
         template<class T> 
         struct is_vector<std::vector<T> >   { static bool const value = true;        };
 
-        template <class T> inline void read_vector(const sajson::value & obj, std::vector<T>& value)
+        template <class T, class Ctx> inline void read_vector(const sajson::value & obj, std::vector<T>& value, Ctx& ctx)
         {
             for(size_t i = 0; i < obj.get_length(); ++i)
             {
                 T tmp_value = {};
-                deserialize_sajson(tmp_value, obj.get_array_element(i));
+                deserialize_sajson(tmp_value, obj.get_array_element(i), ctx);
                 value.push_back(std::move(tmp_value));
             }
         }
     }
 
  
-    template<class T>
-    inline void deserialize_sajson(T& object, const sajson::value& jvalue)
+    template<class T, class Ctx>
+    inline void deserialize_sajson(T& object, const sajson::value& jvalue, Ctx& ctx)
     {
         if constexpr (!std::is_same_v<decltype(reflection::get_properties<T>()), void>)
         {
+            auto count = jvalue.get_length();
+            std::set<std::string> keys;
+            for (int i = 0; i < count; ++i)
+            {
+                const sajson::string key = jvalue.get_object_key(i);
+                //const sajson::value  value = jvalue.get_object_value(i);
+                keys.insert(key.as_string());
+            }
+
             auto properties = reflection::get_properties<T>();
+
             reflection::for_each(properties, [&](size_t idx, auto* arg) {
 
                 sajson::string key(arg->name, strlen(arg->name));
+
+                keys.erase(key.as_string());
 
                 auto value = jvalue.get_value_of_key(key);
                 if (value.get_type() == sajson::TYPE_NULL)
@@ -295,7 +315,7 @@ namespace json
 
                 if constexpr (std::is_assignable_v<member_type, std::string>)   // string, string_view
                 {
-                    object.*arg->member = value.as_cstring();;
+                    object.*arg->member = value.as_cstring();
                 }
                 else if constexpr (std::is_floating_point_v<member_type>)        // float, double
                 {
@@ -312,7 +332,7 @@ namespace json
                 }
                 else if constexpr (detail::is_vector<member_type>::value)       // vector
                 {
-                    detail::read_vector(value, object.*arg->member);
+                    detail::read_vector(value, object.*arg->member, ctx);
                 }
                 else if constexpr (std::is_same_v<member_type, guid_t>)
                 {
@@ -321,14 +341,28 @@ namespace json
                 } 
                 else if constexpr (!std::is_same_v<decltype(reflection::get_properties<member_type>()), void>)
                 {
-                    deserialize_sajson(object.*arg->member, value);
+                    deserialize_sajson(object.*arg->member, value, ctx);
                 }
                 else
                 {
                     debug::log_error("[json_serializer]:unknmown type \'%s\'", typeid(member_type).name());
                 }
             }); // for_each
+
+            for(auto it: keys)
+            {
+                debug::log_error("[json_serializer]:unutilized json object with key: \'%s\'", it.c_str());
+            }
+
         }
+    }
+
+    // without a context: the callers that don't need one
+    template<class T>
+    inline void deserialize_sajson(T& object, const sajson::value& jvalue)
+    {
+        no_ctx ctx;
+        deserialize_sajson(object, jvalue, ctx);
     }
 
     namespace detail

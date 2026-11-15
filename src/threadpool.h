@@ -29,6 +29,7 @@ constexpr task_handle_t kInvalidTask = 0;
 class thread_pool 
 {
 public:
+    static thread_pool * shared();
 
     thread_pool(uint32_t worker_count = std::thread::hardware_concurrency());
     ~thread_pool();
