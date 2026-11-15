@@ -220,12 +220,28 @@ namespace json
             first_element = false;
         }
 
+        // json string: quote, backslash and control characters (a raw newline is not legal json) are escaped
         void write_string_value(const char* value) {
             write_char('"');
             while (*value) {
-                char c = *value;
-                if (c == '"' || c == '\\') { write_char('\\'); }
-                write_char(c);
+                const unsigned char c = (unsigned char)*value;
+                switch (c) {
+                    case '"':   write_str_raw("\\\"", 2); break;
+                    case '\\':  write_str_raw("\\\\", 2); break;
+                    case '\n':  write_str_raw("\\n", 2);  break;
+                    case '\r':  write_str_raw("\\r", 2);  break;
+                    case '\t':  write_str_raw("\\t", 2);  break;
+                    case '\b':  write_str_raw("\\b", 2);  break;
+                    case '\f':  write_str_raw("\\f", 2);  break;
+                    default:
+                        if (c < 0x20) {
+                            char esc[8];
+                            int n = snprintf(esc, sizeof(esc), "\\u%04x", (unsigned)c);
+                            write_str_raw(esc, (size_t)n);
+                        } else {
+                            write_char((char)c);
+                        }
+                }
                 value++;
             }
             write_char('"');
@@ -260,7 +276,10 @@ namespace json
 
     // Context of a read: whatever the caller wants to be handed down to every object being read (world, scene, ...).
     // `no_ctx` for a caller that has none: deserialize_sajson(object, value) is deserialize_sajson(object, value, no_ctx{}).
-    struct no_ctx {};
+    struct no_ctx {
+        template<class T, class Ctx> 
+        void unused(T& t, const sajson::string& k, const sajson::value& v, Ctx&) {};
+    };
 
     template<class T, class Ctx>
     inline void deserialize_sajson(T& object, const sajson::value& jvalue, Ctx& ctx);
@@ -272,6 +291,13 @@ namespace json
 
         template<class T> 
         struct is_vector<std::vector<T> >   { static bool const value = true;        };
+
+
+        inline bool key_equals(const sajson::string& key, const char* name)
+        {
+            const size_t length = strlen(name);
+            return key.length() == length && memcmp(key.data(), name, length) == 0;
+        }
 
         template <class T, class Ctx> inline void read_vector(const sajson::value & obj, std::vector<T>& value, Ctx& ctx)
         {
@@ -290,24 +316,19 @@ namespace json
     {
         if constexpr (!std::is_same_v<decltype(reflection::get_properties<T>()), void>)
         {
-            auto count = jvalue.get_length();
-            std::set<std::string> keys;
-            for (int i = 0; i < count; ++i)
-            {
-                const sajson::string key = jvalue.get_object_key(i);
-                //const sajson::value  value = jvalue.get_object_value(i);
-                keys.insert(key.as_string());
-            }
-
+            size_t found = 0;                         // keys of the json that are fields of T
             auto properties = reflection::get_properties<T>();
 
             reflection::for_each(properties, [&](size_t idx, auto* arg) {
 
                 sajson::string key(arg->name, strlen(arg->name));
 
-                keys.erase(key.as_string());
+                const size_t at = jvalue.find_object_key(key);
+                if (at >= jvalue.get_length())
+                    return;                                 // no such key
+                ++found;                                    // the key is in the json (a json null is a key too)
 
-                auto value = jvalue.get_value_of_key(key);
+                auto value = jvalue.get_object_value(at);
                 if (value.get_type() == sajson::TYPE_NULL)
                     return;
 
@@ -348,12 +369,28 @@ namespace json
                     debug::log_error("[json_serializer]:unknmown type \'%s\'", typeid(member_type).name());
                 }
             }); // for_each
+  
 
-            for(auto it: keys)
+            // keys without a field: the context takes them (ctx.unused(object, key, value)), else it is reported
+            // (all the keys are fields in most objects: nothing to look for then)
+            const size_t count = jvalue.get_length();
+            if (found < count)
             {
-                debug::log_error("[json_serializer]:unutilized json object with key: \'%s\'", it.c_str());
-            }
+                for (size_t i = 0; i < count; ++i)
+                {
+                    sajson::string key = jvalue.get_object_key(i);
+                    sajson::value value = jvalue.get_object_value(i);
 
+                    bool is_field = false;
+                    reflection::for_each(properties, [&](size_t, auto* arg) {
+                        if (detail::key_equals(key, arg->name)) is_field = true;
+                    });
+                    if (is_field)
+                        continue;
+
+                    ctx.unused(object, key, value, ctx);
+                }
+            }
         }
     }
 
@@ -454,6 +491,17 @@ namespace json
         sajson::document doc = sajson::parse(   sajson::dynamic_allocation(),
                                                 sajson::mutable_string_view(size, data));
         deserialize_sajson(object, doc.get_root());
+        return std::move(object);
+    }
+
+    template<class T, class Ctx>
+    inline T from_json_string_ctx(size_t size, char* data, Ctx & ctx)
+    {
+        T object = {};
+
+        sajson::document doc = sajson::parse(sajson::dynamic_allocation(),
+            sajson::mutable_string_view(size, data));
+        deserialize_sajson(object, doc.get_root(), ctx);
         return std::move(object);
     }
 
