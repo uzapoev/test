@@ -440,6 +440,7 @@ void debug::log(const char* msg, ...)
 {
     arg_vprintf(msg);
     printf("\n\033[0m");
+    fflush(stdout);         // stdout redirected to a file is fully buffered: a crash or a kill would lose the message
 }
 
 void debug::log_error(const char* msg, ...)
@@ -447,6 +448,7 @@ void debug::log_error(const char* msg, ...)
     printf("\n\x1b[31m");
     arg_vprintf(msg);
     printf("\033[0m");
+    fflush(stdout);
 }
 
 void debug::log_warning(const char* msg, ...)
@@ -454,6 +456,7 @@ void debug::log_warning(const char* msg, ...)
     printf("\n\x1B[33m");
     arg_vprintf(msg);
     printf("\033[0m");
+    fflush(stdout);
 }
 
 void debug::breakpoint()
