@@ -14,6 +14,7 @@
 // ============================================================================
 bool resource_compile_mesh(const char* src, const char* dst, const char* meta, platform_type type, void* userdata)
 {
+    (void)src; (void)dst; (void)meta; (void)type; (void)userdata;
     path::copy_file(src, dst);
     return true;
 }
@@ -25,6 +26,7 @@ bool resource_compile_mesh(const char* src, const char* dst, const char* meta, p
 //asset_compile_func_t
 bool resource_compile_shader(const char* src, const char* dst, const char* meta, platform_type type, void* userdata)
 {
+    (void)src; (void)dst; (void)meta; (void)type; (void)userdata;
     static gfx_shader_compiler_context_t* compiler_context = nullptr;
     if (compiler_context == nullptr)
         gfx_shader_compiler_context_create(0, &compiler_context);
@@ -79,6 +81,7 @@ ReflectObjectExternal2(texture_meta_t, guid, maxTextureSize, srgb, compress);
 
 bool resource_compile_texture(const char* src, const char* dst, const char* meta, platform_type type, void* userdata)
 {
+    (void)src; (void)dst; (void)meta; (void)type; (void)userdata;
     std::string python_exe = "python"; // Change to "python3" depending on your OS configuration
     std::string script_path = "../tools/texture_converter.py";
     std::string src_file = std::string("\"").append(src).append("\"");
@@ -104,6 +107,11 @@ bool resource_compile_texture(const char* src, const char* dst, const char* meta
 
     debug::log_warning("[C++] Executing script: %s\n", command.c_str());
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // iOS cannot spawn processes: textures must be compiled on the host and shipped with the app.
+    debug::log_error("[resource_compiler] texture compilation is not available on iOS: %s\n", src_file.c_str());
+    return false;
+#else
     task_handle_t handle = 0;
     
     while(!thread_pool::shared()->try_allocate([command](){ std::system(command.c_str()); }, &handle))
@@ -113,6 +121,7 @@ bool resource_compile_texture(const char* src, const char* dst, const char* meta
     thread_pool::shared()->submit(handle);
 
     return false;
+#endif
 }
 
 // ============================================================================
@@ -123,6 +132,7 @@ bool resource_compile_texture(const char* src, const char* dst, const char* meta
 // binary::read_blob<material_json>.
 bool resource_compile_material(const char* src, const char* dst, const char* meta, platform_type type, void* userdata)
 {
+    (void)src; (void)dst; (void)meta; (void)type; (void)userdata;
     auto data = resource_manager::file_data(src);
     if (data.empty()) {
         debug::log_error("[material] cannot read '%s'", src);
@@ -165,6 +175,7 @@ bool resource_compile_material(const char* src, const char* dst, const char* met
 // ============================================================================
 bool resource_compile_scene(const char* src, const char* dst, const char* meta, platform_type type, void* userdata)
 {
+    (void)src; (void)dst; (void)meta; (void)type; (void)userdata;
     if (std::filesystem::exists(dst))
         return false;
 

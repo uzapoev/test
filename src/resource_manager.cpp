@@ -81,18 +81,6 @@ static const char* compiled_asset_extension(asset_type type/*, platform_type typ
 }
 
 
-static void for_each_file_recursive(const std::filesystem::path & path, std::function<void(const std::filesystem::path&)> callback)
-{
-    if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path) ) {
-        return;
-    }
-
-    for (const auto& it : std::filesystem::recursive_directory_iterator(path)) {
-        if(!std::filesystem::is_directory(it))
-            callback(it.path());
-    }
-}
-
 
 static std::string to_lower_ascii(std::string s)
 {
@@ -162,7 +150,6 @@ bool parse_name_with_guid_hand(const char* filename, char* out_name, guid_t* out
     char guid_buf[64] = { 0 };
     char flag_or_ext[64] = { 0 };
     char ext_buf[64] = { 0 };
-    char extra[8] = { 0 };
     int scanned = sscanf(filename, "%255[^.].%32[^.].%63[^.].%s", out_name, guid_buf, flag_or_ext, ext_buf);
 
     if(strlen(guid_buf) == 32 && uuid::is_guid_str(guid_buf)) {
@@ -195,9 +182,9 @@ asset_handle_t material_manager::create_instance(class resource_manager& m, asse
 }
 
 void material_manager::destroy_instance(asset_handle_t instance_handle)
-{/*
+{
     if (instance_handle.instance_id == 0) return; // base material - do't unload
-
+/*
     uint16_t inst_id = instance_handle.instance_id;
     material_instance_t* inst = &m_instances[inst_id];
 
@@ -211,14 +198,22 @@ void material_manager::destroy_instance(asset_handle_t instance_handle)
 
 void material_manager::set_global_texture(uint64_t id, asset_handle_t texture_handle)
 {
+    (void)id;
+    (void)texture_handle;
 }
 void material_manager::set_global_texture(const char* name, asset_handle_t texture_handle)
 {
+    (void)name;
+    (void)texture_handle;
 }
 
 void material_manager::set_global_data(uint64_t id, void* data, uint32_t size)
 {
- /*  
+    (void)id;
+    (void)data;
+    (void)size;
+    
+ /*
  * struct uniform_material_binding{
     uint32_t        uniform_id;
     const char *    uniform_name;
@@ -1071,8 +1066,11 @@ void resource_manager::set_cash_path(const char* path)
 
     strcat(tmp, platform_string(m_platform_type));
 
-    if(!std::filesystem::exists(tmp))
-        std::filesystem::create_directories(tmp);
+    std::error_code ec;     // no exceptions in this project: a throw here terminates the app (e.g. read-only cwd on iOS)
+    if(!std::filesystem::exists(tmp, ec))
+        std::filesystem::create_directories(tmp, ec);
+    if (ec)
+        debug::log_error("resource_manager::set_cash_path('%s'): %s", tmp, ec.message().c_str());
 
     m_asset_db.set_cash(path, std::filesystem::path(tmp).generic_string());
     load_asset_db();        // what the previous runs compiled, the compiled resources can be used without the sources

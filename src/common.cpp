@@ -278,7 +278,13 @@ uint64_t hasher::xxhash64(const void* input, size_t length, uint64_t seed)
 
 int path::ensure_directory_exists(const char* canonical_dir_path) {
 
-    std::filesystem::create_directories(canonical_dir_path);
+    // error_code overload: the project builds with -fno-exceptions, a throw here would terminate the app
+    std::error_code ec;
+    std::filesystem::create_directories(canonical_dir_path, ec);
+    if (ec) {
+        debug::log_error("path::ensure_directory_exists('%s'): %s", canonical_dir_path, ec.message().c_str());
+        return 0;
+    }
     return 1;
 }
 

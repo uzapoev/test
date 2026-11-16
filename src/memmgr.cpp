@@ -26,6 +26,24 @@ static volatile bool    g_trace_allocations = 0;
 
 
 
+#if !defined(_WIN32)
+    #include <stdlib.h>
+    #if defined(__APPLE__)
+        #include <malloc/malloc.h>
+        #define sys_usable_size(p) malloc_size(p)
+    #else
+        #include <malloc.h>
+        #define sys_usable_size(p) malloc_usable_size(p)
+    #endif
+    static inline void* _aligned_malloc(size_t size, size_t alignment) {
+        if (alignment < sizeof(void*)) alignment = sizeof(void*);
+        void* p = nullptr;
+        return posix_memalign(&p, alignment, size) == 0 ? p : nullptr;
+    }
+    static inline size_t _aligned_msize(void* p, size_t, size_t) { return p ? sys_usable_size(p) : 0; }
+    static inline void   _aligned_free(void* p) { ::free(p); }
+#endif
+
 #define sys_malloc(x)           ::malloc(x)
 #define sys_free(x)             ::free(x)
 

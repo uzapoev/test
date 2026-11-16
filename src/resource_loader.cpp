@@ -1,4 +1,5 @@
 #include "resource_loader.h"
+#include <sys/stat.h>   // stat
 #include "common.h"
 #include "resource_manager.h"
 #include "material_data.h"
@@ -148,15 +149,15 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
 
     if(pool != nullptr)
     {
-        uint32_t offset_vb = (uint32_t)gfx_offset_allocator_allocate(pool->vertex_buffer_allocator, vertex_buffer_size);
-        uint32_t offset_ib = (uint32_t)gfx_offset_allocator_allocate(pool->index_buffer_allocator, index_buffer_size);
+        intptr_t offset_vb = gfx_offset_allocator_allocate(pool->vertex_buffer_allocator, vertex_buffer_size);
+        intptr_t offset_ib = gfx_offset_allocator_allocate(pool->index_buffer_allocator, index_buffer_size);
 
         if(offset_vb != -1)
         {
             out_mesh->vertex_buffer = pool->vertex_buffer;
-            out_mesh->vertex_buffer_offset = offset_vb;
+            out_mesh->vertex_buffer_offset = (uint32_t)offset_vb;
 
-            gfx_buffer_update_data(ctx, pool->vertex_buffer, vertex_data_ptr, vertex_buffer_size, offset_vb);
+            gfx_buffer_update_data(ctx, pool->vertex_buffer, vertex_data_ptr, vertex_buffer_size, (uint32_t)offset_vb);
         }
         else
         {
@@ -166,9 +167,9 @@ void load_mesh_from_file_data(gfx_context_t * ctx, mesh_pool_t* pool, const char
         if (offset_ib != -1)
         {
             out_mesh->index_buffer = pool->index_buffer;
-            out_mesh->index_buffer_offset = offset_ib;
+            out_mesh->index_buffer_offset = (uint32_t)offset_ib;
 
-            gfx_buffer_update_data(ctx, pool->index_buffer, index_data_ptr, index_buffer_size, offset_ib);
+            gfx_buffer_update_data(ctx, pool->index_buffer, index_data_ptr, index_buffer_size, (uint32_t)offset_ib);
         }
         else
         {
@@ -344,12 +345,26 @@ bool parse_texture_data(const char* name, char* data, uint32_t size, gfx_texture
             {
                 case MAKEFOURCC('D', 'X', 'T', '1'): desc.format = gfx_pixel_format_bc1; break;
                 case MAKEFOURCC('D', 'X', 'T', '5'): desc.format = gfx_pixel_format_bc3; break;
+                case MAKEFOURCC('A', 'T', 'I', '1'):
+                case MAKEFOURCC('B', 'C', '4', 'U'): desc.format = gfx_pixel_format_bc4; break;
+                case MAKEFOURCC('A', 'T', 'I', '2'):
+                case MAKEFOURCC('B', 'C', '5', 'U'): desc.format = gfx_pixel_format_bc5; break;
                 case MAKEFOURCC('D', 'X', '1', '0'): {
+                    // xcrun TextureConverter always writes the DX10 extension header
                     dds_header_dx10_t* header10 = (dds_header_dx10_t*)desc.data;
                     desc.data = (data + sizeof(dds_magic) + header->size + sizeof(dds_header_dx10_t));
                     switch(header10->dxgiFormat) {
-                        case 95: desc.format = gfx_pixel_format_bc6h; break;
-                        case 98: desc.format = gfx_pixel_format_bc7; break;
+                        case 28: desc.format = gfx_pixel_format_rgba8;      break;  // DXGI_FORMAT_R8G8B8A8_UNORM
+                        case 29: desc.format = gfx_pixel_format_rgba8_srgb; break;  // DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+                        case 71: desc.format = gfx_pixel_format_bc1;        break;  // DXGI_FORMAT_BC1_UNORM
+                        case 72: desc.format = gfx_pixel_format_bc1_srgb;   break;  // DXGI_FORMAT_BC1_UNORM_SRGB
+                        case 77: desc.format = gfx_pixel_format_bc3;        break;  // DXGI_FORMAT_BC3_UNORM
+                        case 78: desc.format = gfx_pixel_format_bc3_srgb;   break;  // DXGI_FORMAT_BC3_UNORM_SRGB
+                        case 80: desc.format = gfx_pixel_format_bc4;        break;  // DXGI_FORMAT_BC4_UNORM
+                        case 83: desc.format = gfx_pixel_format_bc5;        break;  // DXGI_FORMAT_BC5_UNORM
+                        case 95: desc.format = gfx_pixel_format_bc6h;       break;  // DXGI_FORMAT_BC6H_UF16
+                        case 98: desc.format = gfx_pixel_format_bc7;        break;  // DXGI_FORMAT_BC7_UNORM
+                        case 99: desc.format = gfx_pixel_format_bc7_srgb;   break;  // DXGI_FORMAT_BC7_UNORM_SRGB
                         default:    
                             debug::log_error("texture %s has unsupported format: %d", name? name: "nullptr", header10->dxgiFormat);
                             debug::breakpoint();// wtf
@@ -363,38 +378,37 @@ bool parse_texture_data(const char* name, char* data, uint32_t size, gfx_texture
             desc.width      = header->width;
             desc.height     = header->height;
             desc.depth      = header->depth == 0? 1: header->depth;
-            desc.mip_levels = header->mipmap_count;
+            desc.mip_levels = header->mipmap_count == 0 ? 1 : header->mipmap_count;   // 0 when DDSD_MIPMAPCOUNT is not set
         } break;
 
         case ktx_magic: {
             ktx_header_t * header = (ktx_header_t*) (data);
             desc.data = (data + sizeof(ktx_header_t) + header->keyValueDataLength);
-            bool srgb = false;
-            //https://registry.khronos.org/OpenGL/extensions/KHR/KHR_texture_compression_astc_hdr.txt
+            // https://registry.khronos.org/OpenGL/extensions/KHR/KHR_texture_compression_astc_hdr.txt
             switch (header->glInternalFormat)
             {
-                case 0x93D0: srgb = true; [[fallthrough]];
-                case 0x93B0: desc.format = gfx_pixel_format_astc4x4;        break;  //COMPRESSED_RGBA_ASTC_4x4_KH
-                    
-                case 0x93D2: srgb = true; [[fallthrough]];
-                case 0x93B2: desc.format = gfx_pixel_format_astc5x5;        break;  //COMPRESSED_RGBA_ASTC_4x4_KH
-                    
-                case 0x93D4: srgb = true; [[fallthrough]];
-                case 0x93B4: desc.format = gfx_pixel_format_astc6x6;        break;  //COMPRESSED_RGBA_ASTC_6x6_KHR
-                    
-                case 0x93D7: srgb = true; [[fallthrough]];
-                case 0x93B7: desc.format = gfx_pixel_format_astc8x8;        break;  //COMPRESSED_RGBA_ASTC_8x8_KHR
-                    
-                case 0x93DB: srgb = true; [[fallthrough]];
-                case 0x93BB: desc.format = gfx_pixel_format_astc10x10;      break;  //COMPRESSED_RGBA_ASTC_10x10_KHR
-                    
-                case 0x93DD: srgb = true; [[fallthrough]];
-                case 0x93BD: desc.format = gfx_pixel_format_astc12x12;      break;  //COMPRESSED_RGBA_ASTC_12x12_KHR
+                case 0x93B0: desc.format = gfx_pixel_format_astc4x4;            break;  // COMPRESSED_RGBA_ASTC_4x4_KHR
+                case 0x93D0: desc.format = gfx_pixel_format_astc4x4_srgb;       break;  // COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR
+                case 0x93B2: desc.format = gfx_pixel_format_astc5x5;            break;  // COMPRESSED_RGBA_ASTC_5x5_KHR
+                case 0x93D2: desc.format = gfx_pixel_format_astc5x5_srgb;       break;
+                case 0x93B4: desc.format = gfx_pixel_format_astc6x6;            break;  // COMPRESSED_RGBA_ASTC_6x6_KHR
+                case 0x93D4: desc.format = gfx_pixel_format_astc6x6_srgb;       break;
+                case 0x93B7: desc.format = gfx_pixel_format_astc8x8;            break;  // COMPRESSED_RGBA_ASTC_8x8_KHR
+                case 0x93D7: desc.format = gfx_pixel_format_astc8x8_srgb;       break;
+                case 0x93BB: desc.format = gfx_pixel_format_astc10x10;          break;  // COMPRESSED_RGBA_ASTC_10x10_KHR
+                case 0x93DB: desc.format = gfx_pixel_format_astc10x10_srgb;     break;
+                case 0x93BD: desc.format = gfx_pixel_format_astc12x12;          break;  // COMPRESSED_RGBA_ASTC_12x12_KHR
+                case 0x93DD: desc.format = gfx_pixel_format_astc12x12_srgb;     break;
 
-                case 0x9274: desc.format = gfx_pixel_format_etc1;           break;
-                case 0x9276: desc.format = gfx_pixel_format_etc2_rgb8a1;    break;
-                case 0x9278: desc.format = gfx_pixel_format_etc2_rgba8;     break; // GL_COMPRESSED_RGBA8_ETC2_EAC
-                default: return false;
+                case 0x9274: desc.format = gfx_pixel_format_etc1;               break;  // GL_COMPRESSED_RGB8_ETC2
+                case 0x9275: desc.format = gfx_pixel_format_etc1_srgb;          break;  // GL_COMPRESSED_SRGB8_ETC2
+                case 0x9276: desc.format = gfx_pixel_format_etc2_rgb8a1;        break;  // GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2
+                case 0x9277: desc.format = gfx_pixel_format_etc2_rgb8a1_srgb;   break;  // GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2
+                case 0x9278: desc.format = gfx_pixel_format_etc2_rgba8;         break;  // GL_COMPRESSED_RGBA8_ETC2_EAC
+                case 0x9279: desc.format = gfx_pixel_format_etc2_rgba8_srgb;    break;  // GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC
+                default:
+                    debug::log_error("texture %s: unsupported KTX glInternalFormat 0x%X", name ? name : "nullptr", header->glInternalFormat);
+                    return false;
             }
             
             uint32_t offset = 4;

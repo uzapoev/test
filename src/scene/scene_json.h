@@ -83,20 +83,21 @@ struct scene_ctx
         bool processed = true;
         if constexpr(std::is_same_v<T, node>)
         {
+            node & _node = obj;
             if (json::detail::key_equals(k, "transform")) {
-                auto t = obj.add_component<transform>();
+                auto t = _node.add_component<transform>();
                 json::deserialize_sajson(*t, v, ctx);
             } 
             else if (json::detail::key_equals(k, "renderer")) {
-                auto r = obj.add_component<renderer>();
+                auto r = _node.add_component<renderer>();
                 json::deserialize_sajson(*r, v, ctx);
             } 
             else if (json::detail::key_equals(k, "collider")) {
-                auto c = obj.add_component<collider>();
+                auto c = _node.add_component<collider>();
                 json::deserialize_sajson(*c, v, ctx);
             } 
             else if (json::detail::key_equals(k, "light")) {
-                auto l = obj.add_component<light>();
+                auto l = _node.add_component<light>();
                 json::deserialize_sajson(*l, v, ctx);
             }
             else if (json::detail::key_equals(k, "prefab")) {

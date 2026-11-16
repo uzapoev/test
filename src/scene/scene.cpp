@@ -68,7 +68,6 @@ node::node()
 
 node* scene::create_node(interned_string name, guid_t guid)
 {
-    static uint64_t counter = 0;
     node* result = new node();
     result->name = name;
     result->guid = guid;

@@ -17,12 +17,16 @@
 #include "json_serializer.h"
 
 #include "scene/scene.h"
+#if __has_include("scripting/scripting.h")
 #include "scripting/scripting.h"
+#endif
 
 #include "resource_manager.h"
 #include "resource_compiler.h"
 
+#if __has_include("mesh.h")
 #include "mesh.h"
+#endif
 #include "threadpool.h"
 
 
@@ -91,7 +95,7 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     g_handle = handle;
     gfx_settings_t settings = {0};
         settings.handle     = handle;
-        settings.backend    = gfx_backend_vulkan;
+        settings.backend    = gfx_backend_auto;    // metal on apple, vulkan on win/android, webgpu on web
     //    settings.backend    = gfx_backend_webgpu;
    //     settings.options    = gfx_options_debug;
         settings.dbglog     = log_func;
