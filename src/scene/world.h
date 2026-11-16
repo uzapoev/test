@@ -149,29 +149,25 @@ public:
     
     node* load_node(class scene* _scene, filestream* stream)
     {    
-        guid_t guid     = stream->read<guid_t>();
-        guid_t parent   = stream->read<guid_t>();
-        interned_string name    = stream->read<interned_string>();
-        interned_string tag     = stream->read<interned_string>();
-        uint64_t flags          = stream->read<uint64_t>();
-        return _scene->create_node(name, guid);
+        node *new_node = _scene->create_node();
+        new_node->guid      = stream->read<guid_t>();
+        new_node->parent    = stream->read<guid_t>();
+        new_node->name      = stream->read<interned_string>();
+        new_node->tag       = stream->read<interned_string>();
+        new_node->flags     = stream->read<uint64_t>();
+        return new_node;
     }
 
     void save_node(struct node* _node, filestream* stream)
     {
-     /*   binary_writer writer;
-        writer.write((uint32_t)_node->guid.length());
+        binary_writer writer;
+        writer.write(_node->guid);
+        writer.write(_node->parent);
+        writer.write<interned_string>(_node->name);
+        writer.write<interned_string>(_node->tag);
+        writer.write(_node->flags);
 
-        uint32_t size = (uint32_t)_node->guid.length() + sizeof(uint16_t) +
-                        (uint32_t)_node->name.length() + sizeof(uint16_t) +
-                        (uint32_t)_node->tag.length()  + sizeof(uint16_t) +
-                        sizeof(_node->flags);
-
-        write_chunk_info(stream, scene::component_node, size);
-        stream->write(_node->guid);
-        stream->write(_node->name);
-        stream->write(_node->tag);
-        stream->write(_node->flags);*/
+        write_chunk(stream, scene::component_node, writer.size(), writer.data());
     }
     /**/
 };
