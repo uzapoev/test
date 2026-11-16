@@ -4,7 +4,7 @@
 #include "../mathlib.h"
 #include "../common.h"
 #include "../resource_manager.h"
-
+#include "../json_serializer.h"
 
 struct icomponent 
 {
@@ -17,17 +17,29 @@ struct icomponent
     void  operator delete(void*, void*) noexcept    { }
 };
 
+struct light : icomponent 
+{
+    vec4    color;
+    vec3    dir;
+    float   radius;     // "radius": 10.0,
+    float   intensity;  // "intensity" : 1.0,
+    int     mode;       // "mode" : 0,
+    int     shadowMode; // "shadowMode" : 2
+};
 
+
+// Links between the nodes of a scene by index in the node list (scene::m_nodes), built by scene::link_hierarchy() from
+// node::parent (the guid of the parent, as it is in the file). The children of a node are a list in the order of the file:
+// first_child -> next_sibling -> next_sibling...
 struct hierarchy : icomponent
 {
-    guid_t              parent;
+    static constexpr uint32_t none = 0xFFFFFFFFu;
 
-    uint64_t            parent_id;
-
-
-    int16_t             child_count;
-    uint64_t            next_sibling_id;
-    uint64_t            prev_sibling_id;
+    uint32_t            parent_index = none;    // none = a root
+    uint32_t            first_child  = none;
+    uint32_t            next_sibling = none;
+    uint32_t            prev_sibling = none;
+    int16_t             child_count  = 0;
 };
 
 
@@ -45,22 +57,19 @@ struct transform : icomponent
         global_transform = local_transform;
     }
 
-    static void serialize(transform* _transform, binary_writer* bwr)
-    {
+    static void serialize(transform* _transform, binary_writer* bwr) {
         bwr->write(_transform->position);
         bwr->write(_transform->rotation);
         bwr->write(_transform->scale);
     }
 
-    static void deserialize(transform* _transform, filestream* stream)
-    {
+    static void deserialize(transform* _transform, filestream* stream) {
         _transform->position = stream->read<vec3>();
         _transform->rotation = stream->read<quat>();
         _transform->scale    = stream->read<vec3>();
         _transform->update_transform();
     }
 };
-
 
 
 struct renderer : icomponent
@@ -73,14 +82,14 @@ struct renderer : icomponent
     guid_t                  lightmap_mask_guid;     // lightmap guid
     vec4                    lightmap_scale_offset;  // scale offset
 
-    render_mesh_t*          mesh = nullptr;
-    material_t*             material = nullptr;
+    const render_mesh_t*        mesh = nullptr;
+    const material_instance_t*  material = nullptr;
 
     asset_handle_t          mesh_handle;
     asset_handle_t          material_handle;
 
-    uint32_t                material_count = 0;
-    guid_t                  material_guids[8];
+    guid_t                  material_guids[16];
+    //small_array<guid_t, 12> material_guids;         // materials of the submeshes (City.json: 0..12, 95% have at most 1; an overflow is logged)
 
     mat4                    transform;      // global transform
   //  aabbox                  local_bound;    // local aa bbox
@@ -97,9 +106,9 @@ struct renderer : icomponent
         bwr->write(_renderer->mesh_guid);
         bwr->write(_renderer->material_guid);
 
-        bwr->write(_renderer->material_count);
-        for(uint32_t i = 0; i < _renderer->material_count; ++i)
-            bwr->write(_renderer->material_guids[i]);
+      //  bwr->write((uint32_t)_renderer->material_guids.size());
+      //  for(const guid_t& material : _renderer->material_guids)
+      //      bwr->write(material);
 
         bwr->write(_renderer->lightmap_color_guid);
         bwr->write(_renderer->lightmap_mask_guid);
@@ -112,25 +121,20 @@ struct renderer : icomponent
         _renderer->flags                    = stream->read<uint32_t>();
         _renderer->mesh_guid                = stream->read<guid_t>();
         _renderer->material_guid            = stream->read<guid_t>();
-        _renderer->material_count           = stream->read<uint32_t>();
+        const uint32_t material_count       = stream->read<uint32_t>();
 
-    //    _renderer->material_guids = calloc(_renderer->material_count, sizeof(guid_t))
-        for (uint32_t i = 0; i < _renderer->material_count; ++i)
-            _renderer->material_guids[i] = stream->read<guid_t>();
+     /*   _renderer->material_guids.clear();
+        for (uint32_t i = 0; i < material_count; ++i) {
+            const guid_t material = stream->read<guid_t>();         // always read, the stream stays in sync
+            if (!_renderer->material_guids.push_back(material))
+                debug::log_error("[renderer] more than %u materials, the rest is dropped", (unsigned)_renderer->material_guids.capacity());
+        }*/
 
         _renderer->lightmap_color_guid      = stream->read<guid_t>();
         _renderer->lightmap_mask_guid       = stream->read<guid_t>();
         _renderer->lightmap_scale_offset    = stream->read<vec4>();
     }
-
-   //SerializeObject(renderer,  SerializeObjectFieldWithKey("mesh", mesh_guid),
-   //                           SerializeObjectFieldWithKey("mat_count", material_count),
-   //                           SerializeObjectFieldWithKey("material",  materials),
-   //                           SerializeObjectFieldWithKey("lightmap",  lightmap)
-   // );
-    //void set_material_param(const char * name, )
 };
-
 
 
 struct lod_data
@@ -141,6 +145,7 @@ struct lod_data
     guid_t      material_guid;  //List<List<string>> materialGuids = new List<List<string>>();
 };
 
+
 struct lodgroup : icomponent
 {
     uint32_t            lod_count;
@@ -149,6 +154,8 @@ struct lodgroup : icomponent
 
     float               lod_distance[4];
     float               lod_screen_relative_transition[4];
+
+    renderer            lod_renderers[4];
 
 
     static void serialize(icomponent* component, binary_writer* bwr) {
@@ -179,13 +186,17 @@ struct occluder : icomponent
 };
 
 
-
 struct lightprobes : icomponent
 {
-    int probe_count;
-    struct {
-        float sh[9];
-    } probes;
+    enum mode {spherical_harmonics, sperical_gaussian, sperical_mixed };
+
+    int     probe_count;
+
+    vec3 *  harmonics; // one probe has 9 coefficients
+
+    vec3*  axis;      // Direction of the petal center (normalized vector)
+    float* sharpness; // Cone sharpness/width (how focused the light is)
+    vec3*  amplitude; // Color and light intensity (RGB)
 };
      
 struct streaming_component : icomponent
@@ -193,20 +204,15 @@ struct streaming_component : icomponent
     float   load_distance;
     float   unload_distance;
     guid_t  scene_guid;
-    ReflectObject(streaming_component, ReflectObjectField(scene_guid), ReflectObjectField(load_distance), ReflectObjectField(unload_distance))
 };
      
-struct iphysic  : icomponent        { };
-struct physic2d : iphysic           { };
-struct physic3d : iphysic           { };
-struct collider : icomponent        {
-    enum { sphere, box, mesh };
-};
-struct box_collider : collider      { };
-struct sphere_collider : collider   { };
-struct capsule_collider : collider  { };
-struct mesh_collider : collider     { };
-struct rigidbody: iphysic           { };
+struct collider : icomponent {  };
+
+struct collider2d : icomponent{enum { circle, box, mesh };};
+struct collider3d : icomponent{enum { sphere, box, mesh, capsule };};
+
+struct rigidbody2d: icomponent { };
+struct rigidbody3d: icomponent { };
 
 struct navagent : icomponent    { };
 struct animator : icomponent    { };
