@@ -199,27 +199,40 @@ typedef enum gfx_pixel_format {
     gfx_pixel_format_rgb5a1,            /**< Packed 16-bit texture: 5 bits RGB, 1 bit Alpha */
     gfx_pixel_format_rgb565,            /**< Packed 16-bit texture: 5 bits Red, 6 bits Green, 5 bits Blue */
     gfx_pixel_format_rgba8,             /**< Standard 32-bit texture: 8 bits per channel (RGBA) */
+    gfx_pixel_format_rgba8_srgb,        /**< rgba8, sRGB-encoded: decoded to linear on sampling, encoded on write */
 
     // Mobile ETC compressed formats
-    gfx_pixel_format_etc1,              /**< Ericsson Texture Compression: 4bpp RGB8 fallback */
+    gfx_pixel_format_etc1,              /**< Ericsson Texture Compression: 4bpp RGB8 fallback (ETC2 RGB8) */
+    gfx_pixel_format_etc1_srgb,
     gfx_pixel_format_etc2_rgb8a1,       /**< ETC2 variant supporting RGB8 with 1-bit punch-through Alpha */
+    gfx_pixel_format_etc2_rgb8a1_srgb,
     gfx_pixel_format_etc2_rgba8,        /**< ETC2 variant supporting full 8-bit Alpha channel */
+    gfx_pixel_format_etc2_rgba8_srgb,
 
     // Desktop Block Compression (DXTC / BC) formats
     gfx_pixel_format_bc1,               /**< DXT1: 4 bpp compressed, opaque Albedo/Diffuse maps */
+    gfx_pixel_format_bc1_srgb,
     gfx_pixel_format_bc3,               /**< DXT5: 8 bpp compressed, Albedo/Diffuse maps with full Alpha */
+    gfx_pixel_format_bc3_srgb,
     gfx_pixel_format_bc4,               /**< BC4:  4 bpp compressed, single-channel grayscale mask/height maps */
     gfx_pixel_format_bc5,               /**< BC5:  8 bpp compressed, two-channel format optimal for Normal maps */
     gfx_pixel_format_bc6h,              /**< BC6H: 8 bpp compressed, High Dynamic Range (HDR) floating-point data */
     gfx_pixel_format_bc7,               /**< BC7:  8 bpp compressed, ultra-high quality RGBA texture maps */
+    gfx_pixel_format_bc7_srgb,
 
     // ASTC scalable compressed formats
     gfx_pixel_format_astc4x4,           /**< Adaptive Scalable Texture Compression: 4x4 block size (8.00 bpp) */
+    gfx_pixel_format_astc4x4_srgb,
     gfx_pixel_format_astc5x5,           /**< ASTC 5x5 block footprint allocation (5.12 bpp) */
+    gfx_pixel_format_astc5x5_srgb,
     gfx_pixel_format_astc6x6,           /**< ASTC 6x6 block footprint allocation (3.56 bpp) */
+    gfx_pixel_format_astc6x6_srgb,
     gfx_pixel_format_astc8x8,           /**< ASTC 8x8 block footprint allocation (2.00 bpp) */
+    gfx_pixel_format_astc8x8_srgb,
     gfx_pixel_format_astc10x10,         /**< ASTC 10x10 block footprint allocation (1.28 bpp) */
+    gfx_pixel_format_astc10x10_srgb,
     gfx_pixel_format_astc12x12,         /**< ASTC 12x12 block footprint allocation (0.89 bpp) */
+    gfx_pixel_format_astc12x12_srgb,
     gfx_pixel_format_astc4x4_hdr,       /**< ASTC 4x4 block footprint configured for High Dynamic Range data */
 
     // High precision floating-point formats

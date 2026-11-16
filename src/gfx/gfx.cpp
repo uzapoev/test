@@ -1,4 +1,5 @@
 #include "gfx.h"
+#include "gfx_api.h"
 
 #include <stdio.h>
 #include <memory.h> // memset
@@ -81,6 +82,7 @@ const char* gfx_to_string(gfx_buffer_usage usage)
         case gfx_buffer_usage_uniform:      return  "uniform";
         case gfx_buffer_usage_storage:      return  "storage";
         case gfx_buffer_usage_indirect:     return  "indirect";
+        case gfx_buffer_usage_staging:      return  "staging";
     }
     return "invalid arg in gfx_to_string(gfx_buffer_usage usage)";
 }
@@ -121,6 +123,31 @@ const char* gfx_to_string(gfx_texture_type type)
     return "invalid arg in gfx_to_string(gfx_texture_type type)";
 }
 
+gfx_pixel_format gfx_pixel_format_linear(gfx_pixel_format f)
+{
+    switch (f) {
+        case gfx_pixel_format_rgba8_srgb:       return gfx_pixel_format_rgba8;
+        case gfx_pixel_format_etc1_srgb:        return gfx_pixel_format_etc1;
+        case gfx_pixel_format_etc2_rgb8a1_srgb: return gfx_pixel_format_etc2_rgb8a1;
+        case gfx_pixel_format_etc2_rgba8_srgb:  return gfx_pixel_format_etc2_rgba8;
+        case gfx_pixel_format_bc1_srgb:         return gfx_pixel_format_bc1;
+        case gfx_pixel_format_bc3_srgb:         return gfx_pixel_format_bc3;
+        case gfx_pixel_format_bc7_srgb:         return gfx_pixel_format_bc7;
+        case gfx_pixel_format_astc4x4_srgb:     return gfx_pixel_format_astc4x4;
+        case gfx_pixel_format_astc5x5_srgb:     return gfx_pixel_format_astc5x5;
+        case gfx_pixel_format_astc6x6_srgb:     return gfx_pixel_format_astc6x6;
+        case gfx_pixel_format_astc8x8_srgb:     return gfx_pixel_format_astc8x8;
+        case gfx_pixel_format_astc10x10_srgb:   return gfx_pixel_format_astc10x10;
+        case gfx_pixel_format_astc12x12_srgb:   return gfx_pixel_format_astc12x12;
+        default:                                return f;
+    }
+}
+
+bool gfx_pixel_format_is_srgb(gfx_pixel_format f)
+{
+    return gfx_pixel_format_linear(f) != f;
+}
+
 const char* gfx_to_string(gfx_pixel_format format)
 {
     switch (format)
@@ -147,17 +174,34 @@ const char* gfx_to_string(gfx_pixel_format format)
         case gfx_pixel_format_astc5x5:      return "astc5x5";
         case gfx_pixel_format_astc6x6:      return "astc6x6";
         case gfx_pixel_format_astc8x8:      return "astc8x8";
-        case gfx_pixel_format_astc10x10:    return "astc10x10_srgb";
-        case gfx_pixel_format_astc12x12:    return "astc12x12_srgb";
+        case gfx_pixel_format_astc10x10:    return "astc10x10";
+        case gfx_pixel_format_astc12x12:    return "astc12x12";
 
+        case gfx_pixel_format_rgba8_srgb:       return "rgba8_srgb";
+        case gfx_pixel_format_etc1_srgb:        return "etc1_srgb";
+        case gfx_pixel_format_etc2_rgb8a1_srgb: return "etc2_rgb8a1_srgb";
+        case gfx_pixel_format_etc2_rgba8_srgb:  return "etc2_rgba8_srgb";
+        case gfx_pixel_format_bc1_srgb:         return "bc1_srgb";
+        case gfx_pixel_format_bc3_srgb:         return "bc3_srgb";
+        case gfx_pixel_format_bc7_srgb:         return "bc7_srgb";
+        case gfx_pixel_format_astc4x4_srgb:     return "astc4x4_srgb";
+        case gfx_pixel_format_astc5x5_srgb:     return "astc5x5_srgb";
+        case gfx_pixel_format_astc6x6_srgb:     return "astc6x6_srgb";
+        case gfx_pixel_format_astc8x8_srgb:     return "astc8x8_srgb";
+        case gfx_pixel_format_astc10x10_srgb:   return "astc10x10_srgb";
+        case gfx_pixel_format_astc12x12_srgb:   return "astc12x12_srgb";
+
+        case gfx_pixel_format_astc4x4_hdr:  return "astc4x4_hdr";
+            
         case gfx_pixel_format_r16f:         return "r16";
         case gfx_pixel_format_rg16f:        return "rg16";
         case gfx_pixel_format_rgba16f:      return "rgba16";
-
+            
         case gfx_pixel_format_r32f:         return "r32";
         case gfx_pixel_format_rg32f:        return "rg32";
         case gfx_pixel_format_rgba32f:      return "rgba32";
-
+            
+        case gfx_pixel_format_d32:          return "d32";
         case gfx_pixel_format_d24x8:        return "d24x8";
         case gfx_pixel_format_d24s8:        return "d24s8";
     }
@@ -233,7 +277,7 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
     uint32_t w = width;
     uint32_t h = height;
     uint32_t d = gfx_max(1, depth);//(depth > 0)?depth:1; // clamp [1..depth]
-    switch (format)
+    switch (gfx_pixel_format_linear(format))    // sRGB variants have the same layout
     {
         case gfx_pixel_format_rgb5a1:
         case gfx_pixel_format_rgb565:
@@ -241,9 +285,9 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
 
         case gfx_pixel_format_rgba8:            return w * h * d * 4;
 
-        case gfx_pixel_format_etc1:             return (w >> 2) * (h >> 2) * 8;     //! Compresses RGB888 data without Alpha channel
-        case gfx_pixel_format_etc2_rgb8a1:		return (w >> 2) * (h >> 2) * 16;    //! Compresses RGB888 data without Alpha channel
-        case gfx_pixel_format_etc2_rgba8:		return (w >> 2) * (h >> 2) * 8;     //! Compresses RGBA8888 data with full alpha support
+        case gfx_pixel_format_etc1:             return block_count(w, 4) * block_count(h, 4) * d * 8;     //! ETC2 RGB8, no alpha (8 bytes / 4x4 block)
+        case gfx_pixel_format_etc2_rgb8a1:      return block_count(w, 4) * block_count(h, 4) * d * 8;     //! ETC2 RGB8 + 1-bit punch-through alpha (8 bytes / block)
+        case gfx_pixel_format_etc2_rgba8:       return block_count(w, 4) * block_count(h, 4) * d * 16;    //! ETC2 RGB8 + EAC alpha (16 bytes / block)
 
         case gfx_pixel_format_bc1:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
         case gfx_pixel_format_bc4:              return gfx_max(1, (w + 3) >> 2) * gfx_max(1, (h + 3) >> 2) * gfx_max(1, d) * 8;
@@ -277,8 +321,9 @@ uint32_t gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t de
 
 uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
 {
-    switch (fmt)
+    switch (gfx_pixel_format_linear(fmt))       // sRGB variants have the same layout
     {
+        case gfx_pixel_format_unknown:          return 0;
         case gfx_pixel_format_a8:               return width * sizeof(uint8_t);
         case gfx_pixel_format_rgb5a1:
         case gfx_pixel_format_rgb565:
@@ -286,18 +331,19 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
 
         case gfx_pixel_format_rgba8:            return width * sizeof(uint32_t);
 
-        case gfx_pixel_format_etc1:             return gfx_max(2, (width >> 2)) * 8;
-        case gfx_pixel_format_etc2_rgba8:       return gfx_max(2, (width >> 2)) * 16;
-        case gfx_pixel_format_etc2_rgb8a1:      return gfx_max(2, (width >> 2)) * 8;
+        case gfx_pixel_format_etc1:             return block_count(width, 4) * 8;
+        case gfx_pixel_format_etc2_rgba8:       return block_count(width, 4) * 16;
+        case gfx_pixel_format_etc2_rgb8a1:      return block_count(width, 4) * 8;
 
-        case gfx_pixel_format_bc1:              return gfx_max(1, width >> 2) * 8;
-        case gfx_pixel_format_bc3:              return gfx_max(1, width >> 2) * 16;
-        case gfx_pixel_format_bc4:              return gfx_max(1, width >> 2) * 8;
-        case gfx_pixel_format_bc5:              return gfx_max(1, width >> 2) * 16;
-        case gfx_pixel_format_bc6h:             return gfx_max(1, width >> 2) * 16;
-        case gfx_pixel_format_bc7:              return gfx_max(1, width >> 2) * 16;
+        case gfx_pixel_format_bc1:              return block_count(width, 4) * 8;
+        case gfx_pixel_format_bc3:              return block_count(width, 4) * 16;
+        case gfx_pixel_format_bc4:              return block_count(width, 4) * 8;
+        case gfx_pixel_format_bc5:              return block_count(width, 4) * 16;
+        case gfx_pixel_format_bc6h:             return block_count(width, 4) * 16;
+        case gfx_pixel_format_bc7:              return block_count(width, 4) * 16;
 
         case gfx_pixel_format_astc4x4:          return block_count(width, 4) * 16;
+        case gfx_pixel_format_astc4x4_hdr:      return block_count(width, 4) * 16;
         case gfx_pixel_format_astc5x5:          return block_count(width, 5) * 16;
         case gfx_pixel_format_astc6x6:          return block_count(width, 6) * 16;
         case gfx_pixel_format_astc8x8:          return block_count(width, 8) * 16;
@@ -312,8 +358,10 @@ uint32_t gfx_utils_image_row_pitch(gfx_pixel_format fmt, uint32_t width)
         case gfx_pixel_format_rg32f:            return width * sizeof(float) * 2;
         case gfx_pixel_format_rgba32f:          return width * sizeof(float) * 4;
 
+        case gfx_pixel_format_d32:              return width * sizeof(float);
         case gfx_pixel_format_d24x8:            return width * sizeof(uint32_t);
         case gfx_pixel_format_d24s8:            return width * sizeof(uint32_t);
+        default:                                break;     // *_srgb never reach here (mapped to linear above)
     }
     return 0;
 }
@@ -330,10 +378,10 @@ static gfx_allocator_t* gfx_default_allocator()
     static gfx_allocator_t s_allocator = {};
 
     if(s_allocator.gfx_alloc == nullptr)
-        s_allocator.gfx_alloc = [](size_t size, void * userdata)    { return calloc(1, size);  };
+        s_allocator.gfx_alloc = [](size_t size, void * userdata)    { return calloc(1, size); (void)userdata;  };
         
     if (s_allocator.gfx_free == nullptr)
-        s_allocator.gfx_free = [](void* ptr, void* userdata)        { free(ptr);            };
+        s_allocator.gfx_free = [](void* ptr, void* userdata)        { free(ptr); (void)userdata;            };
 
     return &s_allocator;
 }
@@ -452,7 +500,6 @@ uint64_t gfx_pool_alloc(gfx_handle_pool_t* pool)
     if (pool == nullptr) return 0;
     if (pool->used_slots == pool->capacity) return 0; // No available chunk
 
-    gfx_handle_t invalid_handle = {  };
     for(uint32_t i = 0; i < pool->bitmask_words; ++i)
     {
         uint64_t inv = ~pool->bitmask[i];
@@ -807,106 +854,6 @@ intptr_t gfx_offset_allocator_allocate(gfx_offset_allocator_t* allocator, uint32
 
 
 
- typedef struct gfx_api_pfn
- {
-     // CONTEXT
-     void     (*pfn_init)            (gfx_settings_t* settings, gfx_context_t** ctx);
-     void     (*pfn_destroy)         (gfx_context_t* ctx);
-     void     (*pfn_get_caps)        (gfx_context_t* ctx, gfx_caps_t* caps);
-
-     // SWAPCHAIN / SURFACE
-     void     (*pfn_surface_create)  (gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
-     void     (*pfn_surface_destroy) (gfx_context_t* ctx, gfx_surface_t* surface);
-     gfx_result (*pfn_surface_set_vsync) (gfx_context_t* ctx, gfx_surface_t* surface, bool vsync);    // optional (null = not supported)
-
-     void     (*pfn_frame_begin)     (gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
-     void     (*pfn_frame_end)       (gfx_frame_t* frame);
-
-     // BUFFER
-     void     (*pfn_buffer_create)       (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
-     void     (*pfn_buffer_update_data)  (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
-     void     (*pfn_buffer_destroy)      (gfx_context_t* ctx, gfx_buffer_t* buffer);
-
-     // SHADER
-     void    (*pfn_shader_create)                   (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
-     uint32_t(*pfn_shader_get_descriptor_set_count) (gfx_shader_t* shader);
-     uint32_t(*pfn_shader_get_uniforms)             (gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms); // new
-     uint64_t(*pfn_uniform_location)                (gfx_shader_t* shader, const char* name);
-     void    (*pfn_shader_destroy)                  (gfx_context_t* ctx, gfx_shader_t* shader);
-
-     // DESCRIPTOR SET
-     void     (*pfn_descriptor_set_create)               (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
-     void     (*pfn_descriptor_set_write_buffer_data)    (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
-     void     (*pfn_descriptor_set_write_buffer)         (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
-     void     (*pfn_descriptor_set_write_texture)        (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
-     void     (*pfn_descriptor_set_write_sampler)        (gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler);
-     void     (*pfn_descriptor_set_destroy)              (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
-
-     // SAMPLER
-     void     (*pfn_sampler_create)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
-     void     (*pfn_sampler_destroy) (gfx_context_t* ctx, gfx_sampler_t* sampler);
-
-     // TEXTURE
-     void     (*pfn_texture_create)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
-     void     (*pfn_texture_update_data)     (gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
-     void     (*pfn_texture_update_bindless) (gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
-     void     (*pfn_texture_generate_mipmap) (gfx_context_t* ctx, gfx_texture_t* texture);
-     void     (*pfn_texture_blit)            (gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst);
-     void     (*pfn_texture_get_data)        (gfx_context_t* ctx, gfx_command_buffer_t* cmd);
-     void     (*pfn_texture_destroy)         (gfx_context_t* ctx, gfx_texture_t* texture);
-
-     // PIPELINE
-     void     (*pfn_pipeline_create)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-     void     (*pfn_mesh_pipeline_create)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-     void     (*pfn_pipeline_destroy)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
-
-     void     (*pfn_pipeline_compute_create)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
-     void     (*pfn_pipeline_compute_destroy) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
-
-     void     (*pfn_pipeline_raytrace_create) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
-     void     (*pfn_pipeline_raytrace_destroy)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
-
-     // COMMAND BUFFER
-     void     (*pfn_cmd_begin_pass)              (gfx_command_buffer_t* cmd, gfx_pass_info_t* pass_info);
-     void     (*pfn_cmd_end_pass)                (gfx_command_buffer_t* cmd);
-     void     (*pfn_cmd_begin_compute_pass)      (gfx_command_buffer_t* cmd);
-     void     (*pfn_cmd_end_compute_pass)        (gfx_command_buffer_t* cmd);
-     void     (*pfn_cmd_bind_compute_pipeline)   (gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline);
-
-     void     (*pfn_cmd_scissor) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-     void     (*pfn_cmd_viewport) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
-     void     (*pfn_cmd_bind_pipeline) (gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline);
-     void     (*pfn_cmd_bind_descriptor_set) (gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* descriptor);
-     void     (*pfn_cmd_bind_index_buffer) (gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer);
-     void     (*pfn_cmd_bind_vertex_buffer) (gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer);
-     void     (*pfn_cmd_draw) (gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count);
-     void     (*pfn_cmd_draw_indexed) (gfx_command_buffer_t* cmd, uint32_t idx_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset);
-     void     (*pfn_cmd_draw_indexed_indirect) (gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride);
-     void     (*pfn_cmd_dispatch_compute) (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);
-
-     // Mesh Shading
-     void     (*pfn_cmd_draw_mesh_tasks)             (gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z);                    // new
-     void     (*pfn_cmd_draw_mesh_tasks_indirect)    (gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride); // new
-
-     // Ray Tracing
-     void     (*pfn_acceleration_structure_create)   (gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** acceleration_struct);
-     void     (*pfn_acceleration_structure_destroy)  (gfx_context_t* ctx, gfx_acceleration_structure_t* acceleration_structure);
-     void     (*pfn_sbt_create)                      (gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** sbt);
-     void     (*pfn_sbt_destroy)                     (gfx_context_t* ctx, gfx_sbt_t* sbt);
-     void     (*pfn_cmd_build_acceleration_structure)(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t* dst, gfx_acceleration_structure_t* src);
-     void     (*pfn_cmd_trace_rays)                  (gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
-     void     (*pfn_cmd_trace_ray_query)             (gfx_command_buffer_t* cmd, gfx_acceleration_structure_t tlas, uint32_t width, uint32_t height, uint32_t depth); // new
-
-     // Barriers
-     void     (*pfn_cmd_buffer_barrier)      (gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst);
-     void     (*pfn_cmd_texture_barrier)     (gfx_command_buffer_t* cmd, gfx_texture_t** textures, uint32_t count, gfx_barrier src, gfx_barrier dst);
-
-     // Debug
-     void     (*pfn_cmd_push_marker)         (gfx_command_buffer_t* cmd, const char* marker);
-     void     (*pfn_cmd_pop_marker)          (gfx_command_buffer_t* cmd);
-     void     (*pfn_cmd_get_timestamps)      (gfx_command_buffer_t* cmd, gfx_timestamp_t* timestamps);
-
- } gfx_api_pfn;
 
 
 static gfx_api_pfn * g_tbl = nullptr;
@@ -1044,12 +991,13 @@ uint32_t gfx_shader_get_descriptor_set_count(gfx_shader_t* shader) {
 
 
 uint32_t gfx_shader_get_uniforms(gfx_shader_t* shader, uint32_t group, gfx_uniform_t* uniforms) {
-    assert(false);
-    return 0;
+    return g_tbl->pfn_shader_get_uniforms(shader, group, uniforms);
 }
+
 uint64_t gfx_uniform_location(gfx_shader_t* shader, const char* name) {
     return g_tbl->pfn_uniform_location(shader, name);
 }
+
 void gfx_shader_destroy(gfx_context_t* ctx, gfx_shader_t* buffer) {
     g_tbl->pfn_shader_destroy(ctx, buffer);
 }
@@ -1369,7 +1317,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 
 
 
-#if __has_include("gfx_webgpu.h")
+#ifdef WEBGPU_AVAILABLE
  #include "gfx_webgpu.h"
 #endif 
 
@@ -1377,7 +1325,7 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
 {
     memset(func_table, 0, sizeof(gfx_api_pfn));
 
-#if __has_include("gfx_webgpu.h")
+#ifdef WEBGPU_AVAILABLE
     // CONTEXT
     func_table->pfn_init                    = wgpu_init;
 

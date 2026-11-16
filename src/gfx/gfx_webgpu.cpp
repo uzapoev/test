@@ -49,7 +49,7 @@ static WGPUPrimitiveTopology gfx_topology_2_webgpu(gfx_topology topology)
     }
 }
 
-static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format, bool srgb)
+static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format)
 {
     switch (format)
     {
@@ -58,18 +58,24 @@ static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format, bool
         case gfx_pixel_format_rgb5a1:           return WGPUTextureFormat_Undefined;
         case gfx_pixel_format_rgb565:           return WGPUTextureFormat_Undefined;
         case gfx_pixel_format_rgba8:            return WGPUTextureFormat_RGBA8Unorm;
+        case gfx_pixel_format_rgba8_srgb:       return WGPUTextureFormat_RGBA8UnormSrgb;
 
         case gfx_pixel_format_etc1:             return WGPUTextureFormat_ETC2RGB8Unorm;
         case gfx_pixel_format_etc2_rgb8a1:      return WGPUTextureFormat_ETC2RGB8A1Unorm;
         case gfx_pixel_format_etc2_rgba8:       return WGPUTextureFormat_ETC2RGBA8Unorm;
+        case gfx_pixel_format_etc1_srgb:        return WGPUTextureFormat_ETC2RGB8UnormSrgb;
+        case gfx_pixel_format_etc2_rgb8a1_srgb: return WGPUTextureFormat_ETC2RGB8A1UnormSrgb;
+        case gfx_pixel_format_etc2_rgba8_srgb:  return WGPUTextureFormat_ETC2RGBA8UnormSrgb;
 
-
-        case gfx_pixel_format_bc1:              return srgb ? WGPUTextureFormat_BC1RGBAUnormSrgb : WGPUTextureFormat_BC1RGBAUnorm;
-        case gfx_pixel_format_bc3:              return srgb ? WGPUTextureFormat_BC3RGBAUnormSrgb : WGPUTextureFormat_BC3RGBAUnorm;
-        case gfx_pixel_format_bc4:              return srgb ? WGPUTextureFormat_BC4RSnorm        : WGPUTextureFormat_BC4RUnorm;
-        case gfx_pixel_format_bc5:              return srgb ? WGPUTextureFormat_BC5RGUnorm       : WGPUTextureFormat_BC5RGUnorm;
-        case gfx_pixel_format_bc6h:             return srgb ? WGPUTextureFormat_BC6HRGBUfloat    : WGPUTextureFormat_BC6HRGBFloat;
-        case gfx_pixel_format_bc7:              return srgb ? WGPUTextureFormat_BC7RGBAUnormSrgb : WGPUTextureFormat_BC7RGBAUnorm;
+        case gfx_pixel_format_bc1:              return WGPUTextureFormat_BC1RGBAUnorm;
+        case gfx_pixel_format_bc3:              return WGPUTextureFormat_BC3RGBAUnorm;
+        case gfx_pixel_format_bc4:              return WGPUTextureFormat_BC4RUnorm;
+        case gfx_pixel_format_bc5:              return WGPUTextureFormat_BC5RGUnorm;
+        case gfx_pixel_format_bc6h:             return WGPUTextureFormat_BC6HRGBUfloat;    // same as Vulkan/Metal path (unsigned, DXGI 95)
+        case gfx_pixel_format_bc7:              return WGPUTextureFormat_BC7RGBAUnorm;
+        case gfx_pixel_format_bc1_srgb:         return WGPUTextureFormat_BC1RGBAUnormSrgb;
+        case gfx_pixel_format_bc3_srgb:         return WGPUTextureFormat_BC3RGBAUnormSrgb;
+        case gfx_pixel_format_bc7_srgb:         return WGPUTextureFormat_BC7RGBAUnormSrgb;
 
         case gfx_pixel_format_astc4x4:          return WGPUTextureFormat_ASTC4x4Unorm;
         case gfx_pixel_format_astc5x5:          return WGPUTextureFormat_ASTC5x5Unorm;
@@ -77,6 +83,12 @@ static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format, bool
         case gfx_pixel_format_astc8x8:          return WGPUTextureFormat_ASTC8x8Unorm;
         case gfx_pixel_format_astc10x10:        return WGPUTextureFormat_ASTC10x10Unorm;
         case gfx_pixel_format_astc12x12:        return WGPUTextureFormat_ASTC12x12Unorm;
+        case gfx_pixel_format_astc4x4_srgb:     return WGPUTextureFormat_ASTC4x4UnormSrgb;
+        case gfx_pixel_format_astc5x5_srgb:     return WGPUTextureFormat_ASTC5x5UnormSrgb;
+        case gfx_pixel_format_astc6x6_srgb:     return WGPUTextureFormat_ASTC6x6UnormSrgb;
+        case gfx_pixel_format_astc8x8_srgb:     return WGPUTextureFormat_ASTC8x8UnormSrgb;
+        case gfx_pixel_format_astc10x10_srgb:   return WGPUTextureFormat_ASTC10x10UnormSrgb;
+        case gfx_pixel_format_astc12x12_srgb:   return WGPUTextureFormat_ASTC12x12UnormSrgb;
 
         case gfx_pixel_format_r16f:             return WGPUTextureFormat_R16Float;
         case gfx_pixel_format_rg16f:            return WGPUTextureFormat_RG16Float;
@@ -1113,21 +1125,20 @@ void wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t * desc, gfx_text
     if(desc->format == gfx_pixel_format_bc6h || desc->format == gfx_pixel_format_bc7)
         printf("");
 
-    bool is_srgb = (desc->format == gfx_pixel_format_bc6h || desc->format == gfx_pixel_format_bc7);
 
     WGPUTextureDescriptor texture_desc = {};
         texture_desc.label = desc->label ? desc->label : "";
         texture_desc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc | WGPUTextureUsage_TextureBinding;
         texture_desc.dimension = WGPUTextureDimension_2D;
         texture_desc.size = { desc->width, desc->height, desc->depth == 0 ? 1 : desc->depth };
-        texture_desc.format = gfx_pixel_format_2_webgpu(desc->format, is_srgb);
+        texture_desc.format = gfx_pixel_format_2_webgpu(desc->format);
         texture_desc.mipLevelCount = desc->mip_levels;
         texture_desc.sampleCount = 1;
     WGPUTexture texture = wgpuDeviceCreateTexture(wgpu_ctx->device, &texture_desc);
 
     WGPUTextureViewDescriptor texture_view_desc = {};
         texture_view_desc.label = desc->label ? desc->label : "";
-        texture_view_desc.format = gfx_pixel_format_2_webgpu(desc->format, is_srgb);
+        texture_view_desc.format = gfx_pixel_format_2_webgpu(desc->format);
         texture_view_desc.dimension = WGPUTextureViewDimension_2D;
         texture_view_desc.baseMipLevel = 0;
         texture_view_desc.mipLevelCount = desc->mip_levels;
