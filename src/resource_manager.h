@@ -22,28 +22,28 @@ typedef enum platform_type:uint8_t {
     platform_type_pc,       // x86/apple silicon, 
     platform_type_mobile,   // ios/android
     platform_type_web,      // wasm
-    count
+    platform_type_count
 } platform_type;
 
 
 typedef enum asset_type : uint8_t {
     asset_type_unknown,
-    asset_type_mesh,
-    asset_type_texture,
-    asset_type_material,
-    asset_type_shader,
-    asset_type_font,
-    asset_type_animation,
+    asset_type_mesh,        // mesh manager with meshpooling
+    asset_type_texture,     // texture manager wit mipmap streaming
+    asset_type_material,    // material manager with instance creating  
+    asset_type_shader,      // shader
+    asset_type_font,        // font provider
+    asset_type_animation,   // skinned
     asset_type_atlas,
 
-    asset_type_cinematic,
-    asset_type_prefab,
-    asset_type_scene,
-    asset_type_script,
+    asset_type_cinematic,   // managed by world
+    asset_type_prefab,      // managed by world
+    asset_type_scene,       // managed by world
+    asset_type_script,      // managed by script system
 
     asset_type_raw_mesh,    // render mesh
     asset_type_raw_image,   // raw image bytes in rgba8 fromat
-    asset_type_raw_data,    // raw image bytes in rgba8 fromat
+    asset_type_raw_data,    // raw bytes 
     asset_type_count
 } asset_type;
 
@@ -81,12 +81,14 @@ struct file_info_t {
     uint32_t    size;                   // Unpacked size in RAM after loading
     uint32_t    compressed_size;        // Size on disk (0 if the file is uncompressed)
     uint32_t    offset;                 // Offset within the .pack container
-    uint8_t     bundle_id;              // 0 - raw disk (DEV_MODE), >0 - index of the mounted .pack
+    uint8_t     bundle_id;              // 0 - raw disk (DEV_MODE), > 0 - index of the mounted .pack
     uint8_t     flags;                  // Compression algorithm (0 - none, 1 - LZ4, 2 - Zstd)
     asset_type  type;
-    const char* path = nullptr;         // Only available in debug/editor
-};
 
+    const char* path = nullptr;         // Only available in debug/editor
+    const char* name = nullptr;         // Only available in debug/editor
+    const char* bundle_path = nullptr;  //
+};
 
 
 struct asset_slot_t {
@@ -173,6 +175,8 @@ typedef struct material_t {
 
     uint16_t                    texture_count;
     texture_t *                 textures[8];
+    const char *                texture_names[8];           // shader uniform of textures[i] (interned, never freed)
+    vec4                        texture_scale_offset[8];    // xy = offset, zw = scale
 
     uint32_t                    slot_count;
     char **                     slot_names;
@@ -253,7 +257,7 @@ typedef struct render_mesh_t {
 } render_mesh_t;
 
 
-extern uint32_t read_file_data(const char* path, char** data);
+extern uint32_t read_file_data(const char* path, bool binary, char** data);
 extern void     create_mesh_pool(gfx_context_t* ctx, uint32_t vsize, uint32_t isize, mesh_pool_t* pool);
 
 
@@ -276,23 +280,31 @@ class bundle {
 
 typedef bool (*asset_compile_func_t)(const char* src_path, const char* out_bin_path, const char* meta_path, platform_type target_platform, void* userdata);
 
-typedef bool (*asset_load_func_t)(struct resource_manager & mgr, asset_io_blob_t & blob, asset_slot_t & slot);
+typedef bool (*asset_load_func_t)(struct resource_manager & mgr, asset_io_blob_t & blob, asset_slot_t & slot, void * userdata);
 
 struct base_manager {
-    friend class resource_manager;
-    class texture_streaming_manager_impl* m_impl;
+    virtual void trigger_resource_changed(guid_t guid) = 0;
+protected:
+   friend class resource_manager;
     class resource_manager* m_resource_manager;
 };
 
 struct texture_streaming_manager : base_manager
 {
-    void set_gpu_ram_limit();
+    void set_gpu_ram_limit(uint32_t size); // size in mb
+  //  void set_texture_desired_mip(texture_handle_t handle, uint32_t mip);
 };
 
 class mesh_pool_manager : base_manager
 {
+    struct mesh_allocation_t {
+        uint32_t    page_index;
+    };
+
     void add_mesh();
     void remove_mesh();
+private:
+    mesh_pool_t * mesh_pool;
 };
 
 
@@ -315,7 +327,7 @@ public:
     void set_data(asset_handle_t material, const char* name, const void* data, uint32_t size);
 
 protected:
-    void trigger_resource_changed(guid_t guid, asset_handle_t handle);
+    void trigger_resource_changed(guid_t guid);
 
     void trigger_material_changed(guid_t guid, material_t * material);
     void trigger_shader_changed(guid_t guid, gfx_shader_t * shader);
@@ -326,8 +338,54 @@ private:
     material_instance_t *                                               m_instances;
     std::unordered_map<uint64_t,  std::vector<asset_handle_t>>          m_unform_2_material;
     std::unordered_map<asset_handle_t, std::vector<asset_handle_t>>     m_material_instances;
+
+  //  paged_pool_allocator_t<material_t>                  m_materials;
+  //  paged_pool_allocator_t<material_instance_t>         m_material_instances;
 };
 
+
+
+// resources.db: guid -> original resource, compiled file. Lives in the root of the cash dir (next to the platform dirs),
+// see resource_manager.cpp. Knows nothing about loading: only names, paths and the file on the disk.
+class asset_db
+{
+public:
+    struct entry {
+        std::string         source;         // original resource, relative to the assets dir ("" = unknown)
+        std::string         cooked;         // compiled file, relative to the cash dir of the platform
+        asset_type          type = asset_type_unknown;
+    };
+
+    void                    set_cash(const std::string& root, const std::string& platform_dir);
+    std::string             cash_file(const std::string& relative) const;       // full path of a compiled file
+
+    void                    add(guid_t guid, const entry& e);
+    const entry*            find(guid_t guid) const;
+    std::string             source(guid_t guid) const;                          // path of the original resource, "" = unknown
+    std::string             cooked_path(guid_t guid) const;                     // full path of the compiled file, "" = unknown
+
+    // A resource by name: a guid string, a path of the original (source) resource, or the end of it ("dir/name.png",
+    // "name.png", a part of the path as the last resort).
+    guid_t                  find_guid(const char* name_or_guid) const;
+
+    const std::unordered_map<guid_t, entry>& entries() const { return m_entries; }
+
+    void                    load();
+    void                    save() const;
+    std::vector<guid_t>     validate();     // drops the entries whose compiled file is missing, returns them
+
+private:
+    std::string             db_file_path() const;
+    void                    rebuild_name_index() const;
+
+    std::string                                         m_cash_root = "cash";   // resources.db is here
+    std::string                                         m_cash_path;            // cash dir of the platform
+    std::unordered_map<guid_t, entry>                   m_entries;
+
+    mutable bool                                        m_index_dirty = false;
+    mutable std::unordered_map<std::string, guid_t>     m_source_2_guid;        // lower case source path -> guid
+    mutable std::unordered_map<std::string, std::vector<guid_t>> m_name_2_guids;// lower case file name -> guids (for a partial path)
+};
 
 
 class resource_manager
@@ -340,7 +398,14 @@ public:
 public:
     void                                                            init(platform_type type, const char * cash_path = nullptr);
 
-    std::string                                                     find(const std::string & name);
+    std::string                                                     find(const std::string & name);     // = get_path(name)
+
+    // Resource by "name", see asset_db::find_guid. Works with the compiled resources only (resources.db in the root
+    // of the cash dir), the source files don't have to exist.
+    guid_t                                                          find_guid(const char* name_or_guid);
+    std::string                                                     get_path(const char* name_or_guid);     // path of the compiled file, "" = not found
+    std::string                                                     get_path(guid_t guid);
+    std::string                                                     get_name(guid_t guid);                  // path of the original resource (relative to its assets dir)
 
     static std::vector<char>                                        file_data(const std::string_view& path);
 private:
@@ -396,7 +461,6 @@ private:
     }
 
 private:
-    friend bool asset_load_mesh(struct resource_manager& mgr, asset_io_blob_t& blob, asset_slot_t& slot);
     //
     asset_io_blob_t                         read_asset_blob(file_info_t * info);
     void                                    free_asset_blob(asset_io_blob_t* blob);
@@ -405,6 +469,12 @@ private:
     asset_handle_t                          load_material(asset_io_blob_t&);
 
     guid_t                                  get_or_create_guid(const char* path, const char* meta_path);
+
+    // resources.db, see asset_db
+    void                                    register_cooked(guid_t guid, const asset_db::entry& entry);
+    void                                    register_file_info(guid_t guid, const asset_db::entry& entry);
+    void                                    load_asset_db();
+    void                                    validate_asset_db();
 
 private:
     gfx_context_t*                                      m_ctx = nullptr;
@@ -416,7 +486,6 @@ private:
     std::unordered_set<interned_string>                 m_dirs;
     std::unordered_map<uint64_t, file_info_t>           m_file_infos;   // 
 
-    std::unordered_map<guid_t, std::filesystem::path>   m_guid_2_path;
     std::unordered_map<interned_string, guid_t>         m_path_2_guid;  //
     std::unordered_map<uint64_t, asset_slot_t*>         m_guid_2_slots; // loaded resource slots
 
@@ -424,7 +493,8 @@ private:
     asset_compile_func_t                                m_compilers[asset_type_count] = {};
     asset_load_func_t                                   m_loaders[asset_type_count] = {};
 
-    std::string                                         m_cash_path;
+
+    asset_db                                            m_asset_db;
     platform_type                                       m_platform_type = platform_type_pc;
 
     asset_slot_t*                                       m_slots = nullptr;
@@ -502,7 +572,7 @@ inline const material_instance_t* resource_manager::get_material_instance(asset_
 
     const asset_slot_t& slot = m_slots[idx];
     const bool valid = (slot.handle.generation == handle.generation) && (slot.handle.slot_index == slot.handle.slot_index);
-    return valid ? m_material_instances.get_by_index(slot.index_in_pool) : nullptr;
+    return valid ? m_material_instances.get_by_index(handle.instance_id) : nullptr;
 }
 
 #endif // __resource_manager_h__

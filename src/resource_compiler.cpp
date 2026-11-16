@@ -4,8 +4,10 @@
 #include "gfx/gfx_shader_compiler.h"
 
 #include "json_serializer.h"
+#include "binary_serializer.h"
+#include "material_data.h"
 #include "scene/scene.h"
-
+#include "threadpool.h"
 
 // ============================================================================
 // ---                  Mesh                                                ---
@@ -28,7 +30,7 @@ bool resource_compile_shader(const char* src, const char* dst, const char* meta,
         gfx_shader_compiler_context_create(0, &compiler_context);
 
     char* data = nullptr;
-    uint32_t size = read_file_data(src, &data);
+    uint32_t size = read_file_data(src, true, &data);
 
     gfx_shader_compiler_request_desc_t desc = {};
     desc.name = strrchr(src, '/');
@@ -70,6 +72,7 @@ struct texture_meta_t
         uint32_t    max_size;
     };
     //ReflectObject(texture_meta_t, ReflectObjectField(guid), ReflectObjectField(max_size), ReflectObjectField(srgb), ReflectObjectField(compress));
+   // ReflectObject2(texture_meta_t, guid, maxTextureSize, srgb, compress);
 };
 
 ReflectObjectExternal2(texture_meta_t, guid, maxTextureSize, srgb, compress);
@@ -85,10 +88,15 @@ bool resource_compile_texture(const char* src, const char* dst, const char* meta
     auto meta_data = resource_manager::file_data(meta);
     auto jmat = json::from_json_string<texture_meta_t>(meta_data.size(), (char*)meta_data.data());
 
-   // auto f = std::quoted(src_file);
-
     // std::string method = "astc4";
     std::string method = "bc7";
+    switch (type)
+    {
+        case platform_type_common:
+        case platform_type_web:
+        case platform_type_pc:      method = "bc7";     break;
+        case platform_type_mobile:  method = "astc4";   break;
+    }
 
     std::string command = python_exe + " " + script_path + " " +
         src_file + " " + dst_file + " " +
@@ -96,8 +104,13 @@ bool resource_compile_texture(const char* src, const char* dst, const char* meta
 
     debug::log_warning("[C++] Executing script: %s\n", command.c_str());
 
-   
-    std::system(command.c_str());
+    task_handle_t handle = 0;
+    
+    while(!thread_pool::shared()->try_allocate([command](){ std::system(command.c_str()); }, &handle))
+    {
+        thread_pool::shared()->yield();
+    }
+    thread_pool::shared()->submit(handle);
 
     return false;
 }
@@ -106,52 +119,44 @@ bool resource_compile_texture(const char* src, const char* dst, const char* meta
 // ---                  Material                                            ---
 // ============================================================================
 
-ReflectObjectExternal2(vec4, x, y, z, w);
-
-struct material_meta_t {
-    interned_string     guid;
-
-    ReflectObject2(material_meta_t, guid);
-};
-
-template<class T>
-struct shader_slot {
-    interned_string     key;        // uniform name
-    T                   value = {};
-
-    ReflectObject2(shader_slot, key, value);
-};
-
-struct shader_texture_slot {
-    interned_string     guid;
-    interned_string     name;
-    vec4                scaleOffset;
-
-    ReflectObject2(shader_texture_slot, guid, name, scaleOffset);
-};
-
-struct material_json {
-    interned_string                             shader;     // name or guid
-    std::vector< shader_texture_slot>           textures;   // key - name of shader uniform, key - texture guid
-    std::vector< shader_slot<vec4>  >           vectors;    // key - name of shader uniform, key - data
-    std::vector< shader_slot<float> >           scalars;    // key - name of shader uniform, key - data
-
-    ReflectObject2(material_json, shader, textures, vectors, scalars);
-};
-
+// json (source) -> binary blob (see binary_serializer.h / material_data.h). The loader reads it back with
+// binary::read_blob<material_json>.
 bool resource_compile_material(const char* src, const char* dst, const char* meta, platform_type type, void* userdata)
 {
     auto data = resource_manager::file_data(src);
-    auto meta_data = resource_manager::file_data(meta);
+    if (data.empty()) {
+        debug::log_error("[material] cannot read '%s'", src);
+        return false;
+    }
 
-    auto jmat = json::from_json_string<material_json>(data.size(), (char*)data.data());
-    auto jmeta = json::from_json_string<material_meta_t>(meta_data.size(), (char*)meta_data.data());
+    // sajson works in place and asserts on a broken document: check it on a copy first
+    {
+        std::vector<char> copy(data);
+        sajson::document doc = sajson::parse(sajson::dynamic_allocation(), sajson::mutable_string_view(copy.size(), copy.data()));
+        if (!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_OBJECT) {
+            debug::log_error("[material] '%s' is not a valid json object", src);
+            return false;
+        }
+    }
 
-    filestream * fs = filestream::open_wb(dst);
-    fs->write(jmat.shader);
+    material_json jmat = json::from_json_string<material_json>(data.size(), data.data());
 
-    path::copy_file(src, dst);
-    return false;
+    binary_writer blob;
+    binary::write_blob(blob, material_blob_magic, material_blob_version, jmat);
+
+    filestream* fs = filestream::open_wb(dst);
+    if (fs == nullptr) {
+        debug::log_error("[material] cannot write '%s'", dst);
+        return false;
+    }
+    const bool ok = fs->write(blob.size(), blob.data()) == blob.size();
+    fs->flush();
+    delete fs;
+    if (!ok) {
+        debug::log_error("[material] short write to '%s'", dst);
+        return false;
+    }
+    return true;
 }
 
 

@@ -1,6 +1,7 @@
 #include "resource_loader.h"
 #include "common.h"
 #include "resource_manager.h"
+#include "material_data.h"
 
 
 #define GFX_SHADER_COMPILER_IMPL
@@ -19,7 +20,6 @@
 #endif // _MSC_VER
 
 
-
 size_t filesize(FILE* file)
 {
     fseek(file, 0, SEEK_END);
@@ -28,9 +28,19 @@ size_t filesize(FILE* file)
     return size;
 }
 
-uint32_t read_file_data(const char* path, char** data_out)
+uint64_t file_modification_time(const char* path)
 {
-    FILE* file = fopen(path, "rb");
+    struct stat result;
+    if (stat(path, &result) == 0)
+    {
+        return result.st_mtime;
+    }
+    return 0;
+}
+
+uint32_t read_file_data(const char* path, bool binary, char** data_out)
+{
+    FILE* file = fopen(path, binary ? "rb":"r");
     if (file == nullptr)
         return 0;
 
@@ -38,23 +48,6 @@ uint32_t read_file_data(const char* path, char** data_out)
     size_t size = ftell(file);
     fseek(file, 0, SEEK_SET);
     *data_out = (char*)calloc(1, size + 1);
-    fread(*data_out, size, sizeof(char), file);
-    fclose(file);
-
-    return (uint32_t)size;
-}
-
-
-uint32_t read_file_data_text(const char* path, char** data_out)
-{
-    FILE* file = fopen(path, "r");
-    if (file == nullptr)
-        return 0;
-
-    fseek(file, 0, SEEK_END);
-    size_t size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    *data_out = (char*)calloc(1, size);
     fread(*data_out, size, sizeof(char), file);
     fclose(file);
 
@@ -90,7 +83,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
 
     gfx_buffer_desc_t vb = {};
         vb.data     = nullptr;
-        vb.mapped   = false;
+        vb.memory_hint = gfx_memory_auto;
         vb.size     = vertex_buffer_size;
         vb.usage    = gfx_buffer_usage_vertex;
     pool->vertex_buffer = gfx_buffer_create(ctx, &vb);
@@ -98,7 +91,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
 
     gfx_buffer_desc_t ib = {};
         ib.data     = nullptr;
-        ib.mapped   = false;
+        ib.memory_hint = gfx_memory_auto;
         ib.size     = index_buffer_size;
         ib.usage    = gfx_buffer_usage_index;
     pool->index_buffer = gfx_buffer_create(ctx, &ib);
@@ -108,7 +101,7 @@ void create_mesh_pool(gfx_context_t* ctx, uint32_t vertex_buffer_size, uint32_t 
 bool load_mesh_from_file_path(gfx_context_t* ctx, mesh_pool_t * pool, const char * path, render_mesh_t* out_mesh)
 {
     char* data = nullptr;
-    uint32_t size = read_file_data(path, &data);
+    uint32_t size = read_file_data(path, true, &data);
     if(size != 0)
     {
         load_mesh_from_file_data(ctx, pool, strrchr(path, '/'), data, size, out_mesh);
@@ -297,7 +290,7 @@ void load_texture_from_file_path(gfx_context_t* ctx, const char* path, gfx_textu
 {
     char* data = nullptr;
 
-    uint32_t size = read_file_data(path, &data);
+    uint32_t size = read_file_data(path, true, &data);
 
     if (size != 0)
         load_texture_from_file_data(ctx, strrchr(path, '/'), data, size, out_texture);
@@ -525,15 +518,20 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
     char compiled_name_buff[256] = "";
     sprintf(compiled_name_buff, "%s.spirv", path);
 
-    uint32_t size = read_file_data_text(path, &data);
+    uint32_t size = read_file_data(path, false, &data);
     if (size == 0)
         return;
 
+    uint32_t src_mtime = file_modification_time(path);
+    uint32_t dst_mtime = file_modification_time(compiled_name_buff);
+
     // check for exported
-    size = read_file_data(compiled_name_buff, &data);
-    if (size != 0)
+    char* compiled_data = nullptr;
+    size = read_file_data(compiled_name_buff, true, &compiled_data);
+    if (size != 0 && src_mtime < dst_mtime)
     {
-        load_shader_from_file_data(ctx, name, data, size, out_shader);
+        load_shader_from_file_data(ctx, name, compiled_data, size, out_shader);
+        free(compiled_data);
         free(data);
         return;
     }
@@ -552,8 +550,9 @@ void load_shader_from_file_path(gfx_context_t* ctx, const char* path, gfx_shader
     if(gfx_compile_shader(g_compiler_context, &desc, &compiled_program))
     {
         save_shader_program(compiled_name_buff, &compiled_program);
+        load_shader_from_file_data(ctx, name, compiled_data, size, out_shader);
     }
-
+    free(compiled_data);
     free(data);/**/
 }
 
@@ -625,7 +624,7 @@ void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct m
 {
     char* data = nullptr;
 
-    uint32_t size = read_file_data(path, &data);
+    uint32_t size = read_file_data(path, true, &data);
 
     if (size != 0)
         load_material_from_file_data(ctx, data, size, material);
@@ -633,10 +632,93 @@ void load_material_from_file_path(gfx_context_t* ctx, const char* path, struct m
     free(data);
 }
 
-void load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_t* out_matterial)
+bool load_material_from_file_data(gfx_context_t* ctx, char* data, uint32_t size, struct material_t* out_material, struct material_json* out_desc)
 {
-    if(data == nullptr || size == 0) return;
-  //  (*out_insance)->
-  //  std::string jstr(data, size);
-  //  json::from_json<gfx_material_instance_t>(jstr);
+    if (data == nullptr || size == 0 || out_material == nullptr) return false;
+
+    material_json desc;
+    const binary::blob_error err = binary::read_blob(data, size, material_blob_magic, material_blob_version, desc);
+    if (err != binary::blob_error::none) {
+        debug::log_error("[material] bad compiled material: %s", binary::blob_error_string(err));
+        desc = json::from_json_string<material_json>(size, data);
+     //   return false;
+    }
+
+    out_material->uniform_count = 0;
+    out_material->uniforms = nullptr;
+    out_material->slot_count = 0;
+    out_material->slot_names = nullptr;
+    out_material->slot_datas = nullptr;
+    out_material->texture_count = 0;
+    for (int i = 0; i < 8; ++i) {
+        out_material->textures[i] = nullptr;
+        out_material->texture_names[i] = "";
+        out_material->texture_scale_offset[i] = vec4();
+    }
+
+    // texture names / transforms (the texture objects are attached by the resource manager)
+    for (const shader_texture_slot& t : desc.textures) {
+        if (out_material->texture_count >= 8) {
+            debug::log_warning("[material] more than 8 textures, '%s' ignored", t.name.c_str());
+            continue;
+        }
+        const uint32_t i = out_material->texture_count++;
+        out_material->texture_names[i] = t.name.c_str();
+        out_material->texture_scale_offset[i] = t.scaleOffset;
+    }
+
+    // uniform values: one block  [ char* names[n] | shader_slot_data datas[n] | name characters ]
+    const uint32_t n = (uint32_t)(desc.vectors.size() + desc.scalars.size());
+    if (n != 0) {
+        size_t chars = 0;
+        for (const auto& v : desc.vectors) chars += v.key.length() + 1;
+        for (const auto& v : desc.scalars) chars += v.key.length() + 1;
+
+        const size_t names_bytes = sizeof(char*) * n;
+        const size_t datas_off = (names_bytes + alignof(shader_slot_data) - 1) & ~(alignof(shader_slot_data) - 1);
+        const size_t chars_off = datas_off + sizeof(shader_slot_data) * n;
+        char* block = (char*)malloc(chars_off + chars);
+        if (block == nullptr) return false;
+
+        char**            names = (char**)block;
+        shader_slot_data* datas = (shader_slot_data*)(block + datas_off);
+        char*             text  = block + chars_off;
+
+        uint32_t k = 0;
+        auto add_name = [&](const interned_string& key) {
+            const size_t len = key.length();
+            memcpy(text, key.c_str(), len + 1);
+            names[k] = text;
+            text += len + 1;
+        };
+        for (const auto& v : desc.vectors) {
+            add_name(v.key);
+            memset(&datas[k], 0, sizeof(shader_slot_data));
+            datas[k].format = gfx_format_float4;
+            datas[k].f32_4 = v.value;
+            ++k;
+        }
+        for (const auto& v : desc.scalars) {
+            add_name(v.key);
+            memset(&datas[k], 0, sizeof(shader_slot_data));
+            datas[k].format = gfx_format_float1;
+            datas[k].f32_1 = v.value;
+            ++k;
+        }
+        out_material->slot_count = n;
+        out_material->slot_names = names;
+        out_material->slot_datas = datas;
+    }
+
+    if (out_desc) *out_desc = std::move(desc);
+    return true;
+}
+
+void free_material_slots(struct material_t* material)
+{
+    if (material == nullptr) return;
+    free(material->slot_names);         // names, values and name characters share this one block
+    material->slot_names = nullptr;
+    material->slot_datas = nullptr;
+    material->slot_count = 0;
 }

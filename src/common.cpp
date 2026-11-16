@@ -276,7 +276,7 @@ uint64_t hasher::xxhash64(const void* input, size_t length, uint64_t seed)
 
 }
 
-int path::ensure_directory_exists(char* canonical_dir_path) {
+int path::ensure_directory_exists(const char* canonical_dir_path) {
 
     std::filesystem::create_directories(canonical_dir_path);
     return 1;

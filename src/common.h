@@ -45,7 +45,7 @@ struct hasher
 struct path
 {
     static int copy_file(const char* src_path, const char* dest_path);
-    static int ensure_directory_exists(char* canonical_dir_path);
+    static int ensure_directory_exists(const char* canonical_dir_path);
 };
 
 struct debug
@@ -165,6 +165,11 @@ struct binary_writer {
         write(sizeof(T), &v);
     }
 
+    template<> void write(const interned_string & str) {
+        write((uint16_t)str.length());
+        write((uint32_t)str.length(), str.data());
+    }
+
 private:
     std::vector<char> buffer;
 };
@@ -195,6 +200,8 @@ private:
 
 template<>
 inline void filestream::write<interned_string>(interned_string str) {
+    debug::log_warning(str.c_str());
+
     write((uint16_t)str.length());
     write((uint32_t)str.length(), str.data());
 }

@@ -301,11 +301,10 @@ namespace json
 
         template <class T, class Ctx> inline void read_vector(const sajson::value & obj, std::vector<T>& value, Ctx& ctx)
         {
+            value.resize(obj.get_length());
             for(size_t i = 0; i < obj.get_length(); ++i)
             {
-                T tmp_value = {};
-                deserialize_sajson(tmp_value, obj.get_array_element(i), ctx);
-                value.push_back(std::move(tmp_value));
+                deserialize_sajson(value[i], obj.get_array_element(i), ctx);
             }
         }
     }

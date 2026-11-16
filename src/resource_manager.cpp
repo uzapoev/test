@@ -1,7 +1,12 @@
 #include "resource_manager.h"
 #include "resource_loader.h"
 #include "json_serializer.h"
+#include "material_data.h"
+#include "threadpool.h"
 
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
 
 static constexpr uint16_t INVALID_SLOT_INDEX = 0xFFFF;
 static constexpr uint16_t INVALID_POOL_INDEX = 0xFFFF;
@@ -75,15 +80,6 @@ static const char* compiled_asset_extension(asset_type type/*, platform_type typ
     return nullptr;
 }
 
-static void make_cooked_filename_buf(const char* path, guid_t guid, asset_type type, const char* ext, char* cooked_filename, size_t buffer_size)
-{
-    assert(path && ext);
-    char guid_str[33] = "";
-    char canonical_path[256] = "";
-    path::canonicalize_resource_path(path, canonical_path, sizeof(canonical_path));
-    snprintf(cooked_filename, buffer_size, "%s.%s.%d%s", canonical_path, uuid::guid_to_str(guid, guid_str), type, ext);
-}
-
 
 static void for_each_file_recursive(const std::filesystem::path & path, std::function<void(const std::filesystem::path&)> callback)
 {
@@ -97,6 +93,39 @@ static void for_each_file_recursive(const std::filesystem::path & path, std::fun
     }
 }
 
+
+static std::string to_lower_ascii(std::string s)
+{
+    for (char& c : s) c = (char)tolower((unsigned char)c);
+    return s;
+}
+
+static std::string trim_trailing_slashes(std::string s)
+{
+    while (!s.empty() && (s.back() == '/' || s.back() == '\\')) s.pop_back();
+    return s;
+}
+
+// a name given by a user: lower case, '/' only, no leading "./" or '/'
+static std::string normalize_name(const char* name)
+{
+    std::string s = to_lower_ascii(name);
+    std::replace(s.begin(), s.end(), '\\', '/');
+    while (true) {
+        if (s.compare(0, 2, "./") == 0)       s.erase(0, 2);
+        else if (!s.empty() && s[0] == '/')   s.erase(0, 1);
+        else break;
+    }
+    return s;
+}
+
+// `whole` ends with `tail` and the match starts at a path element ("dir/name.png" ends with "name.png", not with "me.png")
+static bool ends_with_path(const std::string& whole, const std::string& tail)
+{
+    if (tail.empty() || tail.size() > whole.size()) return false;
+    if (whole.compare(whole.size() - tail.size(), std::string::npos, tail) != 0) return false;
+    return whole.size() == tail.size() || whole[whole.size() - tail.size() - 1] == '/';
+}
 
 static size_t filesize(FILE* file)
 {
@@ -145,29 +174,6 @@ bool parse_name_with_guid_hand(const char* filename, char* out_name, guid_t* out
     return false;
 }
 
-bool asset_load_mesh(struct resource_manager& mgr, asset_io_blob_t& blob, asset_slot_t& slot)
-{
- /*   render_mesh_t* mesh = mgr.m_render_meshes.allocate();
-    int32_t index = m_render_meshes.get_index(mesh);
-
-    load_mesh_from_file_data(mgr.ctx(), &m_mesh_pool, blob.asset_name, (char*)blob.cpu_data, blob.data_size, mesh);
-
-    if (mesh->index_buffer == nullptr || mesh->vertex_buffer == nullptr)
-    {
-        m_render_meshes.deallocate(mesh);
-        return false;
-    }
-
-    slot.state = asset_state::ready;
-    slot.index_in_pool = index > 0 ? index : 0;
-    */
-    return false;
-}
-
-bool asset_load_texture(struct resource_manager& mgr, asset_io_blob_t& blob, asset_slot_t& slot)
-{
-    return false;
-}
 
 asset_handle_t material_manager::create_instance(class resource_manager& m, asset_handle_t handle)
 {
@@ -312,14 +318,15 @@ void resource_manager::init(platform_type type, const char* cash_path)
 
     char cahs_dir[256] = "";
     sprintf(cahs_dir, "%s/%s/", cash_path ? cash_path : "cash", platform_name);
-    m_cash_path.assign(cahs_dir);
+    m_asset_db.set_cash(cash_path ? cash_path : "cash", cahs_dir);
+    load_asset_db();
 
     m_staging_allocator = new staging_allocator(m_allocator, 4*1024*1024, true);
     
     
     gfx_shader_t* test = nullptr;
-    load_shader_from_file_path(m_ctx, "../data/shaders/test.hlsl", &test);
-    load_shader_from_file_path(m_ctx, "../data/shaders/simple.hlsl", &m_default_shader);
+    load_shader_from_file_path(m_ctx, "../assets/shaders/test.hlsl", &test);
+    load_shader_from_file_path(m_ctx, "../assets/shaders/simple.hlsl", &m_default_shader);
 
   //  create_mesh_pool(m_ctx, (64)*1024*1024, (8)*1024*1024, &m_mesh_pool);
     create_mesh_pool(m_ctx, 380*1024*1024, 32*1024*1024, &m_mesh_pool);
@@ -355,7 +362,7 @@ void resource_manager::init(platform_type type, const char* cash_path)
     {
         uint16_t idx = static_cast<uint16_t>(i);
         
-        m_slots[idx].handle.slot_index =  (i + 1 < m_slots_capacity) ? static_cast<uint16_t>(i + 1) : INVALID_SLOT_INDEX;;
+        m_slots[idx].handle.slot_index =  (i + 1 < m_slots_capacity) ? static_cast<uint16_t>(i + 1) : INVALID_SLOT_INDEX;
         m_slots[idx].handle.generation = 1;
         m_slots[idx].handle.instance_id = 0;
         
@@ -364,23 +371,60 @@ void resource_manager::init(platform_type type, const char* cash_path)
     }
 }
 
+// the compiled file of a source, relative to the cash dir:
+//   <type dir>/<guid><ext>                         a scene keeps its name and the folders of the source:
+//   scenes/<dir of the source>/<name>.bscene
+static std::string asset_compiled_dir(asset_type type, guid_t guid, const std::filesystem::path& source, const std::filesystem::path& assets_dir)
+{
+    const char* folder = "raw";
+    switch (type)
+    {
+        case asset_type_mesh:       folder = "meshes";      break;
+        case asset_type_texture:    folder = "textures";    break;
+        case asset_type_material:   folder = "materials";   break;
+        case asset_type_shader:     folder = "shaders";     break;
+        case asset_type_scene:      folder = "scenes";      break;
+        default: break;
+    }
+
+    std::string name;
+    if (type == asset_type_scene) {
+        const std::string rel_dir = std::filesystem::relative(source.parent_path(), assets_dir).generic_string();
+        name = (rel_dir == "." ? "" : rel_dir + "/") + source.stem().string();
+    } else {
+        char guid_str[64] = "";
+        name = uuid::guid_to_str(guid, guid_str);
+    }
+
+    const char* ext = compiled_asset_extension(type);
+    return std::string(folder) + "/" + name + (ext ? ext : source.extension().string().c_str());
+}
+
 void resource_manager::set_assets_path(const std::string & dir)
 {
     measure ms("resource_manager::set_assets_path");
-    if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir) || (m_dirs.find(dir) != m_dirs.end()) ) {
+    if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir)) {
+        // no sources (a build with the compiled resources only): resources.db is all we know about the resources
+        validate_asset_db();
         return;
     }
+    if (m_dirs.find(dir) != m_dirs.end())
+        return;
 
     m_dirs.emplace(dir);
 
-    for_each_file_recursive(dir, [&](const std::filesystem::path & path){
-        auto u8path = path.string();
+    for (const auto& it : std::filesystem::recursive_directory_iterator(dir)) 
+    {
+        auto path = it.path();
+        if (std::filesystem::is_directory(it)) continue;
+        
+        auto u8path = path.generic_string(); // convert '\\' to '/'
         if(is_meta_file(u8path.c_str()) )
-            return;
+            continue;
 
         if (!utf8::is_ascii(u8path.data(), u8path.length())) {
             debug::log_error("none ascii symbols: %s", u8path.c_str());
-            return;
+            continue;
         }
 
         auto meta_path = u8path + ".jmeta";
@@ -388,82 +432,73 @@ void resource_manager::set_assets_path(const std::string & dir)
         guid_t asset_guid = get_or_create_guid(u8path.c_str(), meta_path.c_str());
         asset_type type = deduce_asset_type(u8path.c_str());
 
-        auto stem = path.stem().string();
-        auto ext = path.extension().string();
-        auto parent_path = path.parent_path().string();
-        auto relative_parent = std::filesystem::relative(path.parent_path(), dir).string();
+        const std::string cooked_filename = asset_compiled_dir(type, asset_guid, path, dir);
+        const std::string cooked_filepath = m_asset_db.cash_file(cooked_filename);
 
-        if (relative_parent == ".")
-            relative_parent = "";
-
-        char guid_str_buf[64] = "";
-        char cooked_filename[256] = "";
-        const char * extension = compiled_asset_extension(type);
-        extension = extension ? extension : ext.c_str();
-        //make_cooked_filename_buf(stem.c_str(), asset_guid, type, extension, cooked_filename, sizeof(cooked_filename));
-        if(type == asset_type_scene) {
-            sprintf(cooked_filename, "%s%s", stem.c_str(), extension);
-        } else {
-            sprintf(cooked_filename, "%s%s", uuid::guid_to_str(asset_guid, guid_str_buf), extension);
-        }
-
-        char cooked_filepath[256] = "";
-      //  !m_cash_path.empty()?strcat(cooked_filepath, m_cash_path.c_str()):"";
-      //  !relative_parent.empty()?strcat(cooked_filepath, relative_parent.c_str()):"";
-      //  strcat(cooked_filepath, cooked_filename);
-
-        snprintf(cooked_filepath, sizeof(cooked_filepath), "%s/%s/%s",
-            m_cash_path.c_str(), relative_parent.c_str(), cooked_filename);
-
-        path::canonicalize_resource_path(cooked_filepath, cooked_filepath, sizeof(cooked_filename)); // replace '\\' to '/' and make strlwr
-        
-        if(need_recompile(u8path.c_str(), cooked_filepath, meta_path.c_str()))
+        if(need_recompile(u8path.c_str(), cooked_filepath.c_str(), meta_path.c_str()))
         {
             if(m_compilers[type] != nullptr){
-                m_compilers[type](u8path.c_str(), cooked_filepath, meta_path.c_str(), m_platform_type, this);
+                std::filesystem::create_directories(std::filesystem::path(cooked_filepath).parent_path());
+                m_compilers[type](u8path.c_str(), cooked_filepath.c_str(), meta_path.c_str(), m_platform_type, this);
             } else {
                 debug::log_error("no compiler for resource: %s", u8path.c_str());
             }
         }
 
+        bool iscooked = true;
         if(!std::filesystem::exists(cooked_filepath)){
+            iscooked = false;
             debug::log_error("filed cooking file: %s", u8path.c_str());
-            return;
+          //  return;
         }
 
-       // char guid_str[33] = "";
-        m_path_2_guid.emplace(u8path.c_str(), asset_guid);
-        m_guid_2_path.emplace(asset_guid, std::filesystem::path(cooked_filepath));
+        // the original path (relative to the assets dir) -> the compiled file: what resources.db keeps
+        asset_db::entry entry;
+        entry.source = std::filesystem::relative(path, dir).generic_string();
+        entry.cooked = cooked_filename;
+        entry.type   = type;
 
-        file_info_t info        = {};
-        info.type               = type;
-        info.guid_rt            = uuid::runtime_guid(asset_guid);
-        info.guid               = asset_guid;
-        info.size               = (uint32_t)std::filesystem::file_size(cooked_filepath);
-        info.compressed_size    = info.size;
-        info.path               = interned_string(cooked_filepath).c_str();
-        m_file_infos.emplace(info.guid_rt, info);
-    });
+        m_path_2_guid[interned_string(u8path.c_str())] = asset_guid;
+        register_cooked(asset_guid, entry);
+        (void)iscooked;
+    };
+
+    thread_pool::shared()->wait_for_all();
+    for(auto & it : m_file_infos)
+    {
+        if(std::filesystem::exists(it.second.path))
+            it.second.size = std::filesystem::file_size(it.second.path);
+    }
+
+    // the compilation is over: check that everything the db knows is there, then write it down
+    validate_asset_db();
+    m_asset_db.save();
 }
 
 std::string resource_manager::find(const std::string & name)
 {
-    auto lowername(name);
-    std::transform(lowername.begin(), lowername.end(), lowername.begin(), [](unsigned char c){ return std::tolower(c); });
-    
-    static std::string empty;
+    return get_path(name.c_str());
+}
 
-    if(uuid::is_guid_str(name.c_str()))
-    {
-        guid_t guid = uuid::str_to_guid(name.c_str());
-        auto it2 = m_guid_2_path.find(guid);
-        if (it2 != m_guid_2_path.end())
-        {
-            return it2->second.u8string();
-        }
-    }
-    
-    return empty;
+std::string resource_manager::get_path(guid_t guid)
+{
+    return m_asset_db.cooked_path(guid);
+}
+
+std::string resource_manager::get_path(const char* name_or_guid)
+{
+    const guid_t guid = find_guid(name_or_guid);
+    return guid == nullptr ? std::string() : get_path(guid);
+}
+
+std::string resource_manager::get_name(guid_t guid)
+{
+    return m_asset_db.source(guid);
+}
+
+guid_t resource_manager::find_guid(const char* name_or_guid)
+{
+    return m_asset_db.find_guid(name_or_guid);
 }
 
 
@@ -573,6 +608,320 @@ guid_t resource_manager::get_or_create_guid(const char* path, const char * meta_
 }
 
 
+// ======================================================================================================================
+// resources.db: guid -> original path, compiled file. Lives in the root of the cash dir (next to the platform dirs),
+// written after the resources are compiled, read back when the cash path is set. That is what lets the compiled
+// resources be found by the path of the original ones when the sources are not there (build, DLC).
+//
+//   #resdb 1
+//   <guid> <TAB> <asset_type> <TAB> <original path, relative to the assets dir> <TAB> <compiled file, relative to the platform dir>
+//
+// Text, sorted by the original path: readable, no diff noise. The paths are ascii (set_assets_path skips the others).
+// ======================================================================================================================
+static const char* k_resource_db_name   = "resources.db";
+static const char* k_resource_db_header = "#resdb 1";
+
+void asset_db::set_cash(const std::string& root, const std::string& platform_dir)
+{
+    m_cash_root = trim_trailing_slashes(root);
+    m_cash_path = trim_trailing_slashes(platform_dir);
+}
+
+std::string asset_db::db_file_path() const
+{
+    return m_cash_root + "/" + k_resource_db_name;
+}
+
+std::string asset_db::cash_file(const std::string& relative) const
+{
+    return m_cash_path + "/" + relative;
+}
+
+void asset_db::add(guid_t guid, const entry& e)
+{
+    m_entries[guid] = e;
+    m_index_dirty = true;
+}
+
+const asset_db::entry* asset_db::find(guid_t guid) const
+{
+    auto it = m_entries.find(guid);
+    return it != m_entries.end() ? &it->second : nullptr;
+}
+
+std::string asset_db::source(guid_t guid) const
+{
+    const entry* e = find(guid);
+    return e ? e->source : std::string();
+}
+
+std::string asset_db::cooked_path(guid_t guid) const
+{
+    const entry* e = find(guid);
+    return e ? cash_file(e->cooked) : std::string();
+}
+
+void asset_db::rebuild_name_index() const
+{
+    m_source_2_guid.clear();
+    m_name_2_guids.clear();
+
+    for (const auto& it : m_entries)
+    {
+        if (it.second.source.empty()) continue;
+
+        const std::string lower = to_lower_ascii(it.second.source);
+        m_source_2_guid[lower] = it.first;
+
+        const size_t slash = lower.rfind('/');
+        m_name_2_guids[slash == std::string::npos ? lower : lower.substr(slash + 1)].push_back(it.first);
+    }
+    m_index_dirty = false;
+}
+
+// A resource by name: guid string | path of the original | the end of it | a part of it.
+//   "b5a0953624bca8644be523fa1c4cada7"      the guid
+//   "textures/wall.png"                     the path relative to the assets dir (the exact one wins)
+//   "wall.png", "textures/wall.png"         the end of the path: the shortest path that ends with it wins
+//   "../data/textures/wall.png"             a path that is longer than the known one (the assets dir in front)
+//   "wall"                                  a part of the path, the last resort
+guid_t asset_db::find_guid(const char* name_or_guid) const
+{
+    if (name_or_guid == nullptr || *name_or_guid == 0) return {};
+
+    if (strlen(name_or_guid) == 32 && uuid::is_guid_str(name_or_guid))
+        return uuid::str_to_guid(name_or_guid);
+
+    const std::string query = normalize_name(name_or_guid);
+    if (query.empty()) return {};
+
+    if (m_index_dirty) rebuild_name_index();
+
+    auto exact = m_source_2_guid.find(query);
+    if (exact != m_source_2_guid.end())
+        return exact->second;
+
+    struct match_t { guid_t guid; size_t score; const std::string* source; };
+    std::vector<match_t> matches;
+
+    // the file name is the key of the index: only the files with the same name are looked at
+    const size_t slash = query.rfind('/');
+    const std::string base = slash == std::string::npos ? query : query.substr(slash + 1);
+    auto bucket = m_name_2_guids.find(base);
+    if (bucket != m_name_2_guids.end())
+    {
+        for (const guid_t& guid : bucket->second)
+        {
+            const std::string& source = m_entries.at(guid).source;
+            const std::string lower_source = to_lower_ascii(source);
+            if (ends_with_path(lower_source, query))         matches.push_back({ guid, lower_source.size() - query.size(), &source });
+            else if (ends_with_path(query, lower_source))    matches.push_back({ guid, query.size() - lower_source.size(), &source });
+        }
+    }
+
+    bool partial = false;
+    if (matches.empty())
+    {
+        partial = true;
+        for (const auto& it : m_entries) {
+            const std::string lower_source = to_lower_ascii(it.second.source);
+            if (lower_source.find(query) != std::string::npos)
+                matches.push_back({ it.first, lower_source.size() - query.size(), &it.second.source });
+        }
+    }
+
+    if (matches.empty()) return {};
+
+    std::sort(matches.begin(), matches.end(), [](const match_t& a, const match_t& b) {
+        return a.score != b.score ? a.score < b.score : *a.source < *b.source;      // the closest, then a stable order
+    });
+
+    if (matches.size() > 1 && matches[1].score == matches[0].score)
+        debug::log_warning("[resource_manager] '%s' is ambiguous (%d matches), using '%s'", name_or_guid, (int)matches.size(), matches[0].source->c_str());
+    else if (partial)
+        debug::log_warning("[resource_manager] '%s': no exact name, using '%s'", name_or_guid, matches[0].source->c_str());
+
+    return matches[0].guid;
+}
+
+void asset_db::load()
+{
+    const std::string path = db_file_path();
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec))
+        return;
+
+    const std::vector<char> data = resource_manager::file_data(path);
+    if (data.empty()) return;
+
+    const char* it  = data.data();
+    const char* end = data.data() + data.size();
+    size_t line_number = 0, loaded = 0, broken = 0;
+
+    while (it < end)
+    {
+        const char* eol = (const char*)memchr(it, '\n', (size_t)(end - it));
+        const char* line_end = eol ? eol : end;
+        std::string line(it, line_end);
+        it = eol ? eol + 1 : end;
+
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        ++line_number;
+
+        if (line_number == 1) {
+            if (line != k_resource_db_header) {
+                debug::log_error("[resource_db] %s: unknown format '%s', ignored (it will be written again)", path.c_str(), line.c_str());
+                return;
+            }
+            continue;
+        }
+        if (line.empty() || line[0] == '#') continue;
+
+        // guid TAB type TAB source TAB cooked
+        const size_t t1 = line.find('\t');
+        const size_t t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
+        const size_t t3 = t2 == std::string::npos ? t2 : line.find('\t', t2 + 1);
+        const std::string guid_text = line.substr(0, t1);
+        if (t3 == std::string::npos || guid_text.size() != 32 || !uuid::is_guid_str(guid_text.c_str())) {
+            ++broken;
+            continue;
+        }
+
+        const int type = atoi(line.substr(t1 + 1, t2 - t1 - 1).c_str());
+        entry e;
+        e.type   = (type > 0 && type < (int)asset_type_count) ? (asset_type)type : asset_type_unknown;
+        e.source = line.substr(t2 + 1, t3 - t2 - 1);
+        e.cooked = line.substr(t3 + 1);
+        if (e.cooked.empty()) { ++broken; continue; }
+
+        add(uuid::str_to_guid(guid_text.c_str()), e);
+        ++loaded;
+    }
+
+    if (broken > 0)
+        debug::log_error("[resource_db] %s: %d broken lines skipped", path.c_str(), (int)broken);
+}
+
+// Everything the db lists must be there: a compiled file that is missing is reported and dropped
+// (so a load of it fails at once instead of reading nothing).
+std::vector<guid_t> asset_db::validate()
+{
+    std::vector<guid_t> dropped;
+    for (auto it = m_entries.begin(); it != m_entries.end(); )
+    {
+        std::error_code ec;
+        const std::string full = cash_file(it->second.cooked);
+        if (std::filesystem::exists(full, ec)) { ++it; continue; }
+
+        char guid_text[64] = "";
+        debug::log_error("[resource_db] '%s' (%s): compiled file is missing: %s", it->second.source.c_str(), uuid::guid_to_str(it->first, guid_text), full.c_str());
+
+        dropped.push_back(it->first);
+        it = m_entries.erase(it);
+    }
+
+    if (!dropped.empty()) {
+        m_index_dirty = true;
+        debug::log_error("[resource_db] %d resources are not available (compile them again: remove the compiled files of the cash dir)", (int)dropped.size());
+    }
+    return dropped;
+}
+
+void asset_db::save() const
+{
+    struct line_t { std::string source; std::string text; };
+    std::vector<line_t> lines;
+    lines.reserve(m_entries.size());
+
+    for (const auto& it : m_entries)
+    {
+        const entry& e = it.second;
+        if (e.source.find_first_of("\t\r\n") != std::string::npos || e.cooked.find_first_of("\t\r\n") != std::string::npos)
+            continue;       // can't be written in a line
+
+        char guid_text[64] = "";
+        uuid::guid_to_str(it.first, guid_text);
+        lines.push_back({ e.source, std::string(guid_text) + "\t" + std::to_string((int)e.type) + "\t" + e.source + "\t" + e.cooked + "\n" });
+    }
+    std::sort(lines.begin(), lines.end(), [](const line_t& a, const line_t& b) { return a.source != b.source ? a.source < b.source : a.text < b.text; });
+
+    std::string text = std::string(k_resource_db_header) + "\n";
+    for (const auto& line : lines) text += line.text;
+
+    // nothing changed: leave the file alone (the time stays, no useless writes)
+    const std::string path = db_file_path();
+    std::error_code ec;
+    if (std::filesystem::exists(path, ec)) {
+        const std::vector<char> old = resource_manager::file_data(path);
+        if (old.size() == text.size() && memcmp(old.data(), text.data(), text.size()) == 0)
+            return;
+    }
+
+    std::filesystem::create_directories(m_cash_root, ec);
+
+    const std::string tmp_path = path + ".tmp";
+    FILE* file = fopen(tmp_path.c_str(), "wb");
+    if (file == nullptr) {
+        debug::log_error("[resource_db] can't write %s", tmp_path.c_str());
+        return;
+    }
+    const bool written = fwrite(text.data(), 1, text.size(), file) == text.size();
+    fclose(file);
+
+    if (!written) {
+        debug::log_error("[resource_db] failed writing %s", tmp_path.c_str());
+        std::filesystem::remove(tmp_path, ec);
+        return;
+    }
+
+    std::filesystem::rename(tmp_path, path, ec);
+    if (ec) {
+        debug::log_error("[resource_db] can't replace %s: %s", path.c_str(), ec.message().c_str());
+        std::filesystem::remove(tmp_path, ec);
+    }
+}
+
+// ---- the manager side: the db entries become the file infos the loader works with ----------------------------------
+
+void resource_manager::register_file_info(guid_t guid, const asset_db::entry& entry)
+{
+    const std::string full = m_asset_db.cash_file(entry.cooked);
+
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(full, ec);
+
+    file_info_t info        = {};
+    info.type               = entry.type;
+    info.guid_rt            = uuid::runtime_guid(guid);
+    info.guid               = guid;
+    info.size               = exists ? (uint32_t)std::filesystem::file_size(full, ec) : 0;
+    info.compressed_size    = info.size;
+    info.path               = interned_string(full.c_str()).c_str();
+    info.name               = interned_string(strrchr(full.c_str(), '/')).c_str();
+    m_file_infos.insert_or_assign(info.guid_rt, info);
+}
+
+// a compiled resource of the scan
+void resource_manager::register_cooked(guid_t guid, const asset_db::entry& entry)
+{
+    m_asset_db.add(guid, entry);
+    register_file_info(guid, entry);
+}
+
+void resource_manager::load_asset_db()
+{
+    m_asset_db.load();
+    for (const auto& it : m_asset_db.entries())
+        register_file_info(it.first, it.second);
+}
+
+void resource_manager::validate_asset_db()
+{
+    for (guid_t guid : m_asset_db.validate())
+        m_file_infos.erase(uuid::runtime_guid(guid));
+}
+
+
 void resource_manager::set_compiler(asset_type type, asset_compile_func_t func)
 {
     m_compilers[type] = func;
@@ -582,7 +931,12 @@ asset_handle_t resource_manager::load(const char* path, load_params_t* params)
 {
     if (path == nullptr) return { 0 };
 
-    guid_t guid = get_or_create_guid(path, nullptr);
+    // a guid, or the name of the original resource (see find_guid)
+    guid_t guid = find_guid(path);
+    if (guid == nullptr) {
+        debug::log_error("[resource_manager] load: resource '%s' not found", path);
+        return INVALID_ASSET_HANDLE;
+    }
 
     return load(guid, params);
 }
@@ -593,25 +947,24 @@ asset_handle_t resource_manager::load(guid_t guid, load_params_t* param)
     if(guid == 0) return INVALID_ASSET_HANDLE;
 
     uint64_t fileid = uuid::runtime_guid(guid);
+    file_info_t* file = get_file_info(fileid);
+    asset_slot_t* slot = get_slot(fileid);
 
-    if(asset_slot_t* slot = get_slot(fileid)) {
+    if(slot != nullptr) {
         if(slot->type == asset_type_material)
-        {
-            auto instance = create_material_instance(slot->handle);
-            debug::log_warning("");
-        }
+            return create_material_instance(slot->handle);
+
         slot->ref_count++;
         return slot->handle;
     }
 
-    if(file_info_t* file = get_file_info(fileid)) {
+    asset_handle_t result = INVALID_ASSET_HANDLE;
+    if(file != nullptr) {
 
-        
-        auto handle2 = slot_allocate(fileid, file->type);
-        auto slot = slot_validate_and_get(handle2);
+        auto asset_handle = slot_allocate(fileid, file->type);
+        auto slot = slot_validate_and_get(asset_handle);
 
         auto loader = m_loaders[(uint32_t)file->type];
-
 
         const char * dbg_name = strrchr(file->path, '/');
         slot->state = asset_state::loading;
@@ -632,37 +985,48 @@ asset_handle_t resource_manager::load(guid_t guid, load_params_t* param)
 
             slot->state = asset_state::ready;
             slot->index_in_pool = index > 0 ? index : 0;
+            result = slot->handle;
         }
         if(slot->type == asset_type_texture)
         {
-            gfx_texture_t * texture_handle = nullptr;
-            load_texture_from_file_data(m_ctx, dbg_name, (char*)blob.cpu_data, blob.data_size, &texture_handle);
+            gfx_texture_t * gfx_texture = nullptr;
+            load_texture_from_file_data(m_ctx, dbg_name, (char*)blob.cpu_data, blob.data_size, &gfx_texture);
 
-            if(texture_handle != nullptr)
+            if(gfx_texture != nullptr)
             {
-                slot->state = asset_state::ready;
                 auto texture = m_textures.allocate();
-                auto index = m_textures.get_index(texture);
-                texture->texture_handle = texture_handle;
-                slot->index_in_pool = index;
+                texture->texture_handle = gfx_texture;
+
+                slot->state = asset_state::ready;
+                slot->index_in_pool = m_textures.get_index(texture);
             }
-            
+            result = slot->handle;
         }
         if (slot->type == asset_type_material)
         {
-            material_t material = {};
-            load_material_from_file_data(m_ctx, (char*)blob.cpu_data, blob.data_size, &material);
-            material.manager = this;
-            material.pipeline = m_default_pipeline;
-            material.shader = m_default_shader;
-            /*m_material_instances_new.emplace_back(instance);
+            material_t * material = m_materials.allocate();
 
-            material_instance_t material = {};
-            material.instance = &base_material;
-            auto set = gfx_descriptor_set_create(m_ctx, m_default_shader, 0);
-            m_materials_new.emplace_back(material);
+            material_json desc;
+            if (load_material_from_file_data(m_ctx, (char*)blob.cpu_data, blob.data_size, material, &desc))
+            {
+                for (uint16_t i = 0; i < material->texture_count; ++i)
+                {
+                    const asset_handle_t th = load(desc.textures[i].guid, nullptr);
+                    material->textures[i] = const_cast<texture_t*>(get_texture(th));    // null if the texture is unknown
+                }
+            }
 
-            slot->index_in_pool = (uint32_t)m_materials_new.size();*/
+            material->manager = this;
+
+            if(material->shader == nullptr)
+                material->shader = m_default_shader;
+
+            if(material->pipeline == nullptr)
+                material->pipeline = m_default_pipeline;
+
+            slot->state = asset_state::ready;
+            slot->index_in_pool = m_materials.get_index(material);
+            result = create_material_instance(slot->handle);
         }
 
         free_asset_blob(&blob);
@@ -670,10 +1034,10 @@ asset_handle_t resource_manager::load(guid_t guid, load_params_t* param)
 
         m_guid_2_slots.emplace(fileid, slot);
 
-        return slot->handle;
+        return result;
     }
 
-    return {0};
+    return INVALID_ASSET_HANDLE;
 }
 
 void resource_manager::release(asset_handle_t handle)
@@ -697,7 +1061,7 @@ void resource_manager::release(asset_handle_t handle)
 void resource_manager::set_cash_path(const char* path)
 {
     char tmp[512] = "";
-    path::canonicalize_resource_path(path, tmp, sizeof(tmp));
+    strcat(tmp, path);
 
     uint32_t len = (uint32_t)strlen(tmp);
     if (tmp[len - 1] != '/') {
@@ -710,7 +1074,8 @@ void resource_manager::set_cash_path(const char* path)
     if(!std::filesystem::exists(tmp))
         std::filesystem::create_directories(tmp);
 
-    m_cash_path = tmp;
+    m_asset_db.set_cash(path, std::filesystem::path(tmp).generic_string());
+    load_asset_db();        // what the previous runs compiled, the compiled resources can be used without the sources
 }
 
 void resource_manager::set_dlc_path(const char* path)
@@ -809,13 +1174,45 @@ void resource_manager::slot_free(asset_handle_t handle)
 
 asset_handle_t resource_manager::create_material_instance(asset_handle_t handle)
 {
+    static std::unordered_map<interned_string, interned_string> remaps = {
+        {"_MainTex", "_texture0"},
+        {"_Albedo", "_texture0"}
+    };
     asset_slot_t* slot = slot_validate_and_get(handle);
     if(slot->type != asset_type_material)
         return INVALID_ASSET_HANDLE;
 
-    //debug::breakpoint();
-    return INVALID_ASSET_HANDLE;
-    //m_material_mananget
+    slot->ref_count++;
+    material_t * material = m_materials.get_by_index(slot->index_in_pool);
+
+    auto material_instance = m_material_instances.allocate();
+    auto material_instance_id = m_material_instances.get_index(material_instance);
+
+    material_instance->instance = material;
+    material_instance->descriptor_set = gfx_descriptor_set_create(m_ctx, material->shader, 0);
+
+    for(int i = 0; i < material->texture_count; ++i)
+    {
+        auto location = gfx_uniform_location(material->shader, material->texture_names[i]);
+        if(location == 0)
+        {
+            auto remapped = remaps.find(material->texture_names[i]);
+            if(remapped == remaps.end())
+                continue;
+
+            location = gfx_uniform_location(material->shader, remapped->second.c_str());
+            if (location == 0)
+                continue;
+        }
+        
+        auto texture = material->textures[i];
+        gfx_descriptor_set_write_texture(material_instance->descriptor_set, location, texture->texture_handle);
+    }
+
+    asset_handle_t result = slot->handle;
+    result.instance_id = material_instance_id;
+
+    return result;
 }
 
 void resource_manager::gc_process()
@@ -831,7 +1228,7 @@ asset_io_blob_t resource_manager::read_asset_blob(file_info_t* info)
     blob.data_size = info->size;
 
     // TODO: replace to virtual fs(android)
-    FILE* file = fopen(info->path, "r");
+    FILE* file = fopen(info->path, "rb");
     if (file) {
         fread(blob.cpu_data, blob.data_size, 1, file);
         fclose(file);
@@ -842,6 +1239,7 @@ asset_io_blob_t resource_manager::read_asset_blob(file_info_t* info)
 void resource_manager::free_asset_blob(asset_io_blob_t* blob)
 {
     if (blob && blob->cpu_data) {
+        memset(blob->cpu_data, 0, blob->data_size);
         m_staging_allocator->deallocate(blob->cpu_data);
         memset(blob, 0, sizeof(asset_io_blob_t));
     }
