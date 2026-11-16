@@ -41,6 +41,25 @@ struct camera : icomponent
 
     void update();
 
+    // Drive the camera from an external controller (a game's player) instead of mouse delta + target.
+    // Angles are in radians, y up, right handed: at yaw = pitch = roll = 0 the camera looks along -z; positive yaw
+    // turns left, positive pitch looks up (three.js 'YXZ' euler order, R = Ry(yaw) * Rx(pitch) * Rz(roll)).
+    // Uses m_fov / m_aspect / m_near / m_far (see setup()) and updates _pos, _target and m_view_proj.
+    // Returns the view matrix, because the struct is uploaded to the GPU as is and has no room for another member.
+    mat4 set_pose(const vec3& eye, float yaw, float pitch, float roll)
+    {
+        const float sy = sinf(yaw), cy = cosf(yaw), sp = sinf(pitch), cp = cosf(pitch), sr = sinf(roll), cr = cosf(roll);
+        const vec3 fwd = { -sy * cp, sp, -cy * cp };
+        const vec3 up  = { -cy * sr + sy * sp * cr, cp * cr, sy * sr + cy * sp * cr };
+
+        _pos = eye;
+        _target = eye + fwd;
+        mat4 proj = math::perspective_matrix(math::deg2rad(m_fov), m_aspect, m_near, m_far, true);
+        mat4 view = math::look_at_matrix(eye, _target, up, true);
+        m_view_proj = math::mul(proj, view);
+        return view;
+    }
+
     float m_fov         = 45.0f;
     float m_aspect      = 4.0f / 3.0f;
     float m_near        = 0.1f;
@@ -55,19 +74,11 @@ struct camera : icomponent
 };
 
 
-struct node
+struct node : tinynode
 {
-    interned_string         name;
-    interned_string         guid;
-    interned_string         tag;
-    uint64_t                flags = 0; // static, enabled
-
-    uint32_t                index = 0; // index in scene, read only
-
-    transform               transform;
-    renderer                renderer;
-
-    std::vector<node>       childs;
+    node();
+    uint32_t                index = 0;
+    hierarchy               hierarchy;  // links by index, filled by scene::link_hierarchy(); TODO: editor only (#ifdef) if the memory gets tight
 };
 
 
@@ -126,12 +137,15 @@ public:
     void            load(const std::string_view& path);
     void            save(const std::string_view& path);
 
+    // node::parent (guid) -> node::hierarchy (indexes). Call when all the nodes are in m_nodes (a parent may come after its child).
+    void            link_hierarchy();
+
     void            clear();
     void            update();
     void            draw(gfx_command_buffer_t* cmd, camera & cam);
 
  public:
-   node *           create_node(interned_string name = "", interned_string guid = "");
+   node *           create_node(interned_string name = "", guid_t guid = {});
 
 public:
     friend struct scene_reader_json;
@@ -140,15 +154,19 @@ public:
     class world*                            m_world = nullptr;
 
     std::vector<node>                       m_nodes;
-    std::vector<node*>                      m_nodes_flat_list;
-    std::vector<node*>                      m_allocated_nodes;
      
     entity_query<transform, renderer>       m_render_query;
-    std::vector<tinynode*>                  m_tiny_nodes;
+    std::vector<tinynode*>                      m_tiny_nodes;
     
     //scene resources
-    std::unordered_set<interned_string>     m_meshes;
-    std::unordered_set<interned_string>     m_materials;
+    std::vector<guid_t> m_mesh_guids;
+    std::vector<guid_t> m_texture_guids;
+    std::vector<guid_t> m_shaders_guids;
+    std::vector<guid_t> m_materials_guids;
+
+private:
+
+  //  SerializeObject(scene, ReflectObjectFieldWithKey("nodes", m_nodes));
 };
 
 #endif

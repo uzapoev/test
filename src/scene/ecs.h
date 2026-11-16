@@ -70,14 +70,23 @@
 // }
 // 
 
+typedef enum node_flag {
+    node_flag_none      = 0,
+    node_flag_enabled   = 1 << 0,
+    node_flag_static    = 1 << 1,
+}node_flag;
 
-struct tinynode
-{
-    guid_t                  guid;
-    interned_string         name;
-    uint64_t                flags; // static, enabled
-    uint64_t                runtime_id;
-    uint64_t                component_mask;
+
+struct tinynode {
+    guid_t                  guid;                   //
+    guid_t                  parent;                 //
+    interned_string         name;                   // 
+    interned_string         tag;                   // 
+    uint8_t                 flags           = 0;    // static, enabled
+
+    uint32_t                runtime_id      = 0;    // runtime guid 64bit
+    uint64_t                component_mask  = 0;    // in a future change to uint64_t component_mask[2]// 128 component types, or
+    uint8_t                 scene_id        = 0;
 
     template <class T>    inline T * add_component();
     template <class T>    inline T * get_component();
@@ -87,10 +96,13 @@ struct tinynode
 class component_registry {
 private:
     static inline std::atomic<uint32_t> g_component_counter { 0 };
+    static inline std::atomic<uint32_t> g_query_counter{ 1 };
+    static inline const char* g_names[256] = { };
 
     template<class CleanType>
     static inline uint32_t get_clean_type_index_() noexcept {
         static uint32_t index = g_component_counter.fetch_add(1, std::memory_order_relaxed);
+        if(g_names[index] == nullptr) g_names[index] = typeid(CleanType).name();
         return index;
     }
 
@@ -101,16 +113,50 @@ public:
         return get_clean_type_index_<std::remove_cv_t<std::remove_reference_t<std::remove_pointer_t<T>>>>();
     }
 
+    static inline const char * type_name(uint32_t index) {
+        return g_names[index];
+    }
+
+
     template<typename T>
     static inline uint64_t component_bit() noexcept {
         static const uint64_t bit = 1ULL << type_index<T>();
         assert(bit != 0 && "Exceeded 64-component architecture limit!");
         return bit;
     }
+
+    template<class QueryWrapperType>
+    static inline uint32_t query_type_id() noexcept {
+        static uint32_t index = g_query_counter.fetch_add(1, std::memory_order_relaxed);
+        debug::log_warning("\n%s", typeid(QueryWrapperType).name());
+        return index;
+    }
 };
 
 
 class component_manager;
+
+
+class icomponent_query {
+public:
+    virtual ~icomponent_query() = default;
+
+    uint32_t get_wrapper_type_id() const noexcept { return m_wrapper_type_id; }
+
+    template <typename... Components>
+    auto& as() {
+        using wrapper_type = component_query_wrapper<Components...>;
+        uint32_t cast_type = component_registry::query_type_id<entity_query<Components...>>();
+
+        assert(get_wrapper_type_id() == cast_type &&
+            "SECS ERROR: Query type mismatch or WRONG COMPONENT ORDER in .as<T>() cast!");
+
+        return *static_cast<wrapper_type*>(this);
+    }
+protected:
+    uint32_t   m_wrapper_type_id = 0;
+};
+
 
 class iquery_listener {
 public:
@@ -125,6 +171,7 @@ public:
     virtual void*   get_raw(uint32_t runtime_id) = 0;
     virtual void*   allocate_raw(uint32_t runtime_id) = 0;
     virtual void    add_extern_raw(uint32_t runtime_id, void* external_comp_ptr) = 0;
+    virtual bool    contains_component_ptr(const void* ptr) const noexcept = 0;
     virtual void    remove(uint32_t runtime_id) = 0;
 };
 
@@ -251,8 +298,8 @@ private:
     };
 
     std::string                             m_type_name;
-    aligned_allocator* m_mem_resources = nullptr;
-    paged_pool_allocator* m_allocator = nullptr;
+    aligned_allocator* m_mem_resources      = nullptr;
+    paged_pool_allocator* m_allocator       = nullptr;
 
     // Using the utility container for storage and indexing mapping
     paged_sparse_set<dense_element>         m_set;
@@ -294,6 +341,10 @@ public:
         new (internal_storage) T(std::move(*static_cast<T*>(external_comp_ptr)));
         m_set.insert(runtime_id, { runtime_id, internal_storage });
     }
+
+    virtual bool contains_component_ptr(const void* ptr) const noexcept {
+        return m_allocator->contains_address(ptr);
+    };
     /*
     virtual void update_from_raw(uint32_t runtime_id, void* external_comp_ptr) override {
         T* existing = get(runtime_id);
@@ -389,6 +440,30 @@ private:
 };
 
 
+template <typename... Components>
+class component_query_wrapper : public icomponent_query {
+private:
+    entity_query<Components...>* m_raw_query;
+
+public:
+    component_query_wrapper(entity_query<Components...>* raw) : m_raw_query(raw) {
+        m_wrapper_type_id = component_registry::query_type_id<entity_query<Components...>>();
+    }
+
+    // Magic for range-based for: begin/end methods that the compiler twitches
+    inline auto begin() { return m_raw_query->begin(); }
+    inline auto end() { return m_raw_query->end(); }
+
+    // Allows you to .exclude<T>() directly on creation
+    template <typename... ExcludeComponents>
+    component_query_wrapper& exclude() {
+        m_raw_query->template exclude<ExcludeComponents...>();
+        return *this;
+    }
+};
+
+
+
 class component_manager {
 public:
     static component_manager& instance() {
@@ -410,9 +485,7 @@ public:
 
     void register_query(iquery_listener* listener) { m_listeners.push_back(listener); }
 
-    void post_frame_cleanup() {
-        for (auto* listener : m_listeners) { listener->garbage_collect(); }
-    }
+    void post_frame_cleanup() { for (auto* listener : m_listeners) listener->garbage_collect(); }
 
     template <typename T>
     component_pool<T>* get_pool() {
@@ -420,6 +493,20 @@ public:
         if (idx >= m_pools.size()) m_pools.resize(idx + 1, nullptr);
         if (!m_pools[idx]) m_pools[idx] = new component_pool<T>();
         return static_cast<component_pool<T>*>(m_pools[idx]);
+    }
+
+    icomponent_pool* get_pool_by_type_index(uint32_t type_idx) {
+        if (type_idx < m_pools.size()) return m_pools[type_idx];
+        return nullptr;
+    }
+
+    // manager.is<transform>(component_ptr); 
+    template <typename T>
+    inline bool is(const void* component_ptr) const noexcept {
+        if (!component_ptr) return false;
+        const icomponent_pool* pool = const_cast<component_manager*>(this)->get_pool<T>();
+        if (!pool) return false;
+        return pool->contains_component_ptr(component_ptr);
     }
 
     template <typename T>
@@ -430,6 +517,9 @@ public:
             debug::log_error("Component configuration conflict detected! Cannot add component to node: %s", node->name.data());
             return nullptr; // Gracefully abort allocation
         }
+
+        if(auto c = get_component<T>(node))
+            return c;
 
         T* comp = get_pool<T>()->add(node->runtime_id);
         node->component_mask |= component_registry::component_bit<T>();
@@ -536,6 +626,16 @@ public:
         return (current_mask & m_conflict_masks[type_idx]) != 0ULL;
     }
 
+
+    template <typename... Components>
+    icomponent_query* create_query() {
+        auto* raw_query = new entity_query<Components...>();
+
+        register_query(raw_query);
+
+        return new component_query_wrapper<Components...>(raw_query);
+    }
+
 private:
     std::vector<uint64_t>           m_conflict_masks;    // Array where index = type_idx, and value = bitmask of conflicting components
     std::vector<icomponent_pool*>   m_pools;
@@ -544,10 +644,10 @@ private:
 };
 
 
-template <class T>    inline T* tinynode::add_component() {
+template <class T> inline T* tinynode::add_component() {
     return component_manager::instance().add_component<T>(this);
 }
-template <class T>    inline T* tinynode::get_component() {
+template <class T> inline T* tinynode::get_component() {
     return component_manager::instance().get_component<T>(this);
 }
 #endif

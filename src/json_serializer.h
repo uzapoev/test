@@ -279,6 +279,9 @@ namespace json
     struct no_ctx {
         template<class T, class Ctx> 
         void unused(T& t, const sajson::string& k, const sajson::value& v, Ctx&) {};
+
+        template<class T>
+        T * allocate() { return new T(); }
     };
 
     template<class T, class Ctx>

@@ -17,13 +17,13 @@
 #include "json_serializer.h"
 
 #include "scene/scene.h"
-#include "scene/render_system.h"
+#include "scripting/scripting.h"
 
 #include "resource_manager.h"
 #include "resource_compiler.h"
 
 #include "mesh.h"
-
+#include "threadpool.h"
 
 
 uintptr_t g_handle;
@@ -33,24 +33,25 @@ static gfx_surface_t surface = {};
 static gfx_pipeline_t* pipeline = nullptr;
 static scene g_scene;
 
-void scene_test(gfx_context_t* ctx, const char * data_path, const char* scene_name)
+void scene_test(gfx_context_t* ctx, const char* scene_name)
 {
-    std::string bin_path = scene_name;
-    bin_path.append(".bin");
-    if (std::filesystem::exists(bin_path)) {
-        g_scene.load(bin_path);
+    std::string scene_path = scene_name;
+
+    std::string scene_json_path = scene_path + ".json";
+    std::string scene_bin_path = scene_path + ".bscene";
+
+    if (std::filesystem::exists(scene_name)) {
+        g_scene.load(scene_name);
     }
-
-    /*g_scene = scene::create_from_json_file(scene_name);
-    
-    std::string bin_path = std::string(scene_name).append(".bin");
-
-    if(std::filesystem::exists(bin_path))
-        g_scene = scene::create_from_file(bin_path.c_str());
-    else
-        g_scene = scene::create_from_json_file(scene_name);*/
+    if (std::filesystem::exists(scene_bin_path)) {
+        g_scene.load(scene_bin_path);
+    }
+    else if (std::filesystem::exists(scene_json_path)) {
+        g_scene.load(scene_json_path);
+    }
+  //  else
+   // bin_path.append(".bin");
 }
-
 
 void log_func(gfx_msg type, const char* msg, ...)
 {
@@ -83,7 +84,6 @@ gfx_allocator_t gfx_allocator = {
  };
 
 
-
 void platform_main(uintptr_t handle, int argc, char** argv)
 {
     memory::enable_tracking();
@@ -93,7 +93,7 @@ void platform_main(uintptr_t handle, int argc, char** argv)
         settings.handle     = handle;
         settings.backend    = gfx_backend_vulkan;
     //    settings.backend    = gfx_backend_webgpu;
-    //    settings.options    = gfx_options_debug;
+   //     settings.options    = gfx_options_debug;
         settings.dbglog     = log_func;
         settings.allocator  = &gfx_allocator;
     gfx_init(&settings, &ctx);
@@ -110,9 +110,9 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     gfx_surface_desc_t surface_desc = {};
         surface_desc.label              = "main_view";
         surface_desc.window_handle      = handle;
-        surface_desc.vsync              = true;
+        surface_desc.vsync              = false;    // false: uncapped (mailbox, no tearing); true: FIFO, capped at the refresh rate
         surface_desc.preferred_format   = gfx_pixel_format_rgba8;
-        surface_desc.sample_count       = gfx_sample_1x;
+        surface_desc.sample_count       = gfx_sample_8x;
     surface = gfx_surface_create(ctx, &surface_desc);
 
    /* gfx_shader_t* compute = nullptr;
@@ -123,7 +123,8 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     gfx_pipeline_compute_t * compute_pipeline = gfx_compute_pipeline_create(ctx, &compute_desc);
     */
 
-    auto assets = resource_manager::create_and_make_shared(ctx);
+    auto asset_allocator = new aligned_allocator("asset_allocator");
+    auto assets = resource_manager::create_and_make_shared(ctx, asset_allocator);
 
     assets->set_compiler(asset_type_scene, resource_compile_scene);
     assets->set_compiler(asset_type_mesh, resource_compile_mesh);
@@ -131,10 +132,12 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     assets->set_compiler(asset_type_texture, resource_compile_texture);
     assets->set_compiler(asset_type_material, resource_compile_material);
 
-    assets->set_cash_path("../.cash");
-    assets->set_assets_path("../data/");
+    assets->set_cash_path("../.cash");   // for editor
+    assets->set_assets_path("../data/"); // for editor
 
-    render_system::create_and_make_shared(ctx);
+    assets->set_dlc_path("../dlc/");    // for client
+
+    //std::this_thread::sleep_for(1000ms);
 
     //gfx_shader_t* shader = nullptr;
     //load_shader_from_file_path(ctx, "../data/shaders/simple.hlsl", &shader);
@@ -165,20 +168,6 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     pipeline = gfx_pipeline_create(ctx, &piplene_desc);
     */
 
-    
-   /* mvp_location            = gfx_uniform_location(shader, "mvp");
-    auto color_location     = gfx_uniform_location(shader, "_color");
-    auto texture_location   = gfx_uniform_location(shader, "_texture0");
-    auto sampler_location   = gfx_uniform_location(shader, "_textureSampler");
-    auto lightmap_location  = gfx_uniform_location(shader, "_lightmap");
-    auto lightmap_scale_offset_location = gfx_uniform_location(shader, "lightmap_scale_offset");
-
-    gfx_sampler_desc_t linear_filtering = {};
-        linear_filtering.minmag = gfx_filter_linear;
-        linear_filtering.mipmap = gfx_filter_linear;
-   //     linear_filtering.anisotropy = 8;
-    gfx_sampler_t* sampler = gfx_create_sampler2(ctx, &linear_filtering);*/
-
     rect_t rc = platform_get_window_size(handle);
     uint16_t width = rc.w - rc.x;
     uint16_t height = rc.h - rc.y;
@@ -187,14 +176,15 @@ void platform_main(uintptr_t handle, int argc, char** argv)
     g_camera.set_fov(55);
     g_camera.set_near_far(0.01f, 1500.0f);
     g_camera.set_apect(aspect);
-    g_camera.set_pos(math::make_vec3(4.366324f, 9.78074f, 185.8569f));
+    g_camera.set_pos(math::make_vec3(4.366324f, 9.78074f, 15.8569f));
     g_camera.set_target(g_camera._pos + math::make_vec3(0, 0, 1));
 
+    auto g = assets->get_path("gungsta/Demo.json");
     icomponent_query* renderer_query = component_manager::instance().create_query<transform, renderer>();
   //  scene_test(ctx, "../data/unity", "Southside.big.json");
   //  scene_test(ctx, "../data/unity", "../data/unity/Southside.big.json");
   //  scene_test(ctx, "../data/unity", "../data/City.json");
-    scene_test(ctx, "../data/gungsta", "../data/gungsta/Demo.json");
+    scene_test(ctx, g.c_str());
 
     auto& active_query = renderer_query->as<transform, renderer>();
 
@@ -240,7 +230,7 @@ void platform_tick(void* userdata)
    // measure ms("\nplatform_tick");
     Time::tick();
 
-    resource_manager::shared()->perform_resource_uploading();
+    resource_manager::shared()->update();
 
     update_camera(g_camera);
 
@@ -268,11 +258,12 @@ void platform_tick(void* userdata)
     g_camera.update();
 
     auto frame = gfx_begin_frame(ctx, &surface);
+    if (!frame)
+        return;                 // window minimized or swapchain being rebuilt: skip this frame
     {
         auto pass = gfx_default_pass(frame);
 
         gfx_cmd_begin_pass(frame->cmd, &pass);
-            render_system::shared()->draw(frame->cmd);
             g_scene.draw(frame->cmd, g_camera);
         gfx_cmd_end_pass(frame->cmd);
     }

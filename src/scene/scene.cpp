@@ -3,6 +3,7 @@
 #include "../memmgr.h"
 #include "scene_json.h"
 
+#include <unordered_map>
 
 struct scene_chunk_info_t {
     uint32_t type = 0;
@@ -15,11 +16,10 @@ struct scene_header_t {
 
     uint32_t node_count;
 
+    uint32_t meshes_count;
     uint32_t textures_count;
-    uint32_t lightmaps_count;
     uint32_t shaders_count;
     uint32_t materials_count;
-    uint32_t meshes_count;
 };
 
 void camera::update()
@@ -46,166 +46,108 @@ scene scene::create_from_file(const std::string_view& path)
 }
 
 
-void scene_traverse(scene& s, node& n, std::function<void(scene& s, node&)>& callback)
-{
-    for (size_t i = 0; i < n.childs.size(); ++i)
-    {
-        callback(s, n.childs[i]);
-        scene_traverse(s, n.childs[i], callback);
-    }
-}
 
 scene scene::create_from_json_file(const std::string_view& path)
 {
     measure ms("\nscene loading");
 
     if(std::filesystem::exists(path)) {
-        std::function<void(scene& s, node& n)> callback = [](scene &s, node& n) { s.m_nodes_flat_list.push_back(&n); };
-        scene result = scene_reader_json::create_from_file(path);
-        for (size_t i = 0; i < result.m_nodes.size(); ++i)
-        {
-            callback(result, result.m_nodes[i]);
-            scene_traverse(result, result.m_nodes[i], callback);
-        }
-        return result;
+        return scene_reader_json::create_from_file(path);
     } else {
         debug::log_error("no file at path %s", path.data());
         return {};
     }
-    /*
-    for (auto [node0, trans0, rend0] : result.m_render_query)
-    {
-        auto mesh = resource_manager::shared()->load_mesh(rend0->mesh_guid.c_str());
-        auto mesh_handle = resource_manager::shared()->load(rend0->mesh_guid.c_str(), nullptr);
+}
 
-        if (strstr(node0->name.c_str(), "LOD1"))   continue;
-        if (strstr(node0->name.c_str(), "LOD2"))   continue;
-        if (strstr(node0->name.c_str(), "LOD3"))   continue;
-        if (strstr(node0->name.c_str(), "Imposter"))  continue;
-        if (strstr(node0->name.c_str(), "Impostor"))  continue;
-        if (strstr(node0->name.c_str(), "mpostor"))   continue;
-
-        rend0->transform = trans0->global_transform;
-    }
-
-    int current_vb_size = 0;
-    int current_ib_size = 0;
-    int compressed_vb_size = 0;
-    {
-        measure ms("\nmesh loading");
-        for(auto m : result.m_meshes)
-        {
-            auto mesh = resource_manager::shared()->load_mesh(m.c_str());
-            if(mesh)
-            {
-                current_ib_size += mesh->mesh()->index_count * sizeof(uint16_t);
-                current_vb_size += mesh->mesh()->vertex_count * sizeof(vertex);
-                compressed_vb_size += mesh->mesh()->vertex_count * sizeof(vertex_packed);
-            }
-           // else
-           //     debug::log_error("failed load mesh %s", m.c_str());
-        }
-    }
-    float fi = (float)(current_ib_size) / (1024.0f * 1024.0f);
-    float fv = (float)(current_vb_size) / (1024.0f * 1024.0f);
-    float fcv = (float)(compressed_vb_size) / 1024.0f / 1024.0f;
-    float profit = (fv + fi)/(fcv + fi);
-     
-    for (size_t i = 0; i < result.m_nodes_flat_list.size(); ++i)
-    {
-      //  renderer_t renderer = {};
-        auto node = result.m_nodes_flat_list[i];
-        renderer.transform = mat4::trs( node->transform.position,
-                                        node->transform.rotation,
-                                        node->transform.scale);
-
-   //     if(strstr(node->name.c_str(), "LOD0"))          continue;
-        if(strstr(node->name.c_str(), "LOD1"))   continue;
-        if(strstr(node->name.c_str(), "LOD2"))   continue;
-        if(strstr(node->name.c_str(), "LOD3"))   continue;
-        if(strstr(node->name.c_str(), "Imposter"))  continue;
-        if(strstr(node->name.c_str(), "Impostor"))  continue;
-        if(strstr(node->name.c_str(), "mpostor"))   continue;
-
-        // mesh
-        auto mesh_guid = node->renderer.mesh_guid;
-        auto lighmap_guid = node->renderer.lightmap_guid;
-        auto material_guid = node->renderer.material_guid.c_str();
-
-        if(mesh_guid.empty())
-            continue;
-
-        auto mesh = resource_manager::shared()->load_mesh(mesh_guid.c_str());
-        if(mesh == nullptr)
-            continue;
-
-        renderer.mesh = mesh->mesh();
-        renderer.material = resource_manager::shared()->load_material(material_guid).get();
-        renderer.world_bounds = bbox::create(renderer.mesh->bounds, renderer.transform);
-
-        for(int i = 0; i < 8; i++)
-            renderer.bounds.extend({renderer.world_bounds.corners[i].x,
-                                    renderer.world_bounds.corners[i].y,
-                                    renderer.world_bounds.corners[i].z });
-
-        if(renderer.material == nullptr)
-            debug::log_error("failed to load material %s", material_guid);
-
-        if(!lighmap_guid.empty())
-        {
-            renderer.lightmap.lightmap = resource_manager::shared()->load_texture(lighmap_guid.c_str())->texture_handle();
-            renderer.lightmap.scale_offset = node->renderer.lightmap_scale_offset;
-        }
-
-        if(renderer.material != nullptr && renderer.mesh != nullptr)
-            result.m_renderers.emplace_back(renderer);
-    }*/
-
-/*    auto ctx = resource_manager::shared()->ctx();
-    gfx_sampler_desc_t desc = {};
-        desc.mode = gfx_address_mode_repeat;
-        desc.minmag = gfx_filter_linear;
-        desc.mipmap = gfx_filter_linear;
-        desc.anisotropy = 8;
-    auto sampler = gfx_sampler_create(ctx, &desc);
-
-    // update lightmap data
-    for (size_t i = 0; i < result.m_renderers.size(); ++i)
-    {
-        auto & renderer = result.m_renderers[i];
-
-        auto shader = renderer.material->instance->shader;
-        auto set = renderer.material->descriptor_set;
-
-        auto texture_location = gfx_uniform_location(shader, "_texture0");
-        auto sampler_location = gfx_uniform_location(shader, "_textureSampler");
-        auto lightmap_location = gfx_uniform_location(shader, "_lightmap");
-        auto lightmap_scale_offset_location = gfx_uniform_location(shader, "lightmap_scale_offset");
-
-        if(texture_location && renderer.material->instance->textures[0].value)
-            gfx_descriptor_set_write_texture(set, texture_location, renderer.material->instance->textures[0].value);
-
-       if(lightmap_scale_offset_location != 0)
-            gfx_descriptor_set_write_buffer_data(set, lightmap_scale_offset_location, &result.m_renderers[i].lightmap.scale_offset, sizeof(vec4));
-
-        if(lightmap_location != 0)
-            gfx_descriptor_set_write_texture(set, lightmap_location, result.m_renderers[i].lightmap.lightmap);
-
-        if (sampler_location != 0)
-            gfx_descriptor_set_write_sampler(set, sampler_location, sampler);
-    }
-    
-    return result;*/
+uint64_t s_rt_counter = 0;
+node::node()
+{
+    runtime_id = ++s_rt_counter;
 }
 
 
-node* scene::create_node(interned_string name, interned_string guid)
+node* scene::create_node(interned_string name, guid_t guid)
 {
+    static uint64_t counter = 0;
     node* result = new node();
     result->name = name;
     result->guid = guid;
-    m_allocated_nodes.push_back(result);
     return result;
+}
+
+// The file has a flat list and "parent" = guid of another node of the list (any place of it), so the links are built
+// when the whole list is read: node::parent -> node::hierarchy. An unknown parent or a cycle makes the node a root (reported).
+void scene::link_hierarchy()
+{
+    const uint32_t none  = hierarchy::none;
+    const size_t   count = m_nodes.size();
+
+    std::unordered_map<guid_t, uint32_t> by_guid;
+    by_guid.reserve(count);
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        m_nodes[i].index     = i;
+        m_nodes[i].hierarchy = hierarchy();
+        if (!(m_nodes[i].guid == nullptr) && !by_guid.emplace(m_nodes[i].guid, i).second)
+            debug::log_warning("[scene] node '%s': the guid is not unique, children can be linked to the first node with it", m_nodes[i].name.c_str());
+    }
+
+    // 1. the parent of every node
+    std::vector<uint32_t> parent(count, none);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        if (m_nodes[i].parent == nullptr)
+            continue;
+
+        auto it = by_guid.find(m_nodes[i].parent);
+        if (it == by_guid.end() || it->second == i) {
+            char text[64] = {};
+            debug::log_warning("[scene] node '%s': the parent %s is not in the scene, the node becomes a root", m_nodes[i].name.c_str(), uuid::guid_to_str(m_nodes[i].parent, text));
+            m_nodes[i].parent = {};
+            continue;
+        }
+        parent[i] = it->second;
+    }
+
+    // 2. a cycle (a -> b -> a) is never reached from a root: cut it at the node where it was found
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        uint32_t steps = 0;
+        for (uint32_t p = parent[i]; p != none && steps <= count; p = parent[p])
+            ++steps;
+        if (steps > count) {
+            // `i` may only lead into the cycle: count steps up always land on a node of the cycle itself
+            uint32_t on_cycle = i;
+            for (size_t s = 0; s < count; ++s)
+                on_cycle = parent[on_cycle];
+            debug::log_warning("[scene] node '%s': the parents make a cycle, the node becomes a root", m_nodes[on_cycle].name.c_str());
+            parent[on_cycle] = none;
+            m_nodes[on_cycle].parent = {};
+        }
+    }
+
+    // 3. the children lists, in the order of the nodes
+    std::vector<uint32_t> last_child(count, none);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const uint32_t p = parent[i];
+        if (p == none)
+            continue;
+
+        hierarchy& h  = m_nodes[i].hierarchy;
+        hierarchy& ph = m_nodes[p].hierarchy;
+
+        h.parent_index = p;
+        ph.child_count++;
+        if (last_child[p] == none) {
+            ph.first_child = i;
+        } else {
+            m_nodes[last_child[p]].hierarchy.next_sibling = i;
+            h.prev_sibling = last_child[p];
+        }
+        last_child[p] = i;
+    }
 }
 
 template<class T> inline void deserialize_component(T& object, filestream* stream)
@@ -236,22 +178,21 @@ void scene::load(const std::string_view& path)
     PROFILE_SAMPLE("scene::load::bin")
     filestream * stream = filestream::open_rb(path.data());
 
-    //scene_header_t header = stream->read<scene_header_t>();
     auto header = stream->read<scene_header_t>();
-
-    std::vector<guid_t> mesh_guids;
-    std::vector<guid_t> lightmap_guids;
-    std::vector<guid_t> shaders_guids;
-    std::vector<guid_t> materials_guids;
-    std::vector<guid_t> meshes_guids;
-
-    if(header.version == 2){
-        auto mesh_count = stream->read<uint32_t>();
-        mesh_guids.resize(mesh_count);
-        stream->read((uint32_t)(sizeof(guid_t) * mesh_guids.size()), mesh_guids.data());
-    }
-
     m_nodes.resize(header.node_count);// = allocator->alloc<node>(nodes_count);
+
+    // the asset lists of the header, in the order of the counts: meshes, textures, shaders, materials
+    // (the same four lists as "meshes", "textures", "shaders", "materials" of the json scene)
+    m_mesh_guids.resize(header.meshes_count);
+    m_texture_guids.resize(header.textures_count);
+    m_shaders_guids.resize(header.shaders_count);
+    m_materials_guids.resize(header.materials_count);
+
+    for (std::vector<guid_t>* list : { &m_mesh_guids, &m_texture_guids, &m_shaders_guids, &m_materials_guids })
+    {
+        if (!list->empty())
+            stream->read((uint32_t)(sizeof(guid_t) * list->size()), list->data());
+    }
 
     scene_chunk_info_t info = {};
     component_manager::instance().pause_notifications();
@@ -261,11 +202,11 @@ void scene::load(const std::string_view& path)
         switch(info.type) {
             case component_node: {
                 auto node = m_world->load_node(this, stream);
-                auto tnode = world::create_node(uuid::str_to_guid(node->guid.c_str()), this);
-                tnode->name = node->name;
-                node->guid = node->guid;
+              //  auto tnode = world::create_node(uuid::str_to_guid(node->guid), this);
+               // tnode->name = node->name;
+               // node->guid = node->guid;
 
-                m_tiny_nodes.push_back(tnode);
+                m_tiny_nodes.push_back(node);
             } break;
 
             case component_transform: {
@@ -276,17 +217,10 @@ void scene::load(const std::string_view& path)
                 transform::deserialize(component, stream);
             } break;
 
-            case component_hierarchy: {
-                uint32_t  index = stream->read<uint32_t>();
-                tinynode* node  = m_tiny_nodes[index];
-                auto component  = node->add_component<hierarchy>();
-               // hierarchy::deserialize(component, stream);
-            } break;
-
             case component_light: {
                 uint32_t  index = stream->read<uint32_t>();
                 tinynode* node  = m_tiny_nodes[index];
-                //auto component  = node->add_component<light>();
+                auto component  = node->add_component<light>();
                 //light::deserialize(component, stream);
             }break;
 
@@ -299,6 +233,9 @@ void scene::load(const std::string_view& path)
 
                 component->mesh_handle = resource_manager::shared()->load(component->mesh_guid, nullptr);
                 component->material_handle = resource_manager::shared()->load(component->material_guid, nullptr);
+
+                component->material = resource_manager::shared()->get_material_instance(component->material_handle);
+                component->mesh = resource_manager::shared()->get_mesh(component->mesh_handle);
             } break;
 
             default: 
@@ -319,36 +256,45 @@ void scene::save(const std::string_view& path)
     scene_header_t header = {};
         header.magick       = gfx_fourcc('S', 'C', 'N', '0');
         header.version      = 1;
-        header.node_count   = (uint32_t)m_nodes_flat_list.size();
+        header.node_count   = (uint32_t)m_nodes.size();
+        header.meshes_count     = (uint32_t)m_mesh_guids.size();
+        header.textures_count   = (uint32_t)m_texture_guids.size();
+        header.shaders_count    = (uint32_t)m_shaders_guids.size();
+        header.materials_count  = (uint32_t)m_materials_guids.size();
     stream->write(header);
+
+    // asset lists, same order as the counts
+    for (const std::vector<guid_t>* list : { &m_mesh_guids, &m_texture_guids, &m_shaders_guids, &m_materials_guids })
+    {
+        if (!list->empty())
+            stream->write((uint32_t)(sizeof(guid_t) * list->size()), list->data());
+    }
     // write meta
 
-    int emptynodes = 0;
-    for (uint32_t i = 0; i < m_nodes_flat_list.size(); i++)
+    for (uint32_t i = 0; i < m_nodes.size(); i++)
     {
-        auto & node = m_nodes_flat_list[i];
-        node->index = i;
-
-        m_world->save_node(node, stream);
-
-        if (node->renderer.mesh_guid == 0)
-            emptynodes++;
+        auto& node = m_nodes[i];
+        node.index = i;
+        node.runtime_id = i;
+        m_world->save_node(&node, stream);
     }
-    for (uint32_t i = 0; i < m_nodes_flat_list.size(); i++)
+    for (uint32_t i = 0; i < m_nodes.size(); i++)
     {
-        auto& node = m_nodes_flat_list[i];
+        auto& node = m_nodes[i];
+
+        if (auto t = node.get_component<transform>())
         {
             binary_writer bw = {};
             bw.write(i);
-            transform::serialize(&node->transform, &bw);
+            transform::serialize(t, &bw);
             write_chunk(stream, scene::component_transform, bw.size(), (char*)bw.data());
         }
-        
-        if (node->renderer.mesh_guid != 0 )
+
+        if (auto r = node.get_component<renderer>() )
         {
             binary_writer bw0 = {};
             bw0.write(i);
-            renderer::serialize(&node->renderer, &bw0);
+            renderer::serialize(r, &bw0);
             write_chunk(stream, scene::component_renderer, bw0.size(), (char*)bw0.data());
         }
      }
@@ -360,42 +306,155 @@ void scene::save(const std::string_view& path)
 
 void scene::clear()
 {
-    //m_renderers.clear();
-   // m_visibles.clear();
-
     m_nodes.clear();
-    m_nodes_flat_list.clear();
-
-    m_meshes.clear();
-    m_materials.clear();
+    m_mesh_guids.clear();
+    m_materials_guids.clear();
 }
 
 void scene::update()
 {
 }
 
+struct direct_batch_t
+{
+    gfx_pipeline_t* pipeline = nullptr;
+    gfx_buffer_t* vertex_buffer = nullptr;
+    gfx_buffer_t* index_buffer = nullptr;
+    
+    gfx_descriptor_set_t ** sets;
+    submesh_t * mesh_ranges;
+};
+
+// Occlusion pass prototype:
+//   1. render occluders (big/near static meshes) depth-only into a small depth target
+//   2. build Hi-Z pyramid (max-depth mip chain) from that depth
+//   3. return Hi-Z texture, it is consumed by the GPU culling pass
+gfx_texture_t* scene_occlusion_pass(gfx_command_buffer_t* cmd, camera& camera)
+{
+    gfx_cmd_push_marker(cmd, "scene_occlusion_pass");
+
+    // small depth target (e.g. 256x128), created once in real code
+    gfx_texture_t * occluder_depth = nullptr;
+    // Hi-Z pyramid, mip chain of the depth, one mip per compute dispatch
+    gfx_texture_t * hiz_texture = nullptr;
+    gfx_pipeline_t * occluder_pipeline = nullptr;
+    gfx_descriptor_set_t * descriptor_set_camera = nullptr;
+    gfx_descriptor_set_t * descriptor_set_hiz = nullptr;
+
+    gfx_buffer_t * occluder_vertex_buffer = nullptr;
+    gfx_buffer_t * occluder_index_buffer = nullptr;
+    uint32_t occluder_index_count = 0;
+
+    // 1. draw occluders into small depth-only target
+    gfx_pass_info_t pass = {};
+    pass.depth_attachment = occluder_depth;
+    pass.depth_load_op = gfx_load_op_clear;
+    pass.depth_clear_value = 1.0f;
+    for (int i = 0; i < 4; i++) {
+        pass.color_attachment[i] = nullptr;
+        pass.color_load_op[i] = gfx_load_op_dont_care;
+    }
+    pass.target = nullptr;
+
+    gfx_cmd_begin_pass(cmd, &pass);
+    gfx_cmd_viewport(cmd, 0, 0, 256, 128);
+    gfx_cmd_scissor(cmd, 0, 0, 256, 128);
+
+    gfx_descriptor_set_write_buffer_data(descriptor_set_camera, 0, &camera, sizeof(camera));
+    gfx_cmd_bind_pipeline(cmd, occluder_pipeline);
+    gfx_cmd_bind_descriptor_set(cmd, 0, descriptor_set_camera);
+    gfx_cmd_bind_index_buffer(cmd, gfx_index_format_16, 0, occluder_index_buffer);
+    gfx_cmd_bind_vertex_buffer(cmd, 0, 0, occluder_vertex_buffer);
+    gfx_cmd_draw_indexed(cmd, occluder_index_count, 0, 1, 0);   // real code: loop / indirect over occluders
+
+    gfx_cmd_end_pass(cmd);
+
+    // 2. depth -> Hi-Z. Depth must be readable by compute.
+    gfx_cmd_texture_barrier(cmd, &occluder_depth, 1, gfx_barrier_depth_stencil, gfx_barrier_compute_read);
+
+    // mip 0 = copy of depth, every next mip = max of 2x2 texels of previous mip.
+    // (compute pipeline binding is not exposed in gfx.h yet, so only dispatches are shown)
+    gfx_descriptor_set_write_texture(descriptor_set_hiz, 0, occluder_depth);
+    gfx_descriptor_set_write_texture(descriptor_set_hiz, 1, hiz_texture);
+    gfx_cmd_bind_descriptor_set(cmd, 0, descriptor_set_hiz);
+
+    uint32_t mip_count = 8;
+    uint32_t w = 256, h = 128;
+    for (uint32_t mip = 0; mip < mip_count; mip++)
+    {
+        gfx_cmd_dispatch_compute(cmd, (w + 7) / 8, (h + 7) / 8, 1);
+        gfx_cmd_texture_barrier(cmd, &hiz_texture, 1, gfx_barrier_compute_write, gfx_barrier_compute_read);
+        w = w > 1 ? w / 2 : 1;
+        h = h > 1 ? h / 2 : 1;
+    }
+
+    gfx_cmd_pop_marker(cmd);
+    return hiz_texture;
+}
+
+void scene_draw(gfx_command_buffer_t* cmd, camera& camera)
+{
+}
+
 void scene_draw_indirect(gfx_command_buffer_t* cmd, camera& camera)
 {
+    // One batch = one pipeline + one shared geometry pool (vertex/index buffers).
+    // All objects of the batch are drawn with a single multi-draw indirect call;
+    // each object is one gfx_indirect_data_t entry inside the batch's range of the indirect buffer.
     struct batch {
-        gfx_pipeline_t * pipeline;
+        gfx_pipeline_t * pipeline       = nullptr;
+        gfx_buffer_t *   vertex_buffer  = nullptr;  // positions/normals/uv
+        gfx_buffer_t *   instance_buffer = nullptr; // per-instance data (transforms, material ids)
+        gfx_buffer_t *   index_buffer   = nullptr;
+        uint32_t         first_draw     = 0;        // index of first gfx_indirect_data_t of this batch
+        uint32_t         draw_count     = 0;        // number of draws in this batch
     };
     std::vector<batch> m_batches;
 
     gfx_cmd_push_marker(cmd, "scene_draw_indirect");
 
-    gfx_buffer_t * indirect_buffer = nullptr;
+    gfx_buffer_t * indirect_buffer = nullptr;       // array of gfx_indirect_data_t, filled by GPU culling
     gfx_descriptor_set_t * descriptor_set_camera = nullptr;
     gfx_descriptor_set_t * descriptor_set_instance = nullptr;
     gfx_descriptor_set_t * descriptor_set_bindless = nullptr;
 
+    //gfx_pipeline_compute_t
+   
+    // 0. Occlusion pass: draw occluders into small depth, build Hi-Z
+    gfx_texture_t * hiz_texture = scene_occlusion_pass(cmd, camera);
+
+    // 1. Upload camera data (view/proj) into the camera set. Handle 0 is a placeholder binding.
+    gfx_descriptor_set_write_buffer_data(descriptor_set_camera, 0, &camera, sizeof(camera));
+    // Hi-Z is read by the culling shader (handle 1 is a placeholder binding)
+    gfx_descriptor_set_write_texture(descriptor_set_camera, 1, hiz_texture);
+
+    // 2. GPU culling pass: compute shader reads instances + camera frustum and
+    //    writes visible draws (gfx_indirect_data_t) into indirect_buffer.
+    //    (compute pipeline + descriptor sets would be bound here; gfx.h has no compute bind call yet)
+    gfx_cmd_dispatch_compute(cmd, 64, 1, 1);
+
+    // 3. Make compute writes visible to the indirect draw argument fetch.
+    gfx_cmd_buffer_barrier(cmd, &indirect_buffer, 1, gfx_barrier_compute_write, gfx_barrier_indirect);
+
+    // 4. Draw: one indirect multi-draw per batch.
     for (size_t i = 0; i < m_batches.size(); i++)
     {
-        gfx_cmd_bind_pipeline(cmd, m_batches[i].pipeline);
+        const batch& b = m_batches[i];
+
+        gfx_cmd_bind_pipeline(cmd, b.pipeline);
         gfx_cmd_bind_descriptor_set(cmd, 0, descriptor_set_camera);
         gfx_cmd_bind_descriptor_set(cmd, 1, descriptor_set_instance);
         gfx_cmd_bind_descriptor_set(cmd, 2, descriptor_set_bindless);
 
-        gfx_cmd_draw_indexed_indirect(cmd, indirect_buffer, 0, (uint32_t)m_batches.size(), sizeof(gfx_indirect_data_t));
+        gfx_cmd_bind_index_buffer(cmd, gfx_index_format_16, 0, b.index_buffer);
+        gfx_cmd_bind_vertex_buffer(cmd, 0, 0, b.vertex_buffer);
+        gfx_cmd_bind_vertex_buffer(cmd, 1, 0, b.instance_buffer);
+
+        // offset is in bytes into indirect_buffer, stride - size of one command
+        gfx_cmd_draw_indexed_indirect(cmd, indirect_buffer,
+                                      b.first_draw * (uint32_t)sizeof(gfx_indirect_data_t),
+                                      b.draw_count,
+                                      (uint32_t)sizeof(gfx_indirect_data_t));
     }
 
     gfx_cmd_pop_marker(cmd);
@@ -404,62 +463,45 @@ void scene_draw_indirect(gfx_command_buffer_t* cmd, camera& camera)
 void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
 {
     gfx_cmd_push_marker(cmd, "scene::draw");
-   /* mat4 vp = camera.view_proj();
-    auto visible_renderers = cull(camera); // culling
-
-    uint64_t  mvp_location = 0;
-    gfx_shader_t * shader = nullptr;
-    {
-      //  measure ms("uniform:update");
-        for(int i = 0; i < visible_renderers.size(); ++i) 
-        {
-            auto & renderer = visible_renderers[i];
-            if(renderer->material->instance->shader != shader) {
-                shader = renderer->material->instance->shader;
-                mvp_location = gfx_uniform_location(shader, "mvp");
-            }
-
-            mat4 mvp = math::mul(vp, renderer->transform);
-            gfx_descriptor_set_write_buffer_data(renderer->material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
-        }
-    }
 
     gfx_pipeline_t* pipeline = nullptr;
-    gfx_buffer_t * vertex_buffer = nullptr;
-    gfx_buffer_t * index_buffer = nullptr;
+    gfx_buffer_t* vertex_buffer = nullptr;
+    gfx_buffer_t* index_buffer = nullptr;
 
-    for (int i = 0; i < visible_renderers.size(); ++i)
-    {
-        auto& renderer = visible_renderers[i];
-        if (renderer->material->instance->pipeline != pipeline)
+    for (auto [node, trans, renderer] : m_render_query) {
+        if (!node) continue;
+
+        auto mesh = renderer->mesh;
+        auto material = renderer->material;
+
+        if(material == nullptr) continue;
+        if (material && material->instance->pipeline != pipeline)
         {
-            pipeline = renderer->material->instance->pipeline;
+            pipeline = material->instance->pipeline;
             gfx_cmd_bind_pipeline(cmd, pipeline);
         }
 
-        auto mesh = renderer->mesh;
+        mat4 mvp = math::mul(camera.view_proj(), trans->global_transform);
+        auto mvp_location = gfx_uniform_location(material->instance->shader, "mvp");
+        gfx_descriptor_set_write_buffer_data(material->descriptor_set, mvp_location, &mvp, sizeof(mat4));
 
-        gfx_cmd_bind_descriptor_set(cmd, 0, renderer->material->descriptor_set);
+        gfx_cmd_bind_descriptor_set(cmd, 0, material->descriptor_set);
 
-        if(vertex_buffer != mesh->vertex_buffer){
-            vertex_buffer = mesh->vertex_buffer;
-            gfx_cmd_bind_vertex_buffer(cmd, 0, 0, vertex_buffer);
-        }
+        if (vertex_buffer != mesh->vertex_buffer) 
+            gfx_cmd_bind_vertex_buffer(cmd, 0, 0, mesh->vertex_buffer);
 
-        if(index_buffer != mesh->index_buffer)
-        {
-            index_buffer = mesh->index_buffer;
+        if (index_buffer != mesh->index_buffer)
             gfx_cmd_bind_index_buffer(cmd, mesh->index_format, 0, mesh->index_buffer);
-        }
 
-        if(mesh->index_format == gfx_index_format_32)
-        {
-            debug::log_error("fuck");
-        }
+        index_buffer = mesh->index_buffer;
+        vertex_buffer = mesh->vertex_buffer;
 
+        assert(mesh->index_format != gfx_index_format_32);
+        assert(mesh->submesh_count != 0);
+  
         int32_t start_idx = 0;
-        int32_t vertex_offset = mesh->vertex_buffer_offset/mesh->vertex_stride;
-        int32_t index_offset = mesh->index_buffer_offset/sizeof(uint16_t);
+        int32_t vertex_offset = mesh->vertex_buffer_offset / mesh->vertex_stride;
+        int32_t index_offset = mesh->index_buffer_offset / sizeof(uint16_t);
 
         for (size_t sub_idx = 0; sub_idx < mesh->submesh_count; sub_idx++)
         {
@@ -468,12 +510,7 @@ void scene::draw(gfx_command_buffer_t* cmd, camera & camera)
 
             gfx_cmd_draw_indexed(cmd, count, index_offset + start, 1, vertex_offset);
         }
-
-        if (mesh->submesh_count == 0)
-        {
-            gfx_cmd_draw_indexed(cmd, mesh->index_count, index_offset, 1, vertex_offset);
-        }
-    }*/
+    }
 
     gfx_cmd_pop_marker(cmd);
 }
@@ -549,51 +586,6 @@ const std::vector<renderer_t*>& scene::cull(const camera& camera)
             }
         }
     }*/
-
-    return m_visibles;
-
-    // frustum check acceleration structs(static objects)
-
- //   for(auto it = m_trees.begin(); it != m_trees.end(); ++it)
- //   {
- //       //auto visibles = it->traverse(mvp);
- //       //m_visibles.append(visibles);
- //   }
- //
- //   // frustum check without acceleration strucs(dynamic objects)
- //   for (auto it = m_dynamic_objects.begin(); it != m_dynamic_objects.end(); ++it)
- //   {
- //       //auto visibles = furustum_check(mvp, m_dynamic_objects);
- //       //m_visibles.append(visibles);
- //   }
-
-   // hi-z occlusion culling
-   // grab prev depth buffer, build hi-z, compute visibility
-   // if(hiz_enabled)
-   // {
-   //   var depth_rt = renderer->get_depth_rt();
-   //
-   //   auto dept_target_h = gfx_uniform_get_location("depth_texture");
-   //   auto visibility_h = gfx_uniform_get_location("visibility_buffer");
-   // 
-   //   gfx_descriptor_set_write_texture(descriptor, dept_target_h, depth_rt);
-   //   gfx_descriptor_set_write_buffer(descriptor, visibility_h, depth_rt);
-   // 
-   //   // build hi-z buffer
-   //   gfx_cmd_bind_pipeline(cmd, build_hi_z_buffer);
-   //   gfx_cmd_bind_descriptor_set(cmd, descriptor);
-   //   gfx_cmd_dispatch_compute(cmd, 16, 16, 16);
-   // 
-   //   // sort by distance?
-   // 
-   //   // compute visibilities
-   //   gfx_cmd_bind_pipeline(cmd, build_visibility_buffer);
-   //   gfx_cmd_bind_descriptor_set(cmd, descriptor);
-   //   gfx_cmd_dispatch_compute(cmd, 16, 16, 16);
-   // 
-   //   gfx_submit(cmd);
-   // } 
-
     return m_visibles;
 }
 
