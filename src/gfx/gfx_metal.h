@@ -2,6 +2,7 @@
 #define __gfx_metal_h__
 
 #include "gfx.h"
+#include "gfx_api.h"
 
 #include <stdarg.h>
 #include <ctype.h>
@@ -42,6 +43,10 @@ typedef struct metal_context_t {
 
     // Cached frame object (single-threaded presentation for now)
     struct metal_frame_internal_t*  current_frame;
+
+    // Swapchain color format (BGRA8Unorm or BGRA8Unorm_sRGB, from surface_desc.preferred_format).
+    // Render pipelines are built for it, so create the surface before the pipelines.
+    MTLPixelFormat                  color_format;
 } metal_context_t;
 
 typedef struct metal_surface_t {
@@ -245,15 +250,29 @@ static MTLPixelFormat metal_pixel_format(gfx_pixel_format format) {
         case gfx_pixel_format_bc3:          return MTLPixelFormatBC3_RGBA;
         case gfx_pixel_format_bc4:          return MTLPixelFormatBC4_RUnorm;
         case gfx_pixel_format_bc5:          return MTLPixelFormatBC5_RGUnorm;
-        case gfx_pixel_format_bc6h:         return MTLPixelFormatBC6H_RGBFloat;
+        case gfx_pixel_format_bc6h:         return MTLPixelFormatBC6H_RGBUfloat;    // DXGI BC6H_UF16, same as Vulkan/WebGPU
         case gfx_pixel_format_bc7:          return MTLPixelFormatBC7_RGBAUnorm;
+        case gfx_pixel_format_bc1_srgb:     return MTLPixelFormatBC1_RGBA_sRGB;
+        case gfx_pixel_format_bc3_srgb:     return MTLPixelFormatBC3_RGBA_sRGB;
+        case gfx_pixel_format_bc7_srgb:     return MTLPixelFormatBC7_RGBAUnorm_sRGB;
 #endif
+        case gfx_pixel_format_rgba8_srgb:       return MTLPixelFormatRGBA8Unorm_sRGB;
+        case gfx_pixel_format_etc1_srgb:        return MTLPixelFormatETC2_RGB8_sRGB;
+        case gfx_pixel_format_etc2_rgba8_srgb:  return MTLPixelFormatEAC_RGBA8_sRGB;
+        case gfx_pixel_format_etc2_rgb8a1_srgb: return MTLPixelFormatETC2_RGB8A1_sRGB;
+
         case gfx_pixel_format_astc4x4:      return MTLPixelFormatASTC_4x4_LDR;
         case gfx_pixel_format_astc5x5:      return MTLPixelFormatASTC_5x5_LDR;
         case gfx_pixel_format_astc6x6:      return MTLPixelFormatASTC_6x6_LDR;
         case gfx_pixel_format_astc8x8:      return MTLPixelFormatASTC_8x8_LDR;
-        case gfx_pixel_format_astc10x10:    return MTLPixelFormatASTC_10x10_sRGB;
-        case gfx_pixel_format_astc12x12:    return MTLPixelFormatASTC_12x12_sRGB;
+        case gfx_pixel_format_astc10x10:    return MTLPixelFormatASTC_10x10_LDR;
+        case gfx_pixel_format_astc12x12:    return MTLPixelFormatASTC_12x12_LDR;
+        case gfx_pixel_format_astc4x4_srgb:   return MTLPixelFormatASTC_4x4_sRGB;
+        case gfx_pixel_format_astc5x5_srgb:   return MTLPixelFormatASTC_5x5_sRGB;
+        case gfx_pixel_format_astc6x6_srgb:   return MTLPixelFormatASTC_6x6_sRGB;
+        case gfx_pixel_format_astc8x8_srgb:   return MTLPixelFormatASTC_8x8_sRGB;
+        case gfx_pixel_format_astc10x10_srgb: return MTLPixelFormatASTC_10x10_sRGB;
+        case gfx_pixel_format_astc12x12_srgb: return MTLPixelFormatASTC_12x12_sRGB;
         case gfx_pixel_format_r16f:         return MTLPixelFormatR16Float;
         case gfx_pixel_format_rg16f:        return MTLPixelFormatRG16Float;
         case gfx_pixel_format_rgba16f:      return MTLPixelFormatRGBA16Float;
@@ -268,7 +287,7 @@ static MTLPixelFormat metal_pixel_format(gfx_pixel_format format) {
 }
 
 static bool metal_is_compressed(gfx_pixel_format format) {
-    switch (format) {
+    switch (gfx_pixel_format_linear(format)) {
         case gfx_pixel_format_etc1:
         case gfx_pixel_format_etc2_rgb8a1:
         case gfx_pixel_format_etc2_rgba8:
@@ -381,6 +400,7 @@ static void metal_init(gfx_settings_t* settings, gfx_context_t** out_ctx) {
     if (!mctx) return;
 
     mctx->device = MTLCreateSystemDefaultDevice();
+    mctx->color_format = MTLPixelFormatBGRA8Unorm;
     if (!mctx->device) {
         free(mctx);
         return;
@@ -517,11 +537,13 @@ static void metal_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, g
 
     if (surface->layer) {
         surface->layer.device = mctx->device;
-        surface->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        // CAMetalLayer only offers BGRA for 8-bit: rgba8 -> BGRA8Unorm, rgba8_srgb -> BGRA8Unorm_sRGB (shader writes linear, HW encodes)
+        mctx->color_format = gfx_pixel_format_is_srgb(surface->preferred_format) ? MTLPixelFormatBGRA8Unorm_sRGB : MTLPixelFormatBGRA8Unorm;
+        surface->layer.pixelFormat = mctx->color_format;
         surface->layer.framebufferOnly = YES;
-        if (@available(macOS 10.13, iOS 11.0, *)) {
-            surface->layer.displaySyncEnabled = desc->vsync;
-        }
+#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+        surface->layer.displaySyncEnabled = desc->vsync;   // iOS: always vsynced, pacing comes from CADisplayLink
+#endif
     }
 
     metal_ensure_depth_texture(surface);
@@ -544,9 +566,9 @@ static gfx_result metal_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t* sur
     if (!s) return gfx_error_invalid_handle;
     s->vsync = vsync;
     if (s->layer) {
-        if (@available(macOS 10.13, iOS 11.0, *)) {
-            s->layer.displaySyncEnabled = vsync;
-        }
+#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+        s->layer.displaySyncEnabled = vsync;
+#endif
     }
     return gfx_ok;
 }
@@ -580,7 +602,7 @@ static void metal_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_fr
     frame->color_view->texture = drawable.texture;
     frame->color_view->width = (uint32_t)drawable.texture.width;
     frame->color_view->height = (uint32_t)drawable.texture.height;
-    frame->color_view->format = gfx_pixel_format_rgba8;
+    frame->color_view->format = gfx_pixel_format_is_srgb(msurface->preferred_format) ? gfx_pixel_format_rgba8_srgb : gfx_pixel_format_rgba8;
     frame->color_view->mip_levels = 1;
 
     frame->depth_view->texture = msurface->depth_texture;
@@ -831,7 +853,7 @@ static void metal_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx
         MTLRenderPipelineDescriptor* pd = [MTLRenderPipelineDescriptor new];
         pd.vertexFunction = mshader->vertex_func;
         pd.fragmentFunction = mshader->fragment_func;
-        pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+        pd.colorAttachments[0].pixelFormat = mctx->color_format;
         pd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
         MTLRenderPipelineReflection* reflection = nil;
@@ -1026,13 +1048,13 @@ static void metal_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, g
                 uint32_t h = gfx_max(desc->height >> level, 1u);
                 uint32_t d = (desc->type == gfx_texture3d) ? gfx_max(desc->depth >> level, 1u) : 1u;
                 uint32_t size = gfx_utils_image_layer_size(w, h, d, desc->format);
-                uint32_t bpr = metal_is_compressed(desc->format) ? 0 : gfx_utils_image_row_pitch(desc->format, w);
+                uint32_t bpr = gfx_utils_image_row_pitch(desc->format, w);   // compressed: bytes per row of blocks
                 const uint8_t* pixels = (const uint8_t*)desc->data + offset;
                 offset += size;
 
                 if (desc->type == gfx_texture3d) {
                     MTLRegion region = MTLRegionMake3D(0, 0, 0, w, h, d);
-                    uint32_t bpi = bpr * h;
+                    uint32_t bpi = size / d;
                     [texture replaceRegion:region mipmapLevel:level slice:0
                                  withBytes:pixels bytesPerRow:bpr bytesPerImage:bpi];
                 } else {
@@ -1060,8 +1082,7 @@ static void metal_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture
     (void)size; (void)offset;
 
     // Full-mip0 upload for simplicity
-    uint32_t bpr = metal_is_compressed(mtex->format) ? 0
-                    : gfx_utils_image_row_pitch(mtex->format, mtex->width);
+    uint32_t bpr = gfx_utils_image_row_pitch(mtex->format, mtex->width);   // compressed: bytes per row of blocks
     MTLRegion region = MTLRegionMake2D(0, 0, mtex->width, mtex->height);
     [mtex->texture replaceRegion:region mipmapLevel:0 withBytes:data bytesPerRow:bpr];
     (void)mctx;
@@ -1179,7 +1200,7 @@ static void metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc,
     pd.vertexFunction = mshader->vertex_func;
     pd.fragmentFunction = mshader->fragment_func;
     pd.vertexDescriptor = vd;
-    pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+    pd.colorAttachments[0].pixelFormat = mctx->color_format;
     pd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
     gfx_render_states_desc_t* rs = &desc->render_states;

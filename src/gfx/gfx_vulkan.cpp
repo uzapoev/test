@@ -1,4 +1,5 @@
 #include "gfx_vulkan.h"
+#include "gfx_api.h"
 //#include "gfx_memory.h"
 
 #ifdef VULKAN_AVAILABLE
@@ -55,6 +56,21 @@ VkFormat gfx_pixel_format_2_vk(gfx_pixel_format format)
 
         case gfx_pixel_format_d24x8:            return VK_FORMAT_X8_D24_UNORM_PACK32;   //! depth buffer
         case gfx_pixel_format_d24s8:            return VK_FORMAT_D24_UNORM_S8_UINT;   //! depth buffer
+
+        case gfx_pixel_format_rgba8_srgb:       return VK_FORMAT_R8G8B8A8_SRGB;
+        case gfx_pixel_format_etc1_srgb:        return VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK;
+        case gfx_pixel_format_etc2_rgb8a1_srgb: return VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK;
+        case gfx_pixel_format_etc2_rgba8_srgb:  return VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK;
+        case gfx_pixel_format_bc1_srgb:         return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+        case gfx_pixel_format_bc3_srgb:         return VK_FORMAT_BC3_SRGB_BLOCK;
+        case gfx_pixel_format_bc7_srgb:         return VK_FORMAT_BC7_SRGB_BLOCK;
+        case gfx_pixel_format_astc4x4_srgb:     return VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
+        case gfx_pixel_format_astc5x5_srgb:     return VK_FORMAT_ASTC_5x5_SRGB_BLOCK;
+        case gfx_pixel_format_astc6x6_srgb:     return VK_FORMAT_ASTC_6x6_SRGB_BLOCK;
+        case gfx_pixel_format_astc8x8_srgb:     return VK_FORMAT_ASTC_8x8_SRGB_BLOCK;
+        case gfx_pixel_format_astc10x10_srgb:   return VK_FORMAT_ASTC_10x10_SRGB_BLOCK;
+        case gfx_pixel_format_astc12x12_srgb:   return VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
+        default: break;
     };
 
     return VK_FORMAT_UNDEFINED;
@@ -1465,6 +1481,20 @@ static bool _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
     if (surface->color_format != VK_FORMAT_UNDEFINED) {
         for (uint32_t i = 0; i < format_count; ++i)
             if (formats[i].format == surface->color_format) { surface_format = formats[i]; break; }
+    }
+    else {
+        // first swapchain: honour surface_desc.preferred_format (rgba8 -> UNORM, rgba8_srgb -> SRGB: shader writes linear, HW encodes)
+        const bool want_srgb = gfx_pixel_format_is_srgb(surface->format);
+        const VkFormat wanted[2] = {
+            want_srgb ? VK_FORMAT_B8G8R8A8_SRGB : VK_FORMAT_B8G8R8A8_UNORM,
+            want_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
+        };
+        bool found = false;
+        for (uint32_t w = 0; w < 2 && !found; ++w)
+            for (uint32_t i = 0; i < format_count; ++i)
+                if (formats[i].format == wanted[w]) { surface_format = formats[i]; found = true; break; }
+        if (!found)
+            ctx->dbg_log(gfx_msg_warning, "swapchain: no %s 8-bit format, using %d", want_srgb ? "sRGB" : "UNORM", (int)formats[0].format);
     }
     surface->color_format = surface_format.format;
 

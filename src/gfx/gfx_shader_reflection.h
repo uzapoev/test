@@ -5,6 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if !defined(_MSC_VER) && !defined(__debugbreak)
+    #if defined(__clang__)
+        #define __debugbreak() __builtin_debugtrap()
+    #else
+        #define __debugbreak() __builtin_trap()
+    #endif
+#endif
+
 typedef struct gfx_shader_meta_t {
     char                entry_point[64];
     gfx_shader_stage    stage;
