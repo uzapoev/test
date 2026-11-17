@@ -2,20 +2,18 @@
 
 #ifdef PLATFORM_EMSCRIPTEN
 #include <stdio.h>
+#include <stdlib.h>
 #include <emscripten/html5.h>
 #include <emscripten/html5_webgpu.h>
 
 static const char *canvas = "#canvas";
-    
-input_event_t    g_events[1024];
-int              g_current_event_idx;
-uint8_t          g_keyboard_key_states[256];
-input_point_t    g_point_states[8];
+
+platform_ctx_t* g_platform_ctx = nullptr;
 
 static EM_BOOL _mouse_move_cb(int event_type, const EmscriptenMouseEvent * mouse_event, void * notused)
-{    
+{
     int16_t x = mouse_event->clientX;
-    int16_t y = mouse_event->clientX;
+    int16_t y = mouse_event->clientY;
     
     int16_t dx = mouse_event-> movementX;
     int16_t dy = mouse_event-> movementY;
@@ -32,14 +30,19 @@ static EM_BOOL _mouse_move_cb(int event_type, const EmscriptenMouseEvent * mouse
 static EM_BOOL _mouse_key_cb(int event_type, const EmscriptenMouseEvent * mouse_event, void * notused)
 {
     int16_t x = mouse_event->clientX;
-    int16_t y = mouse_event->clientX;
-    
+    int16_t y = mouse_event->clientY;
+
     if(event_type == EMSCRIPTEN_EVENT_MOUSEDOWN)
         emscripten_request_pointerlock(canvas, true);
     if(event_type == EMSCRIPTEN_EVENT_MOUSEUP)
         emscripten_exit_pointerlock();
     
-    push_input_mouse_event(x, y, 0, 0, input_state_down, none);
+    // DOM buttons: 0 - left, 1 - middle, 2 - right
+    mouse_button btn = mouse_event->button == 0 ? mouse_btn_left
+                     : mouse_event->button == 1 ? mouse_btn_middle
+                     : mouse_event->button == 2 ? mouse_btn_right : mouse_btn_extra0;
+    input_state  st  = event_type == EMSCRIPTEN_EVENT_MOUSEDOWN ? input_state_down : input_state_up;
+    push_input_mouse_event(x, y, 0, 0, st, btn);
     /*printf("_mouse_key_cb\n");
     bool v = event_type == EMSCRIPTEN_EVENT_MOUSEDOWN;
     if(mouse_event->button == 0) ctx.touch.left = v;
@@ -106,6 +109,8 @@ void platform_set_window_size(rect_t rect, bool fullscreen)
 
 int main(int argc, char ** argv)
 {
+    g_platform_ctx = (platform_ctx_t*)calloc(1, sizeof(platform_ctx_t));
+
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
     emscripten_webgl_create_context(canvas, &attrs);

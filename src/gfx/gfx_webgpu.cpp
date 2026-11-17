@@ -8,23 +8,41 @@
 #endif
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+  #include <emscripten/html5.h>     // canvas size
+#else
   #ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+      #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+      #define NOMINMAX
+    #endif
     #include <windows.h>
+    #pragma comment(lib, "x64/webgpu_dawn.lib")
   #endif
-
-  #pragma comment(lib, "x64/webgpu.lib")
 #endif
 
 
+#include "gfx_api.h"    // gfx_pixel_format_linear / gfx_pixel_format_is_srgb
+
 #if GFX_ENABLE_VERBOSE
 #define GFX_VERBOSE(exp)            { exp; }
-#define GFX_VERBOSE_IF(cond, exp)   { if(cond) exp; }
 #else
 #define GFX_VERBOSE(exp)            {}
-#define GFX_VERBOSE_IF(cond, exp)   {}
+#endif
+
+// gfx_pass_info_t::target is [[deprecated]] but still the way frames hand out their back buffer
+#if defined(_MSC_VER) && !defined(__clang__)
+  #define GFX_DISABLE_DEPRECATED_WARNING_BEGIN __pragma(warning(push)) __pragma(warning(disable: 4996))
+  #define GFX_DISABLE_DEPRECATED_WARNING_END   __pragma(warning(pop))
+#else
+  #define GFX_DISABLE_DEPRECATED_WARNING_BEGIN _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+  #define GFX_DISABLE_DEPRECATED_WARNING_END   _Pragma("GCC diagnostic pop")
 #endif
 
 extern const char* gfx_to_string(gfx_buffer_usage usage);
@@ -36,6 +54,35 @@ static wgpu_context_t* from_ctx(gfx_context_t* ctx) {
     return (wgpu_context_t*)ctx;
 }
 
+// ============================================================================
+// helpers
+// ============================================================================
+
+static WGPUStringView wgpu_str(const char* s)
+{
+    WGPUStringView v = { s, s ? WGPU_STRLEN : 0 };
+    return v;
+}
+
+static int wgpu_str_len(WGPUStringView v)
+{
+    if (!v.data) return 0;
+    return (int)(v.length == WGPU_STRLEN ? strlen(v.data) : v.length);
+}
+
+static void default_log(gfx_msg type, const char* msg, ...)
+{
+    (void)type; (void)msg;
+}
+
+// Blocks until the future completes (instance created with TimedWaitAny). On the web this needs ASYNCIFY/JSPI.
+static bool wgpu_wait(WGPUInstance instance, WGPUFuture future)
+{
+    WGPUFutureWaitInfo info = {};
+    info.future = future;
+    return wgpuInstanceWaitAny(instance, 1, &info, UINT64_MAX) == WGPUWaitStatus_Success;
+}
+
 static WGPUPrimitiveTopology gfx_topology_2_webgpu(gfx_topology topology)
 {
     switch (topology)
@@ -45,7 +92,7 @@ static WGPUPrimitiveTopology gfx_topology_2_webgpu(gfx_topology topology)
         case gfx_topology_lines_strip:      return WGPUPrimitiveTopology_LineStrip;
         case gfx_topology_triangles:        return WGPUPrimitiveTopology_TriangleList;
         case gfx_topology_triangles_strip:  return WGPUPrimitiveTopology_TriangleStrip;
-        default: return WGPUPrimitiveTopology_TriangleList;
+        default:                            return WGPUPrimitiveTopology_TriangleList;
     }
 }
 
@@ -54,9 +101,6 @@ static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format)
     switch (format)
     {
         case gfx_pixel_format_a8:               return WGPUTextureFormat_R8Unorm;
-        case gfx_pixel_format_rgba4444:         return WGPUTextureFormat_Undefined;
-        case gfx_pixel_format_rgb5a1:           return WGPUTextureFormat_Undefined;
-        case gfx_pixel_format_rgb565:           return WGPUTextureFormat_Undefined;
         case gfx_pixel_format_rgba8:            return WGPUTextureFormat_RGBA8Unorm;
         case gfx_pixel_format_rgba8_srgb:       return WGPUTextureFormat_RGBA8UnormSrgb;
 
@@ -100,9 +144,45 @@ static WGPUTextureFormat gfx_pixel_format_2_webgpu(gfx_pixel_format format)
 
         case gfx_pixel_format_d24x8:            return WGPUTextureFormat_Depth24Plus;
         case gfx_pixel_format_d24s8:            return WGPUTextureFormat_Depth24PlusStencil8;
-        default: return WGPUTextureFormat_Undefined;
+        case gfx_pixel_format_d32:              return WGPUTextureFormat_Depth32Float;
+        default:                                return WGPUTextureFormat_Undefined;    // rgba4444/rgb5a1/rgb565 have no WebGPU format
     }
-    return WGPUTextureFormat_Undefined;
+}
+
+static bool wgpu_format_is_depth(WGPUTextureFormat f)
+{
+    return f == WGPUTextureFormat_Depth16Unorm || f == WGPUTextureFormat_Depth24Plus || f == WGPUTextureFormat_Depth24PlusStencil8 ||
+           f == WGPUTextureFormat_Depth32Float || f == WGPUTextureFormat_Depth32FloatStencil8 || f == WGPUTextureFormat_Stencil8;
+}
+
+static bool wgpu_format_has_stencil(WGPUTextureFormat f)
+{
+    return f == WGPUTextureFormat_Depth24PlusStencil8 || f == WGPUTextureFormat_Depth32FloatStencil8 || f == WGPUTextureFormat_Stencil8;
+}
+
+static WGPUTextureFormat wgpu_format_srgb(WGPUTextureFormat f)
+{
+    switch (f) {
+        case WGPUTextureFormat_BGRA8Unorm: return WGPUTextureFormat_BGRA8UnormSrgb;
+        case WGPUTextureFormat_RGBA8Unorm: return WGPUTextureFormat_RGBA8UnormSrgb;
+        default:                           return f;
+    }
+}
+
+// block width/height of compressed formats, 1 for everything else
+static uint32_t gfx_pixel_format_block(gfx_pixel_format f)
+{
+    switch (gfx_pixel_format_linear(f)) {
+        case gfx_pixel_format_etc1: case gfx_pixel_format_etc2_rgb8a1: case gfx_pixel_format_etc2_rgba8:
+        case gfx_pixel_format_bc1:  case gfx_pixel_format_bc3: case gfx_pixel_format_bc4: case gfx_pixel_format_bc5:
+        case gfx_pixel_format_bc6h: case gfx_pixel_format_bc7: case gfx_pixel_format_astc4x4:   return 4;
+        case gfx_pixel_format_astc5x5:                                                          return 5;
+        case gfx_pixel_format_astc6x6:                                                          return 6;
+        case gfx_pixel_format_astc8x8:                                                          return 8;
+        case gfx_pixel_format_astc10x10:                                                        return 10;
+        case gfx_pixel_format_astc12x12:                                                        return 12;
+        default:                                                                                return 1;
+    }
 }
 
 static WGPUVertexFormat gfx_vertex_format_2_webgpu(gfx_format format)
@@ -112,87 +192,52 @@ static WGPUVertexFormat gfx_vertex_format_2_webgpu(gfx_format format)
         case gfx_format_float1:  return WGPUVertexFormat_Float32;
         case gfx_format_float2:  return WGPUVertexFormat_Float32x2;
         case gfx_format_float4:  return WGPUVertexFormat_Float32x4;
-
         case gfx_format_int2:    return WGPUVertexFormat_Sint32x2;
         case gfx_format_int4:    return WGPUVertexFormat_Sint32x4;
         case gfx_format_uint2:   return WGPUVertexFormat_Uint32x2;
         case gfx_format_uint4:   return WGPUVertexFormat_Uint32x4;
-
         case gfx_format_half2:   return WGPUVertexFormat_Float16x2;
         case gfx_format_half4:   return WGPUVertexFormat_Float16x4;
-
-        case gfx_format_short2:  return WGPUVertexFormat_Sint16x2;
-        case gfx_format_short4:  return WGPUVertexFormat_Sint16x4;
-
-        case gfx_format_ushort2: return WGPUVertexFormat_Uint16x2;
-        case gfx_format_ushort4: return WGPUVertexFormat_Uint16x4;
-
-        case gfx_format_byte4:   return WGPUVertexFormat_Sint8x4;
-    };
+        case gfx_format_short2:  return WGPUVertexFormat_Snorm16x2;     // gfx.h: normalized to [-1, 1]
+        case gfx_format_short4:  return WGPUVertexFormat_Snorm16x4;
+        case gfx_format_ushort2: return WGPUVertexFormat_Unorm16x2;     // gfx.h: normalized to [0, 1]
+        case gfx_format_ushort4: return WGPUVertexFormat_Unorm16x4;
+        case gfx_format_byte4:   return WGPUVertexFormat_Unorm8x4;      // gfx.h: normalized to [0, 1] (vertex colors)
+    }
     return WGPUVertexFormat_Float32x4;
 }
 
-WGPUFrontFace gfx_face_2_webgpu(gfx_face face)
+static WGPUFrontFace gfx_face_2_webgpu(gfx_face face)
 {
-    switch (face)
-    {
-        case gfx_face_cw: return WGPUFrontFace_CW;
-        case gfx_face_ccw: return WGPUFrontFace_CCW;
-    }
-    return WGPUFrontFace_CCW;
+    return face == gfx_face_cw ? WGPUFrontFace_CW : WGPUFrontFace_CCW;
 }
 
-WGPUCullMode gfx_cull_2_webgpu(gfx_cull cull)
+static WGPUCullMode gfx_cull_2_webgpu(gfx_cull cull)
 {
-    switch (cull)
-    {
-        case gfx_cull_none:     return WGPUCullMode_None;
-        case gfx_cull_back:     return WGPUCullMode_Back;
-        case gfx_cull_front:    return WGPUCullMode_Front;
-    }
-    return WGPUCullMode_None;
-}
-
-static WGPUShaderStage gfx_shader_stage_2_webgpu(gfx_shader_stage stage)
-{
-    switch(stage)
-    {
-        case gfx_shader_vertex:   return WGPUShaderStage_Vertex;
-        case gfx_shader_fragment: return WGPUShaderStage_Fragment;
-        case gfx_shader_compute:  return WGPUShaderStage_Compute;
-        default: return WGPUShaderStage_None;
+    switch (cull) {
+        case gfx_cull_back:  return WGPUCullMode_Back;
+        case gfx_cull_front: return WGPUCullMode_Front;
+        default:             return WGPUCullMode_None;
     }
 }
 
 static WGPUAddressMode gfx_address_mode_2_webgpu(gfx_address_mode mode)
 {
-    switch (mode)
-    {
-        case gfx_address_mode_repeat:           return WGPUAddressMode_Repeat;
+    switch (mode) {
         case gfx_address_mode_mirror_repeat:    return WGPUAddressMode_MirrorRepeat;
         case gfx_address_mode_clamp_to_edge:    return WGPUAddressMode_ClampToEdge;
+        default:                                return WGPUAddressMode_Repeat;
     }
-    return WGPUAddressMode_Repeat;
 }
 
 static WGPUFilterMode gfx_filter_2_webgpu(gfx_filter mode)
 {
-    switch (mode)
-    {
-        case gfx_filter_point:  return WGPUFilterMode_Nearest;
-        case gfx_filter_linear: return WGPUFilterMode_Linear;
-    }
-    return WGPUFilterMode_Nearest;
+    return mode == gfx_filter_linear ? WGPUFilterMode_Linear : WGPUFilterMode_Nearest;
 }
 
 static WGPUMipmapFilterMode gfx_mipmap_filter_2_webgpu(gfx_filter mode)
 {
-    switch (mode)
-    {
-        case gfx_filter_point:  return WGPUMipmapFilterMode_Nearest;
-        case gfx_filter_linear: return WGPUMipmapFilterMode_Linear;
-    }
-    return WGPUMipmapFilterMode_Nearest;
+    return mode == gfx_filter_linear ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
 }
 
 static WGPUCompareFunction gfx_cmp_2_webgpu(gfx_cmp mode)
@@ -214,33 +259,17 @@ static WGPUCompareFunction gfx_cmp_2_webgpu(gfx_cmp mode)
 static WGPUStencilOperation gfx_op_2_webgpu(gfx_stencil_op op)
 {
     switch (op) {
-         case gfx_stencil_op_zero:        return WGPUStencilOperation_Zero;
-         case gfx_stencil_op_keep:        return WGPUStencilOperation_Keep;
-         case gfx_stencil_op_replace:     return WGPUStencilOperation_Replace;
-         case gfx_stencil_op_incr:        return WGPUStencilOperation_IncrementClamp;
-         case gfx_stencil_op_incr_wrap:   return WGPUStencilOperation_IncrementWrap;
-         case gfx_stencil_op_decr:        return WGPUStencilOperation_DecrementClamp;
-         case gfx_stencil_op_decr_wrap:   return WGPUStencilOperation_DecrementWrap;
-         case gfx_stencil_op_invert:      return WGPUStencilOperation_Invert;
+        case gfx_stencil_op_zero:        return WGPUStencilOperation_Zero;
+        case gfx_stencil_op_keep:        return WGPUStencilOperation_Keep;
+        case gfx_stencil_op_replace:     return WGPUStencilOperation_Replace;
+        case gfx_stencil_op_incr:        return WGPUStencilOperation_IncrementClamp;
+        case gfx_stencil_op_incr_wrap:   return WGPUStencilOperation_IncrementWrap;
+        case gfx_stencil_op_decr:        return WGPUStencilOperation_DecrementClamp;
+        case gfx_stencil_op_decr_wrap:   return WGPUStencilOperation_DecrementWrap;
+        case gfx_stencil_op_invert:      return WGPUStencilOperation_Invert;
     }
-    return WGPUStencilOperation_Zero;
+    return WGPUStencilOperation_Keep;
 }
-
-static WGPUBufferUsage gfx_buffer_usage_2_webgpu(gfx_buffer_usage usage)
-{
-    switch (usage)
-    {
-        case gfx_buffer_usage_index:    return WGPUBufferUsage_Index;
-        case gfx_buffer_usage_vertex:   return WGPUBufferUsage_Vertex;
-        case gfx_buffer_usage_uniform:  return WGPUBufferUsage_Uniform;
-        case gfx_buffer_usage_storage:  return WGPUBufferUsage_Storage;
-        case gfx_buffer_usage_indirect: return WGPUBufferUsage_Indirect;
-        default: return WGPUBufferUsage_None;
-    }
-    return WGPUBufferUsage_None;
-}
-
-
 
 static WGPUBlendFactor gfx_blend_mode_2_webgpu(gfx_blend_mode mode)
 {
@@ -264,943 +293,1042 @@ static WGPUBlendOperation gfx_blend_op_2_webgpu(gfx_blend_op op)
 {
     switch(op)
     {
-        case gfx_blend_op_add:             return WGPUBlendOperation_Add;
-        case gfx_blend_op_min:             return WGPUBlendOperation_Min;
-        case gfx_blend_op_max:             return WGPUBlendOperation_Max;
-        case gfx_blend_op_subtract:        return WGPUBlendOperation_Subtract;
-        case gfx_blend_op_rev_subtract:   return WGPUBlendOperation_ReverseSubtract;
+        case gfx_blend_op_add:          return WGPUBlendOperation_Add;
+        case gfx_blend_op_min:          return WGPUBlendOperation_Min;
+        case gfx_blend_op_max:          return WGPUBlendOperation_Max;
+        case gfx_blend_op_subtract:     return WGPUBlendOperation_Subtract;
+        case gfx_blend_op_rev_subtract: return WGPUBlendOperation_ReverseSubtract;
     }
     return WGPUBlendOperation_Add;
 }
 
-
-WGPUBufferUsage gfx_usage_2_wgpu(gfx_buffer_usage usage)
-{
-    switch (usage) {
-        case gfx_buffer_usage_index:    return WGPUBufferUsage_Index;
-        case gfx_buffer_usage_vertex:   return WGPUBufferUsage_Vertex;
-        case gfx_buffer_usage_uniform:  return WGPUBufferUsage_Uniform;
-        case gfx_buffer_usage_storage:  return WGPUBufferUsage_Storage;
-        case gfx_buffer_usage_indirect: return WGPUBufferUsage_Indirect;
-    }
-    return WGPUBufferUsage_Index;
-}
-
-static const char * to_string(WGPUAdapterType type)
-{
-    switch(type){
-        case WGPUAdapterType_DiscreteGPU:   return "WGPUAdapterType_DiscreteGPU";
-        case WGPUAdapterType_IntegratedGPU: return "WGPUAdapterType_IntegratedGPU";
-        case WGPUAdapterType_CPU:           return "WGPUAdapterType_CPU";
-        case WGPUAdapterType_Unknown:       return "WGPUAdapterType_Unknown";
-        default: return "WGPUAdapterType_Force32";
-    }
-    return "WGPUAdapterType_Unknown";
-}
-
-static const char* to_string(WGPUBackendType type)
+static const char* wgpu_backend_name(WGPUBackendType type)
 {
     switch (type) {
-        case WGPUBackendType_Null:      return "WGPUBackendType_Null";
-        case WGPUBackendType_WebGPU:    return "WGPUBackendType_WebGPU";
-        case WGPUBackendType_D3D11:     return "WGPUBackendType_D3D11";
-        case WGPUBackendType_D3D12:     return "WGPUBackendType_D3D12";
-        case WGPUBackendType_Metal:     return "WGPUBackendType_Metal";
-        case WGPUBackendType_Vulkan:    return "WGPUBackendType_Vulkan";
-        case WGPUBackendType_OpenGL:    return "WGPUBackendType_OpenGL";
-        case WGPUBackendType_OpenGLES:  return "WGPUBackendType_OpenGLES";
-        default: return "WGPUBackendType_Force32";
+        case WGPUBackendType_Null:      return "Null";
+        case WGPUBackendType_WebGPU:    return "WebGPU";
+        case WGPUBackendType_D3D11:     return "D3D11";
+        case WGPUBackendType_D3D12:     return "D3D12";
+        case WGPUBackendType_Metal:     return "Metal";
+        case WGPUBackendType_Vulkan:    return "Vulkan";
+        case WGPUBackendType_OpenGL:    return "OpenGL";
+        case WGPUBackendType_OpenGLES:  return "OpenGLES";
+        default:                        return "unknown";
     }
-    return "WGPUBackendType_Null";
 }
 
-
-
-static void get_window_size(intptr_t handle, int * width, int * height)
+static const char* wgpu_adapter_type_name(WGPUAdapterType type)
 {
-#ifdef EMSCRIPTEN
-    emscripten_get_canvas_element_size((const char*)handle, width, height);
-#else
+    switch (type) {
+        case WGPUAdapterType_DiscreteGPU:   return "discrete GPU";
+        case WGPUAdapterType_IntegratedGPU: return "integrated GPU";
+        case WGPUAdapterType_CPU:           return "CPU";
+        default:                            return "unknown";
+    }
+}
+
+static void get_window_size(intptr_t handle, uint32_t* width, uint32_t* height)
+{
+    *width = *height = 0;
+#ifdef __EMSCRIPTEN__
+    int w = 0, h = 0;
+    emscripten_get_canvas_element_size(handle ? (const char*)handle : "#canvas", &w, &h);
+    *width = (uint32_t)(w > 0 ? w : 0);
+    *height = (uint32_t)(h > 0 ? h : 0);
+#elif defined(_WIN32)
     RECT rect = {};
-    GetClientRect((HWND)handle, &rect);
-    *width = rect.right;
-    *height = rect.bottom;
+    if (GetClientRect((HWND)handle, &rect)) {
+        *width = (uint32_t)(rect.right - rect.left);
+        *height = (uint32_t)(rect.bottom - rect.top);
+    }
+#else
+    (void)handle;
 #endif
 }
 
-typedef struct wgsl_info {
-    uint32_t            group;
-    uint32_t            binding;
-    char                name[32];
-    gfx_uniform_type    type;
-} wgsl_info;
-
-// out -
-static inline int match(const char* pattern, const char* str, const char **out) throw()
+static wgpu_texture_t* wgpu_texture_alloc(WGPUTexture texture, WGPUTextureView view, WGPUTextureFormat format, uint32_t w, uint32_t h, uint32_t samples)
 {
-    if(!pattern || !str) return 0;
-    while (str && *str != '\0' && *str == ' ') str++;
-    if(out) *out = str;
-    if (*pattern == '\0') return 1;//*str;
-    if (*pattern == '*')  return match(pattern + 1, str, out) || (*str && match(pattern, str + 1, out));
-    if (*pattern == '?')  return *str && (*str != '.') && match(pattern + 1, str + 1, out);
-    return (*str == *pattern) && match(pattern + 1, str + 1, out);
+    wgpu_texture_t* t = (wgpu_texture_t*)calloc(1, sizeof(wgpu_texture_t));
+    if (!t) return nullptr;
+    t->texture = texture;
+    t->texture_view = view;
+    t->format = format;
+    t->width = w;
+    t->height = h;
+    t->sample_count = samples;
+    return t;
 }
 
-static uint32_t wglsl_reflect(const char *data, gfx_uniform_t* uniforms, WGPUBindGroupLayoutEntry * bgle)
+static void create_default_resources(gfx_context_t* ctx)
 {
-    const char k_group_key [] = "@group(";
-    const char k_binding_key [] = "@binding(";
-    const size_t k_group_key_len = sizeof(k_group_key) - 1;
-    const size_t k_binding_key_len = sizeof(k_binding_key) - 1;
+    wgpu_context_t* wctx = from_ctx(ctx);
 
-    uint32_t count = 0;
-    const char* ptr = data;
-    while(ptr)
-    {
-        char buffer[512] = {};
-        const char* start_group = strstr(ptr, k_group_key);
-        const char* end_group = start_group ? strstr(start_group, ";"):nullptr;
-
-        const char* start_bind = strstr(ptr, k_binding_key);
-        const char* end_bind = start_group ? strstr(start_group, ";") : nullptr;
-
-        if(start_group == nullptr || start_bind == nullptr)
-            return count;
-        if(end_group != end_bind)
-            return count;
-
-        const char* start = start_group < start_bind ? start_group : start_bind;
-        const char* end = end_group;
-
-        intptr_t len = end - start;
-        strncpy(buffer, start, len);
-        ptr = end;
-
-        uniforms[count].group = atoi(start_group + k_group_key_len);
-        uniforms[count].binding = atoi(start_bind + k_binding_key_len);
-
-      //  bgle[count].group = infos[count].group;
-        bgle[count].binding = uniforms[count].binding;
-
-        const char * last = nullptr;
-        const char * var = strstr(buffer, "var");
-        if(var && match("var<uniform>", var, &last)) {
-            printf("");
-        } else if (var && match("var <storage, read>", buffer, &last)) {
-            uniforms[count].type = gfx_uniform_storage_buffer;
-            bgle[count].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
-        } else if (var && match("var <storage", buffer, &last)) {
-            uniforms[count].type = gfx_uniform_storage_buffer;
-            bgle[count].buffer.type = WGPUBufferBindingType_Storage;
-        } else if (var && strstr(var, "var ")) {
-            const char * dblpoint = strstr(buffer, ":");
-            strncpy(uniforms[count].name, var + sizeof("var"), dblpoint - var - sizeof("var"));
-            dblpoint++;
-            while(dblpoint && *dblpoint == ' ' ) dblpoint++;
-
-            // https://www.w3.org/TR/WGSL/#sampled-texture-type
-            if(dblpoint && !strncmp(dblpoint, "sampler", 7)) {
-                uniforms[count].type = gfx_uniform_sampler;
-                bgle[count].sampler.type = WGPUSamplerBindingType_Filtering;
-            }
-            else if (dblpoint && !strncmp(dblpoint, "texture_2d", strlen("texture_2d"))) {
-                uniforms[count].type = gfx_uniform_texture2d;
-                bgle[count].texture.viewDimension = WGPUTextureViewDimension_2D;
-                bgle[count].texture.sampleType = WGPUTextureSampleType_Float;
-            }
-            else if (dblpoint && !strncmp(dblpoint, "texture_3d", strlen("texture_3d"))) {
-                uniforms[count].type = gfx_uniform_texture3d;
-                bgle[count].texture.viewDimension = WGPUTextureViewDimension_3D;
-                bgle[count].texture.sampleType = WGPUTextureSampleType_Float;
-            }
-            else if (dblpoint && !strncmp(dblpoint, "texture_cube", strlen("texture_cube"))) {
-                uniforms[count].type = gfx_uniform_texture2d_cube;
-                bgle[count].texture.viewDimension = WGPUTextureViewDimension_Cube;
-                bgle[count].texture.sampleType = WGPUTextureSampleType_Float;
-            }
-            else if (dblpoint && !strncmp(dblpoint, "texture_2d_array", strlen("texture_2d_array"))) {
-                uniforms[count].type = gfx_uniform_texture2d_array;
-                bgle[count].texture.viewDimension = WGPUTextureViewDimension_2DArray;
-                bgle[count].texture.sampleType = WGPUTextureSampleType_Float;
-            }
-            else {
-                assert(false);
-            }
-
-        }
-        count++;
-    }
-    return count;
-}
-
-static uint32_t get_shader_uniforms(const void* data, uint32_t size, gfx_uniform_t* uniforms, const char** entry) {
-    uint32_t uniform_count = 0;
-    /*bool is_spirv = *(uint32_t*)data == 0x07230203;
-    if (is_spirv) {
-        spirvflect_t* reflect = nullptr;
-        spirvflect_create((uint32_t*)data, size, &reflect);
-        *entry = reflect->entry_point;
-        for (uint32_t idx = 0; idx < reflect->uniform_count; ++idx, uniform_count++)
-        {
-            auto current_uniform = reflect->uniforms[idx];
-            strncpy(uniforms[uniform_count].name, current_uniform.name, sizeof(uniforms[uniform_count].name) - 2);
-            uniforms[uniform_count].binding = current_uniform.binding;
-            if (reflect->uniforms[idx].type == SpvOpTypeStruct)
-            {
-                uniforms[uniform_count].type = gfx_uniform_ubo;
-                uniforms[uniform_count].buffer.size = current_uniform.size;
-                uniforms[uniform_count].buffer.field_count = current_uniform.field_count;
-                for (size_t field_idx = 0; field_idx < current_uniform.field_count; field_idx++)
-                {
-                    auto current_field = current_uniform.fields[field_idx];
-                    strcpy(uniforms[uniform_count].buffer.fields[field_idx].name, current_field.name);
-                    uniforms[uniform_count].buffer.fields[field_idx].offset = current_field.offset;
-                }
-            }
-            if (reflect->uniforms[idx].type == SpvOpTypeSampler) {
-                uniforms[uniform_count].type = gfx_uniform_sampler;
-            }
-            if (reflect->uniforms[idx].type == SpvOpTypeImage) {
-                uniforms[uniform_count].type = gfx_uniform_texture2d;
-            }
-        }
-    } else if (!is_spirv) {
-        WGPUBindGroupLayoutEntry bgle[16] = {};
-        uniform_count = wglsl_reflect((const char*)data, uniforms, bgle);
-    }
-    */
-    return uniform_count;
-}
-
-static void create_default_resources(gfx_context_t* ctx) {
-    wgpu_context_t * wctx = from_ctx(ctx);
-    uint8_t* pixels = (uint8_t*)calloc(16 * 16 * 4, sizeof(uint8_t));
-    if (pixels != nullptr) {
-        for (int i = 0; i < 16 * 16; ++i) {
-            pixels[i * 4 + 0] = rand() % 255;
-            pixels[i * 4 + 1] = rand() % 255;
-            pixels[i * 4 + 2] = rand() % 255;
-            pixels[i * 4 + 3] = 255;
-        }
-
-        gfx_texture_desc_t desc = {"default", 16, 16, 1};
-        desc.format = gfx_pixel_format_rgba8;
-        desc.data = pixels;
+    const uint32_t white = 0xFFFFFFFFu;
+    gfx_texture_desc_t desc = {};
+        desc.label      = "default";
+        desc.width      = 1;
+        desc.height     = 1;
+        desc.depth      = 1;
+        desc.format     = gfx_pixel_format_rgba8;
+        desc.data       = (void*)&white;
         desc.mip_levels = 1;
-        wgpu_create_texture(ctx, &desc, &wctx->default_texture);
-
-        free(pixels);
-    }
+    wgpu_create_texture(ctx, &desc, &wctx->default_texture);
 
     gfx_sampler_desc_t sampler_desc = {};
-        sampler_desc.minmag = gfx_filter_point;
-        sampler_desc.mipmap = gfx_filter_point;
-        sampler_desc.mode = gfx_address_mode_repeat;
+        sampler_desc.minmag     = gfx_filter_point;
+        sampler_desc.mipmap     = gfx_filter_point;
+        sampler_desc.mode       = gfx_address_mode_repeat;
         sampler_desc.anisotropy = 1;
     wgpu_create_sampler(ctx, &sampler_desc, &wctx->default_sampler);
 }
 
+// ============================================================================
+// CONTEXT
+// ============================================================================
 
-static void request_adaprer_cb(WGPURequestAdapterStatus status, WGPUAdapter adapter, char const* message, void* userdata)
+void wgpu_get_caps(gfx_context_t* ctx, gfx_caps_t* caps)
 {
-    printf("request_adaprer_cb status:(%d)\n", status);
-    WGPUAdapter* result = (WGPUAdapter*)userdata;
-    *result = adapter;
-}
+    if (!caps) return;
+    memset(caps, 0, sizeof(*caps));
+    wgpu_context_t* wctx = from_ctx(ctx);
 
-static void request_device_cb(WGPURequestDeviceStatus status, WGPUDevice device, char const* message, void* userdata)
-{
-    printf("request_device_cb status:(%d)\n", status);
-    WGPUDevice* result = (WGPUDevice*)userdata;
-    *result = device;
-}
-
-static void shader_compilation_cb(WGPUCompilationInfoRequestStatus status, WGPUCompilationInfo const* compilationInfo, void* userdata)
-{
-    wgpu_context_t* wctx = from_ctx((gfx_context_t*)userdata);
-    for (uint32_t i = 0; i < compilationInfo->messageCount; i++)
-    {
-        auto message = compilationInfo->messages[i];
-        wctx->dbglog(gfx_msg_info,"(%llu:%llu)%s", message.lineNum, message.linePos, message.message);
+    // browsers accept WGSL only; native Dawn would also take SPIR-V, but one path for both keeps them identical
+    caps->supported_shader_formats              = gfx_shader_format_wgsl;
+    caps->support_compute                       = true;
+    caps->support_indirect                      = true;
+    if (wctx) {
+        caps->max_texture_dimension_2d              = wctx->limits.maxTextureDimension2D;
+        caps->max_compute_work_group_invocations    = wctx->limits.maxComputeInvocationsPerWorkgroup;
+        caps->min_uniform_buffer_offset_alignment   = wctx->limits.minUniformBufferOffsetAlignment;
+        caps->min_storage_buffer_offset_alignment   = wctx->limits.minStorageBufferOffsetAlignment;
+        caps->max_uniform_buffer_range              = (uint32_t)gfx_min(wctx->limits.maxUniformBufferBindingSize, (uint64_t)0xFFFFFFFFu);
     }
 }
 
-static void default_log(gfx_msg type, const char* msg, ...)
+// Dawn's backend on desktop: automatic, or GFX_WEBGPU_BACKEND=d3d12 | d3d11 | vulkan | metal | opengl | opengles
+static WGPUBackendType wgpu_requested_backend()
 {
+#ifndef __EMSCRIPTEN__
+    const char* env = getenv("GFX_WEBGPU_BACKEND");
+    if (env) {
+        if (!strcmp(env, "d3d12"))    return WGPUBackendType_D3D12;
+        if (!strcmp(env, "d3d11"))    return WGPUBackendType_D3D11;
+        if (!strcmp(env, "vulkan"))   return WGPUBackendType_Vulkan;
+        if (!strcmp(env, "metal"))    return WGPUBackendType_Metal;
+        if (!strcmp(env, "opengl"))   return WGPUBackendType_OpenGL;
+        if (!strcmp(env, "opengles")) return WGPUBackendType_OpenGLES;
+    }
+#endif
+    return WGPUBackendType_Undefined;
 }
-
-// --- CONTEXT ---
 
 void wgpu_init(gfx_settings_t* settings, gfx_context_t** ctx)
 {
-#ifdef EMSCRIPTEN
-    EmscriptenWebGLContextAttributes attr;
-    emscripten_webgl_init_context_attributes(&attr);
-
-    auto yield = [](int ms) { emscripten_sleep(ms); };
-#else
-    auto yield = [](int ms) { Sleep(ms); };
-#endif
-
+    *ctx = nullptr;
     wgpu_context_t* wctx = (wgpu_context_t*)calloc(1, sizeof(wgpu_context_t));
     if (!wctx)
         return;
-
-    *ctx = &wctx->handle;
-
-    WGPUInstance instance = wgpuCreateInstance(nullptr);
-
-    WGPURequestAdapterOptions adapter_options = {};
-    adapter_options.powerPreference =  WGPUPowerPreference_HighPerformance;
-    adapter_options.backendType = WGPUBackendType_D3D12;//WGPUBackendType_Vulkan;
-
-    WGPUAdapter adapter = nullptr;
-    wgpuInstanceRequestAdapter(instance, &adapter_options, request_adaprer_cb, &adapter);
-    while (adapter == nullptr)
-        yield(10);
-
-    WGPUFeatureName features[128] = {};
-    uint32_t supported_features = (uint32_t)wgpuAdapterEnumerateFeatures(adapter, features);
-
-   // WGPUFeatureName features[] = { WGPUFeatureName_TextureCompressionBC, WGPUFeatureName_BGRA8UnormStorage };
-    WGPUDeviceDescriptor descriptor = {};
-    descriptor.requiredFeatures = features;
-
-#ifdef EMSCRIPTEN
-    descriptor.requiredFeaturesCount = supported_features;
-#else
-    descriptor.requiredFeatureCount = supported_features;
-#endif
-
-    WGPUDevice device = nullptr;
-    wgpuAdapterRequestDevice(adapter, &descriptor, request_device_cb, &device);
-    while (device == nullptr)
-        yield(10);
-
-    wctx->instance = instance;
-    wctx->adapter = adapter;
-    wctx->device = device;
-    wctx->queue = wgpuDeviceGetQueue(wctx->device);
     wctx->dbglog = settings->dbglog ? settings->dbglog : default_log;
 
+    // --- instance: TimedWaitAny lets the init wait for the adapter/device futures
+    WGPUInstanceFeatureName instance_features[] = { WGPUInstanceFeatureName_TimedWaitAny };
+    WGPUInstanceDescriptor instance_desc = {};
+        instance_desc.requiredFeatureCount = 1;
+        instance_desc.requiredFeatures     = instance_features;
+    wctx->instance = wgpuCreateInstance(&instance_desc);
+    if (!wctx->instance) {
+        wctx->dbglog(gfx_msg_error, "webgpu: wgpuCreateInstance failed");
+        free(wctx);
+        return;
+    }
 
-    GFX_VERBOSE(wctx->dbglog(gfx_msg_info, "wgpu_init()"))
+    // --- adapter
+    struct adapter_result_t { WGPUAdapter adapter; WGPURequestAdapterStatus status; char message[256]; } ar = {};
+    WGPURequestAdapterOptions adapter_options = {};
+        adapter_options.powerPreference = WGPUPowerPreference_HighPerformance;
+        adapter_options.backendType     = wgpu_requested_backend();
+    WGPURequestAdapterCallbackInfo adapter_cb = {};
+        adapter_cb.mode      = WGPUCallbackMode_WaitAnyOnly;
+        adapter_cb.userdata1 = &ar;
+        adapter_cb.callback  = [](WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView message, void* u1, void*) {
+            adapter_result_t* r = (adapter_result_t*)u1;
+            r->status = status;
+            r->adapter = adapter;
+            snprintf(r->message, sizeof(r->message), "%.*s", wgpu_str_len(message), message.data ? message.data : "");
+        };
+    if (!wgpu_wait(wctx->instance, wgpuInstanceRequestAdapter(wctx->instance, &adapter_options, adapter_cb)) || !ar.adapter) {
+        wctx->dbglog(gfx_msg_error, "webgpu: no adapter (%d) %s", (int)ar.status, ar.message);
+        wgpuInstanceRelease(wctx->instance);
+        free(wctx);
+        return;
+    }
+    wctx->adapter = ar.adapter;
 
-    wgpuDeviceGetLimits(device, &wctx->limits);
-    wgpuAdapterGetProperties(adapter, &wctx->properties);
-
-    // wgpuDevicePoll(device, true, NULL);
-
-    auto adaptertype = [](WGPUAdapterType type) -> const char* {
-        switch(type) {
-            case WGPUAdapterType_DiscreteGPU:   return "discrete GPU";
-            case WGPUAdapterType_IntegratedGPU: return "integrated GPU";
-            case WGPUAdapterType_CPU:           return "CPU";
-            default: break;
-        }
-        return "unknown";
+    // --- features: the useful optional ones the adapter has
+    WGPUSupportedFeatures supported = {};
+    wgpuAdapterGetFeatures(wctx->adapter, &supported);
+    const WGPUFeatureName wanted[] = {
+        WGPUFeatureName_Float32Filterable,          // RGBA32F sampled with a filtering sampler (saltline slug curves)
+        WGPUFeatureName_TextureCompressionBC,
+        WGPUFeatureName_TextureCompressionETC2,
+        WGPUFeatureName_TextureCompressionASTC,
+        WGPUFeatureName_IndirectFirstInstance,
+        WGPUFeatureName_ShaderF16,
+        WGPUFeatureName_Depth32FloatStencil8,
+        WGPUFeatureName_RG11B10UfloatRenderable,
+        WGPUFeatureName_BGRA8UnormStorage,
     };
+    WGPUFeatureName features[16] = {};
+    uint32_t feature_count = 0;
+    for (WGPUFeatureName f : wanted)
+        for (size_t i = 0; i < supported.featureCount; ++i)
+            if (supported.features[i] == f) { features[feature_count++] = f; break; }
+    wgpuSupportedFeaturesFreeMembers(supported);
+    for (uint32_t i = 0; i < feature_count; ++i)
+        wctx->float32_filterable = wctx->float32_filterable || features[i] == WGPUFeatureName_Float32Filterable;
 
-    auto backendtype = [](WGPUBackendType type) -> const char * {
-        switch (type) {
-            case WGPUBackendType_WebGPU:    return "WebGPU";
-            case WGPUBackendType_D3D11:     return "D3D11";
-            case WGPUBackendType_D3D12:     return "D3D12";
-            case WGPUBackendType_Metal:     return "Metal";
-            case WGPUBackendType_Vulkan:    return "Vulkan";
-            case WGPUBackendType_OpenGL:    return "OpenGL";
-            case WGPUBackendType_OpenGLES:  return "OpenGLES";
-            default: break;
-        }
-        return "unknown";
-    };
+    // --- device: the adapter's limits (defaults are the WebGPU minimums), errors go to dbglog
+    WGPULimits adapter_limits = {};
+    wgpuAdapterGetLimits(wctx->adapter, &adapter_limits);
 
-    wctx->dbglog(gfx_msg_info, "gfx init with webgpu(%s) backend: \n\
-                                device: %s(%s) \n\
-                                driver: %s",
-        backendtype(wctx->properties.backendType),
-        adaptertype(wctx->properties.adapterType),
-        wctx->properties.name, wctx->properties.driverDescription
-    );
+    struct device_result_t { WGPUDevice device; WGPURequestDeviceStatus status; char message[256]; } dr = {};
+    WGPUDeviceDescriptor device_desc = {};
+        device_desc.label                = wgpu_str("gfx device");
+        device_desc.requiredFeatureCount = feature_count;
+        device_desc.requiredFeatures     = features;
+        device_desc.requiredLimits       = &adapter_limits;
+        device_desc.uncapturedErrorCallbackInfo.userdata1 = wctx;
+        device_desc.uncapturedErrorCallbackInfo.callback  = [](WGPUDevice const*, WGPUErrorType type, WGPUStringView message, void* u1, void*) {
+            wgpu_context_t* c = (wgpu_context_t*)u1;
+            c->dbglog(gfx_msg_error, "webgpu error (%d): %.*s", (int)type, wgpu_str_len(message), message.data ? message.data : "");
+        };
+        device_desc.deviceLostCallbackInfo.mode      = WGPUCallbackMode_AllowSpontaneous;
+        device_desc.deviceLostCallbackInfo.userdata1 = wctx;
+        device_desc.deviceLostCallbackInfo.callback  = [](WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView message, void* u1, void*) {
+            if (reason == WGPUDeviceLostReason_Destroyed || reason == WGPUDeviceLostReason_CallbackCancelled) return;
+            wgpu_context_t* c = (wgpu_context_t*)u1;
+            c->dbglog(gfx_msg_error, "webgpu device lost (%d): %.*s", (int)reason, wgpu_str_len(message), message.data ? message.data : "");
+        };
+    WGPURequestDeviceCallbackInfo device_cb = {};
+        device_cb.mode      = WGPUCallbackMode_WaitAnyOnly;
+        device_cb.userdata1 = &dr;
+        device_cb.callback  = [](WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView message, void* u1, void*) {
+            device_result_t* r = (device_result_t*)u1;
+            r->status = status;
+            r->device = device;
+            snprintf(r->message, sizeof(r->message), "%.*s", wgpu_str_len(message), message.data ? message.data : "");
+        };
+    if (!wgpu_wait(wctx->instance, wgpuAdapterRequestDevice(wctx->adapter, &device_desc, device_cb)) || !dr.device) {
+        wctx->dbglog(gfx_msg_error, "webgpu: no device (%d) %s", (int)dr.status, dr.message);
+        wgpuAdapterRelease(wctx->adapter);
+        wgpuInstanceRelease(wctx->instance);
+        free(wctx);
+        return;
+    }
+    wctx->device = dr.device;
+    wctx->queue  = wgpuDeviceGetQueue(wctx->device);
+    wgpuDeviceGetLimits(wctx->device, &wctx->limits);
 
-#ifndef EMSCRIPTEN
-    wgpuDeviceSetLoggingCallback(device, [](WGPULoggingType type, char const* message, void* userdata) {
-        printf("%d: %s\n", type, message);
-    }, wctx);
-
-    wgpuDeviceSetUncapturedErrorCallback(device, [](WGPUErrorType type, const char* message, void* userdata) {
-        printf("%d: %s\n", type, message);
-    }, wctx);
+#ifndef __EMSCRIPTEN__
+    WGPULoggingCallbackInfo logging = {};
+        logging.userdata1 = wctx;
+        logging.callback  = [](WGPULoggingType type, WGPUStringView message, void* u1, void*) {
+            wgpu_context_t* c = (wgpu_context_t*)u1;
+            const gfx_msg level = type == WGPULoggingType_Error ? gfx_msg_error : type == WGPULoggingType_Warning ? gfx_msg_warning : gfx_msg_info;
+            c->dbglog(level, "webgpu: %.*s", wgpu_str_len(message), message.data ? message.data : "");
+        };
+    wgpuDeviceSetLoggingCallback(wctx->device, logging);
 #endif
 
-    gfx_handle_pool_create(sizeof(wgpu_sampler_t),  16,    &wctx->sampler_pool,  nullptr);
-    gfx_handle_pool_create(sizeof(wgpu_texture_t),  1024,  &wctx->texture_pool,  nullptr);
-    gfx_handle_pool_create(sizeof(wgpu_buffer_t),   4096,  &wctx->buffer_pool,   nullptr);
-    gfx_handle_pool_create(sizeof(wgpu_shader_t),   512,   &wctx->shader_pool,   nullptr);
-    gfx_handle_pool_create(sizeof(wgpu_pipeline_t), 512,   &wctx->pipeline_pool, nullptr);
+    WGPUAdapterInfo info = {};
+    wgpuAdapterGetInfo(wctx->adapter, &info);
+    wctx->backend_type = info.backendType;
+    wctx->adapter_type = info.adapterType;
+    wctx->dbglog(gfx_msg_info, "gfx init with webgpu(%s): %.*s (%s), float32-filterable %d",
+                 wgpu_backend_name(info.backendType), wgpu_str_len(info.device), info.device.data ? info.device.data : "",
+                 wgpu_adapter_type_name(info.adapterType), (int)wctx->float32_filterable);
+    wgpuAdapterInfoFreeMembers(info);
 
+    // until a surface says otherwise
+    wctx->surface_format = WGPUTextureFormat_BGRA8Unorm;
+    wctx->depth_format   = WGPUTextureFormat_Depth24PlusStencil8;
+    wctx->sample_count   = 1;
 
-    gfx_buffer_desc_t desc = {};
-    desc.usage  = gfx_buffer_usage_staging;
-    desc.label  = "staging";
-    desc.size   = settings->limits.staging_buffer_size;
-    wgpu_create_buffer(*ctx, &desc, &wctx->staging_buffer);
+    gfx_handle_pool_create(sizeof(wgpu_buffer_t),  4096, &wctx->buffer_pool,  nullptr);
+    gfx_handle_pool_create(sizeof(wgpu_surface_t), 8,    &wctx->surface_pool, nullptr);
 
+    *ctx = &wctx->handle;
     create_default_resources(*ctx);
 }
 
-// --- SWAPCHAIN ---
+static void wgpu_release_pool(wgpu_context_t* wctx, wgpu_descriptor_set_pool_t* pool);
 
-void wgpu_create_swapchain(gfx_context_t* ctx, intptr_t handle, gfx_swapchain_t ** out_swapchain)
+void wgpu_destroy(gfx_context_t* ctx)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
+    if (!wctx) return;
 
-    GFX_VERBOSE(wctx->dbglog(gfx_msg_info, "wgpu_create_swapchain(%p, %d)", ctx, handle));
+    while (wctx->pools)
+        wgpu_release_pool(wctx, wctx->pools);
 
-    WGPUSwapChainDescriptor desc = {0};
-        desc.usage = WGPUTextureUsage_RenderAttachment;
-        desc.format = WGPUTextureFormat_BGRA8Unorm;
-        desc.presentMode = WGPUPresentMode_Fifo;
-    WGPUSurfaceDescriptor surface_descriptor = {0};
+    if (wctx->default_texture) wgpu_destroy_texture(ctx, wctx->default_texture);
+    if (wctx->default_sampler) wgpu_destroy_sampler(ctx, wctx->default_sampler);
+    free(wctx->frame);
 
-    get_window_size(handle, (int*)&desc.width, (int*)&desc.height);
+    if (wctx->queue)    wgpuQueueRelease(wctx->queue);
+    if (wctx->device) { wgpuDeviceDestroy(wctx->device); wgpuDeviceRelease(wctx->device); }
+    if (wctx->adapter)  wgpuAdapterRelease(wctx->adapter);
+    if (wctx->instance) wgpuInstanceRelease(wctx->instance);
 
-#ifdef EMSCRIPTEN
-    WGPUSurfaceDescriptorFromCanvasHTMLSelector canvDesc = { nullptr, WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector };
-        canvDesc.selector = "canvas";
-    surface_descriptor.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&canvDesc);
+    gfx_handle_pool_destroy(wctx->buffer_pool);
+    gfx_handle_pool_destroy(wctx->surface_pool);
+    free(wctx);
+}
+
+// ============================================================================
+// SURFACE / FRAME
+// ============================================================================
+
+static wgpu_surface_t* wgpu_map_surface(wgpu_context_t* wctx, gfx_surface_t* surface)
+{
+    return (wctx && surface) ? (wgpu_surface_t*)gfx_handle_pool_map(wctx->surface_pool, surface->idx) : nullptr;
+}
+
+static void wgpu_surface_release_targets(wgpu_surface_t* s)
+{
+    if (s->msaa_color_view) { wgpuTextureViewRelease(s->msaa_color_view); s->msaa_color_view = nullptr; }
+    if (s->msaa_color)      { wgpuTextureRelease(s->msaa_color);          s->msaa_color = nullptr; }
+    if (s->depth_view)      { wgpuTextureViewRelease(s->depth_view);      s->depth_view = nullptr; }
+    if (s->depth)           { wgpuTextureRelease(s->depth);               s->depth = nullptr; }
+}
+
+static WGPUPresentMode wgpu_surface_present_mode(const wgpu_surface_t* s)
+{
+    if (s->vsync) return WGPUPresentMode_Fifo;      // the one mode every implementation has
+    for (uint32_t i = 0; i < s->present_mode_count; ++i) if (s->present_modes[i] == WGPUPresentMode_Mailbox)   return WGPUPresentMode_Mailbox;
+    for (uint32_t i = 0; i < s->present_mode_count; ++i) if (s->present_modes[i] == WGPUPresentMode_Immediate) return WGPUPresentMode_Immediate;
+    return WGPUPresentMode_Fifo;
+}
+
+// (re)configure for the current window size: back buffer, MSAA color and depth
+static bool wgpu_surface_configure(wgpu_surface_t* s, uint32_t width, uint32_t height)
+{
+    wgpu_context_t* wctx = s->ctx;
+    wgpu_surface_release_targets(s);
+
+    s->config.width       = width;
+    s->config.height      = height;
+    s->config.presentMode = wgpu_surface_present_mode(s);
+    wgpuSurfaceConfigure(s->surface, &s->config);
+    s->needs_configure = false;
+
+    WGPUTextureDescriptor td = {};
+        td.dimension     = WGPUTextureDimension_2D;
+        td.size          = { width, height, 1 };
+        td.mipLevelCount = 1;
+        td.sampleCount   = s->sample_count;
+        td.usage         = WGPUTextureUsage_RenderAttachment;
+
+    if (s->sample_count > 1) {
+        td.label  = wgpu_str("surface msaa color");
+        td.format = s->view_format;
+        s->msaa_color = wgpuDeviceCreateTexture(wctx->device, &td);
+        s->msaa_color_view = wgpuTextureCreateView(s->msaa_color, nullptr);
+    }
+
+    td.label  = wgpu_str("surface depth");
+    td.format = wctx->depth_format;
+    s->depth = wgpuDeviceCreateTexture(wctx->device, &td);
+    s->depth_view = wgpuTextureCreateView(s->depth, nullptr);
+    return s->depth_view != nullptr;
+}
+
+void wgpu_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    *out_surface = nullptr;
+    if (!wctx || !desc) return;
+
+    WGPUSurfaceDescriptor surface_desc = {};
+    surface_desc.label = wgpu_str(desc->label);
+#ifdef __EMSCRIPTEN__
+    WGPUEmscriptenSurfaceSourceCanvasHTMLSelector source = {};
+        source.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
+        source.selector    = wgpu_str(desc->window_handle ? (const char*)desc->window_handle : "#canvas");
+    surface_desc.nextInChain = &source.chain;
+#elif defined(_WIN32)
+    WGPUSurfaceSourceWindowsHWND source = {};
+        source.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
+        source.hinstance   = GetModuleHandle(nullptr);
+        source.hwnd        = (void*)desc->window_handle;
+    surface_desc.nextInChain = &source.chain;
 #else
-    WGPUSurfaceDescriptorFromWindowsHWND wnddesc = { nullptr, WGPUSType_SurfaceDescriptorFromWindowsHWND };
-        wnddesc.hwnd = (void*)handle;
-        wnddesc.hinstance = GetModuleHandle(nullptr);
-    surface_descriptor.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&wnddesc);
+    wctx->dbglog(gfx_msg_error, "wgpu_surface_create: no surface source for this platform");
+    return;
 #endif
-    // wgpuDeviceCreateSwapChain is outdated
-    //
-    // https://github.com/gfx-rs/wgpu-native/blob/trunk/examples/triangle/main.c
-    // wgpuSurfaceConfigure(surface, &config);
-    // WGPUSurfaceTexture surface_texture;
-    // loop
-    //      wgpuSurfaceGetCurrentTexture(surface, &surface_texture);
-    //      WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
-    //
 
-    WGPUSurface surface = wgpuInstanceCreateSurface(wctx->instance, &surface_descriptor);
-
-    WGPUSurfaceCapabilities capabilities = { 0 };
-    wgpuSurfaceGetCapabilities(surface, wctx->adapter, &capabilities);
-    desc.format = capabilities.formats ? capabilities.formats[0] : wgpuSurfaceGetPreferredFormat(surface, wctx->adapter);
-    desc.format = capabilities.formats ? capabilities.formats[0] : wgpuSurfaceGetPreferredFormat(surface, wctx->adapter);
-
-
-    WGPUSwapChain swapchain = wgpuDeviceCreateSwapChain(wctx->device, surface, &desc);
-
-    GFX_VERBOSE(wctx->dbglog(gfx_msg_info, "    (%d   %d   %d)",
-                      desc.width, desc.height, desc.format));
-
-    wctx->surface_format = desc.format;
-    wgpu_render_target_t* target = (wgpu_render_target_t*)calloc(1, sizeof(wgpu_render_target_t));
-    wgpu_swapchain_t * chain = (wgpu_swapchain_t*)calloc(1, sizeof(wgpu_swapchain_t));
-    if(chain != nullptr) {
-        chain->window_handle    = handle;
-        chain->format           = desc.format;
-        chain->surface          = surface;
-        chain->swapchain        = swapchain;
-        chain->target           = target;
-
-        chain->config.device        = wctx->device;
-        chain->config.usage         = WGPUTextureUsage_RenderAttachment;
-        chain->config.format        = desc.format;
-        chain->config.presentMode   = WGPUPresentMode_Fifo;
-        chain->config.alphaMode     = capabilities.alphaModes[0];
-        chain->config.width         = desc.width;
-        chain->config.height        = desc.height;
-    }
-
-    wgpu_texture_t* depth_texture = (wgpu_texture_t*)calloc(1, sizeof(wgpu_texture_t));
-    if(depth_texture == nullptr)
+    WGPUSurface surface = wgpuInstanceCreateSurface(wctx->instance, &surface_desc);
+    if (!surface) {
+        wctx->dbglog(gfx_msg_error, "wgpu_surface_create: wgpuInstanceCreateSurface failed");
         return;
+    }
 
-    uint32_t sample_count = 1;
-    WGPUTextureFormat depth_format = WGPUTextureFormat_Depth24PlusStencil8;
+    uint64_t handle = 0;
+    wgpu_surface_t* s = (wgpu_surface_t*)gfx_handle_pool_allocate_data(wctx->surface_pool, &handle);
+    if (!s) {
+        wgpuSurfaceRelease(surface);
+        return;
+    }
+    memset(s, 0, sizeof(*s));
+    s->handle        = { handle };
+    s->ctx           = wctx;
+    s->window_handle = desc->window_handle;
+    s->surface       = surface;
+    s->vsync         = desc->vsync;
 
-    WGPUTextureDescriptor depth_texture_desc = { };
-        depth_texture_desc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-        depth_texture_desc.format = depth_format;
-        depth_texture_desc.dimension = WGPUTextureDimension_2D;
-        depth_texture_desc.mipLevelCount = 1;
-        depth_texture_desc.sampleCount = sample_count;
-        depth_texture_desc.size = { desc.width, desc.height, 1};
-        depth_texture->texture = wgpuDeviceCreateTexture(wctx->device, &depth_texture_desc);
+    // WebGPU core has 1x and 4x MSAA only
+    const uint32_t wanted_samples = desc->sample_count ? (uint32_t)desc->sample_count : 1u;
+    s->sample_count = wanted_samples >= 4 ? 4u : 1u;
+    if (s->sample_count != wanted_samples)
+        wctx->dbglog(gfx_msg_warning, "wgpu_surface_create: %ux MSAA is not available in WebGPU, using %ux", wanted_samples, s->sample_count);
 
-    WGPUTextureViewDescriptor depth_view_desc = { };
-        depth_view_desc.format = depth_texture_desc.format;
-        depth_view_desc.dimension = WGPUTextureViewDimension_2D;
-        depth_view_desc.baseMipLevel = 0;
-        depth_view_desc.mipLevelCount = 1;
-        depth_view_desc.baseArrayLayer = 0;
-        depth_view_desc.arrayLayerCount = 1;
-        depth_view_desc.aspect = WGPUTextureAspect_All;
-    depth_texture->texture_view = wgpuTextureCreateView(depth_texture->texture, &depth_view_desc);
+    WGPUSurfaceCapabilities caps = {};
+    wgpuSurfaceGetCapabilities(surface, wctx->adapter, &caps);
 
-    if(chain != nullptr && chain->target != nullptr)
-        chain->target->depth_stencil_atachment = depth_texture;
+    // an 8-bit UNORM format the surface has; sRGB requests get the sRGB view of it (encoding done by the hardware)
+    WGPUTextureFormat format = caps.formatCount ? caps.formats[0] : WGPUTextureFormat_BGRA8Unorm;
+    for (size_t i = 0; i < caps.formatCount; ++i)
+        if (caps.formats[i] == WGPUTextureFormat_BGRA8Unorm || caps.formats[i] == WGPUTextureFormat_RGBA8Unorm) { format = caps.formats[i]; break; }
+    const bool srgb = gfx_pixel_format_is_srgb(desc->preferred_format ? desc->preferred_format : gfx_pixel_format_rgba8);
+    s->view_format = srgb ? wgpu_format_srgb(format) : format;
 
-    if(chain != nullptr)
-        *out_swapchain = &chain->handle;
+    WGPUCompositeAlphaMode alpha = caps.alphaModeCount ? caps.alphaModes[0] : WGPUCompositeAlphaMode_Auto;
+    for (size_t i = 0; i < caps.alphaModeCount; ++i)
+        if (caps.alphaModes[i] == WGPUCompositeAlphaMode_Opaque) { alpha = WGPUCompositeAlphaMode_Opaque; break; }
+
+    s->present_mode_count = (uint32_t)gfx_min(caps.presentModeCount, (size_t)8);
+    for (uint32_t i = 0; i < s->present_mode_count; ++i) s->present_modes[i] = caps.presentModes[i];
+    wgpuSurfaceCapabilitiesFreeMembers(caps);
+
+    s->config.device          = wctx->device;
+    s->config.format          = format;
+    s->config.usage           = WGPUTextureUsage_RenderAttachment;
+    s->config.alphaMode       = alpha;
+    s->config.viewFormatCount = s->view_format != format ? 1 : 0;
+    s->config.viewFormats     = &s->view_format;
+
+    // pipelines are built for the last created surface (as the Vulkan backend's default render pass)
+    wctx->surface_format = s->view_format;
+    wctx->sample_count   = s->sample_count;
+
+    uint32_t w = 0, h = 0;
+    get_window_size(s->window_handle, &w, &h);
+    if (w && h) wgpu_surface_configure(s, w, h);
+    else        s->needs_configure = true;
+
+    GFX_VERBOSE(wctx->dbglog(gfx_msg_info, "wgpu_surface_create %ux%u format %d (view %d) %ux", w, h, (int)format, (int)s->view_format, s->sample_count));
+    *out_surface = &s->handle;
 }
 
-
-int32_t wgpu_acquire_img(gfx_context_t* ctx, gfx_swapchain_t* in_swapchain, gfx_render_target_t** target)
+void wgpu_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface)
 {
-    wgpu_context_t* wgpu_context = from_ctx(ctx);
-    wgpu_swapchain_t* wgpu_swapchain = (wgpu_swapchain_t*)in_swapchain;
-
-    WGPUSwapChain swapchain = wgpu_swapchain->swapchain;
-    wgpu_swapchain->backbuffer_view = wgpuSwapChainGetCurrentTextureView(swapchain);
-    wgpu_swapchain->target->view = wgpu_swapchain->backbuffer_view;
-    *target = &wgpu_swapchain->target->handle;
-    return 0;
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wgpu_surface_t* s = wgpu_map_surface(wctx, surface);
+    if (!s) return;
+    wgpu_surface_release_targets(s);
+    if (s->surface) {
+        wgpuSurfaceUnconfigure(s->surface);
+        wgpuSurfaceRelease(s->surface);
+    }
+    gfx_handle_pool_free(wctx->surface_pool, surface->idx);
 }
 
-
-void wgpu_present_img(gfx_context_t* ctx, gfx_swapchain_t* swapchain, uint32_t idx)
+gfx_result wgpu_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t* surface, bool vsync)
 {
-    wgpu_context_t* wgpu_context = from_ctx(ctx);
-    wgpu_swapchain_t* wgpu_swapchain = (wgpu_swapchain_t*)swapchain;
+    wgpu_surface_t* s = wgpu_map_surface(from_ctx(ctx), surface);
+    if (!s) return gfx_error_invalid_handle;
+    if (s->vsync != vsync) {
+        s->vsync = vsync;
+        s->needs_configure = true;      // applied by the next frame_begin
+    }
+    return gfx_ok;
+}
 
-    wgpuSwapChainPresent(wgpu_swapchain->swapchain);
-    wgpuTextureViewRelease(wgpu_swapchain->backbuffer_view);
+void wgpu_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    *out_frame = nullptr;
+    wgpu_surface_t* s = wgpu_map_surface(wctx, surface);
+    if (!s) return;
 
-    int width = 0;
-    int height = 0;
-    get_window_size(wgpu_swapchain->window_handle, &width, &height);
-    if (wgpu_swapchain->config.width != width || wgpu_swapchain->config.height != height) {
-        wgpu_swapchain->config.width = width;
-        wgpu_swapchain->config.height = height;
-        wgpuSurfaceConfigure(wgpu_swapchain->surface, &wgpu_swapchain->config);
+    uint32_t w = 0, h = 0;
+    get_window_size(s->window_handle, &w, &h);
+    if (w == 0 || h == 0)
+        return;                         // minimized
+    if (s->needs_configure || w != s->config.width || h != s->config.height)
+        wgpu_surface_configure(s, w, h);
+
+    WGPUSurfaceTexture st = {};
+    wgpuSurfaceGetCurrentTexture(s->surface, &st);
+    switch (st.status) {
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal:
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal:
+            s->needs_configure = true;  // usable now, rebuilt next frame
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+        case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+        case WGPUSurfaceGetCurrentTextureStatus_Lost:
+            if (st.texture) wgpuTextureRelease(st.texture);
+            s->needs_configure = true;
+            return;
+        default:
+            if (st.texture) wgpuTextureRelease(st.texture);
+            wctx->dbglog(gfx_msg_error, "wgpu_frame_begin: wgpuSurfaceGetCurrentTexture failed (%d)", (int)st.status);
+            return;
+    }
+
+    WGPUTextureViewDescriptor vd = {};
+        vd.format          = s->view_format;
+        vd.dimension       = WGPUTextureViewDimension_2D;
+        vd.mipLevelCount   = 1;
+        vd.arrayLayerCount = 1;
+        vd.aspect          = WGPUTextureAspect_All;
+    WGPUTextureView view = wgpuTextureCreateView(st.texture, &vd);
+
+    if (!wctx->frame)
+        wctx->frame = (wgpu_frame_t*)calloc(1, sizeof(wgpu_frame_t));
+    wgpu_frame_t* f = wctx->frame;
+    const uint32_t frame_index = f->public_frame.frame_index;
+    memset(f, 0, sizeof(*f));
+
+    f->surface          = s;
+    f->back_buffer      = st.texture;
+    f->back_buffer_view = view;
+
+    f->target.color   = s->sample_count > 1 ? s->msaa_color_view : view;
+    f->target.resolve = s->sample_count > 1 ? view : nullptr;
+    f->target.depth   = s->depth_view;
+    f->target.width   = w;
+    f->target.height  = h;
+
+    f->color_view.texture      = st.texture;
+    f->color_view.texture_view = view;
+    f->color_view.format       = s->view_format;
+    f->color_view.width        = w;
+    f->color_view.height       = h;
+    f->color_view.sample_count = 1;
+    f->color_view.external     = true;
+
+    f->depth_view.texture      = s->depth;
+    f->depth_view.texture_view = s->depth_view;
+    f->depth_view.format       = wctx->depth_format;
+    f->depth_view.width        = w;
+    f->depth_view.height       = h;
+    f->depth_view.sample_count = s->sample_count;
+    f->depth_view.external     = true;
+
+    f->cmd.ctx            = wctx;
+    f->cmd.default_target = &f->target;
+    WGPUCommandEncoderDescriptor ed = {};
+        ed.label = wgpu_str("frame");
+    f->cmd.encoder = wgpuDeviceCreateCommandEncoder(wctx->device, &ed);
+
+    f->public_frame.ctx                   = ctx;
+    f->public_frame.frame_index           = frame_index + 1;
+    f->public_frame.swapchain_image_index = 0;
+    f->public_frame.surface               = surface;
+    f->public_frame.target                = &f->target.handle;
+    f->public_frame.color_attachment      = &f->color_view.handle;
+    f->public_frame.depth_attachment      = &f->depth_view.handle;
+    f->public_frame.cmd                   = &f->cmd.handle;
+
+    *out_frame = &f->public_frame;
+}
+
+// UBO slices written by the CPU this frame -> GPU, before the frame's commands are submitted
+static void wgpu_flush_uniforms(wgpu_context_t* wctx)
+{
+    for (wgpu_descriptor_set_pool_t* pool = wctx->pools; pool; pool = pool->ctx_next) {
+        if (!pool->dirty || !pool->ubo_buffer) continue;
+        wgpu_buffer_t* buffer = (wgpu_buffer_t*)pool->ubo_buffer;
+        wgpuQueueWriteBuffer(wctx->queue, buffer->buffer, 0, pool->ubo_buffer_data_ptr, pool->ubo_buffer_data_size);
+        pool->dirty = false;
     }
 }
 
-// --- BUFFER ---
+void wgpu_frame_end(gfx_frame_t* frame)
+{
+    if (!frame) return;
+    wgpu_frame_t* f = (wgpu_frame_t*)frame;
+    wgpu_context_t* wctx = f->cmd.ctx;
+
+    if (f->cmd.pass)         { wgpuRenderPassEncoderEnd(f->cmd.pass);   wgpuRenderPassEncoderRelease(f->cmd.pass);   f->cmd.pass = nullptr; }
+    if (f->cmd.compute_pass) { wgpuComputePassEncoderEnd(f->cmd.compute_pass); wgpuComputePassEncoderRelease(f->cmd.compute_pass); f->cmd.compute_pass = nullptr; }
+
+    wgpu_flush_uniforms(wctx);
+
+    if (f->cmd.encoder) {
+        WGPUCommandBuffer commands = wgpuCommandEncoderFinish(f->cmd.encoder, nullptr);
+        wgpuQueueSubmit(wctx->queue, 1, &commands);
+        wgpuCommandBufferRelease(commands);
+        wgpuCommandEncoderRelease(f->cmd.encoder);
+        f->cmd.encoder = nullptr;
+    }
+
+#ifndef __EMSCRIPTEN__
+    wgpuSurfacePresent(f->surface->surface);    // the browser presents on its own when the frame callback returns
+#endif
+
+    if (f->back_buffer_view) wgpuTextureViewRelease(f->back_buffer_view);
+    if (f->back_buffer)      wgpuTextureRelease(f->back_buffer);
+    f->back_buffer_view = nullptr;
+    f->back_buffer = nullptr;
+
+    wgpuInstanceProcessEvents(wctx->instance);
+}
+
+// ============================================================================
+// BUFFER
+// ============================================================================
 
 void wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
 {
-    wgpu_context_t* wgpu_ctx = from_ctx(ctx);
+    wgpu_context_t* wctx = from_ctx(ctx);
+    *out_buffer = nullptr;
 
-    GFX_VERBOSE(wgpu_ctx->dbglog(gfx_msg_info, "wgpu_create_buffer(%s, %d, %p,)",
-        gfx_to_string(desc->usage), desc->size, desc->size));
-
-    uint32_t size = gfx_utils_align_up(desc->size, 4);
-
-    void* data_ptr = nullptr;
-    bool mapped = desc->data != nullptr && desc->size > 0;
-
-    if (desc->memory_hint == gfx_memory_cpu_to_gpu || desc->memory_hint == gfx_memory_gpu_to_cpu /*|| desc->usage == gfx_buffer_usage_uniform*/)
-        mapped = true;
+    const uint32_t size = gfx_utils_align_up(gfx_max(desc->size, 4u), 4);
 
     WGPUBufferUsage usage = WGPUBufferUsage_None;
     switch(desc->usage) {
-        case gfx_buffer_usage_staging:   usage = WGPUBufferUsage_MapWrite   | WGPUBufferUsage_CopySrc; break;
-        case gfx_buffer_usage_index:     usage = WGPUBufferUsage_Index      | WGPUBufferUsage_CopyDst; break;
-        case gfx_buffer_usage_vertex:    usage = WGPUBufferUsage_Vertex     | WGPUBufferUsage_CopyDst; break;
-        case gfx_buffer_usage_uniform:   usage = WGPUBufferUsage_Uniform    | WGPUBufferUsage_CopyDst; break;
-        case gfx_buffer_usage_storage:   usage = WGPUBufferUsage_Storage    | WGPUBufferUsage_CopyDst; break;
-        case gfx_buffer_usage_indirect:  usage = WGPUBufferUsage_Indirect   | WGPUBufferUsage_CopyDst; break;
-    };
-
-    WGPUBufferDescriptor buffer_desc = {};
-        buffer_desc.label   = gfx_to_string(desc->usage);//"user vertex buffer";
-        buffer_desc.usage   = usage;
-        buffer_desc.size    = size;
-        buffer_desc.mappedAtCreation = mapped;
-    WGPUBuffer buffer = wgpuDeviceCreateBuffer(wgpu_ctx->device, &buffer_desc);
-
-    uint64_t handle = 0;
-    auto wgpu_buffer = (wgpu_buffer_t*)gfx_handle_pool_allocate_data(wgpu_ctx->buffer_pool, &handle);
-    if (wgpu_buffer != nullptr) {
-        wgpu_buffer->handle = { handle };
-        wgpu_buffer->buffer = buffer;
-        wgpu_buffer->usage = gfx_usage_2_wgpu(desc->usage);
-        wgpu_buffer->data_ptr = data_ptr;
-        wgpu_buffer->size = size;
-        *out_buffer = &wgpu_buffer->handle;
+        case gfx_buffer_usage_staging:   usage = WGPUBufferUsage_MapWrite | WGPUBufferUsage_CopySrc; break;
+        case gfx_buffer_usage_index:     usage = WGPUBufferUsage_Index    | WGPUBufferUsage_CopyDst; break;
+        case gfx_buffer_usage_vertex:    usage = WGPUBufferUsage_Vertex   | WGPUBufferUsage_CopyDst; break;
+        case gfx_buffer_usage_uniform:   usage = WGPUBufferUsage_Uniform  | WGPUBufferUsage_CopyDst; break;
+        case gfx_buffer_usage_storage:   usage = WGPUBufferUsage_Storage  | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc; break;
+        case gfx_buffer_usage_indirect:  usage = WGPUBufferUsage_Indirect | WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst; break;
+        default:                         usage = WGPUBufferUsage_CopyDst; break;
     }
 
-    if (wgpu_buffer != nullptr && (desc->data != nullptr && desc->size > 0))
-        wgpu_update_buffer_data(ctx, &wgpu_buffer->handle, desc->data, desc->size, 0);
+    WGPUBufferDescriptor buffer_desc = {};
+        buffer_desc.label = wgpu_str(desc->label ? desc->label : gfx_to_string(desc->usage));
+        buffer_desc.usage = usage;
+        buffer_desc.size  = size;
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(wctx->device, &buffer_desc);
+    if (!buffer) return;
+
+    uint64_t handle = 0;
+    wgpu_buffer_t* wbuffer = (wgpu_buffer_t*)gfx_handle_pool_allocate_data(wctx->buffer_pool, &handle);
+    if (!wbuffer) {
+        wgpuBufferRelease(buffer);
+        return;
+    }
+    wbuffer->handle = { handle };
+    wbuffer->buffer = buffer;
+    wbuffer->size   = size;
+    *out_buffer = &wbuffer->handle;
+
+    if (desc->data != nullptr && desc->size > 0 && desc->usage != gfx_buffer_usage_staging)
+        wgpu_update_buffer_data(ctx, &wbuffer->handle, desc->data, desc->size, 0);
 }
 
-
+// contract: works for any buffer, data only has to live during the call (wgpuQueueWriteBuffer copies it)
 void wgpu_update_buffer_data(gfx_context_t* ctx, gfx_buffer_t* dst_buffer, void* data, uint32_t size, uint32_t offset)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
+    wgpu_buffer_t* dst = dst_buffer ? (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, dst_buffer->idx) : nullptr;
+    if (!dst || !data || size == 0) return;
 
-    auto dst_buff = (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, dst_buffer->idx);
-    auto src_buff = (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, wctx->staging_buffer->idx);
-
-    auto asize = gfx_utils_align_up(size, 4);
-
-    wgpuQueueWriteBuffer(wctx->queue, dst_buff->buffer, offset, data, asize);
+    if (offset >= dst->size) return;
+    size = gfx_min(size, dst->size - offset);
+    if ((size & 3) == 0) {
+        wgpuQueueWriteBuffer(wctx->queue, dst->buffer, offset, data, size);
+        return;
+    }
+    // WebGPU wants a multiple of 4: copy through a padded temporary (the tail bytes keep their value only up to the padding)
+    const uint32_t padded = gfx_min(gfx_utils_align_up(size, 4), dst->size - offset);
+    uint8_t* tmp = (uint8_t*)calloc(1, padded);
+    if (!tmp) return;
+    memcpy(tmp, data, size);
+    wgpuQueueWriteBuffer(wctx->queue, dst->buffer, offset, tmp, padded);
+    free(tmp);
 }
 
 void wgpu_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer)
 {
-    wgpu_buffer_t* wgpu_buffer = (wgpu_buffer_t*)buffer;
-    wgpuBufferRelease(wgpu_buffer->buffer);
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wgpu_buffer_t* wbuffer = buffer ? (wgpu_buffer_t*)gfx_handle_pool_map(wctx->buffer_pool, buffer->idx) : nullptr;
+    if (!wbuffer) return;
+    if (wbuffer->buffer) wgpuBufferRelease(wbuffer->buffer);
+    gfx_handle_pool_free(wctx->buffer_pool, buffer->idx);
 }
 
-// --- SHADER ---
+// ============================================================================
+// SHADER
+// ============================================================================
 
+// desc->uniforms come from the shader package reflection (Slang layout + per stage usage): one bind group layout entry
+// per uniform, in the same order, so uniforms[i] <-> bindings[i] (the descriptor set code relies on it).
 void wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader)
 {
-    wgpu_context_t* wgpu_ctx = from_ctx(ctx);
+    wgpu_context_t* wctx = from_ctx(ctx);
+    *out_shader = nullptr;
+    const char* label = desc->label ? desc->label : "";
 
-    GFX_VERBOSE(wgpu_ctx->dbglog(gfx_msg_info, "wgpu_create_shader : %s", desc->label ? desc->label : ""));
-
-    for (uint32_t i = 0; i < desc->stage_count; ++i)
-    {
-        if (desc->stages[i].data != nullptr && desc->stages[i].size > 0) {
-            GFX_VERBOSE( wgpu_ctx->dbglog(gfx_msg_info, "    %s", gfx_to_string((gfx_shader_stage)i)) );
-        }
-    }
-
-    wgpu_shader_t* wgpu_shader = (wgpu_shader_t*)calloc(1, sizeof(wgpu_shader_t));
-    if(wgpu_shader == nullptr) {
-        wgpu_ctx->dbglog(gfx_msg_error, "failed allocating wgpu_shader_t");
+    if (desc->uniform_count > WGPU_MAX_BINDINGS) {
+        wctx->dbglog(gfx_msg_error, "wgpu_create_shader %s: %u uniforms, the backend supports %u per shader", label, desc->uniform_count, WGPU_MAX_BINDINGS);
         return;
     }
 
-    *out_shader = &wgpu_shader->handle;
-    wgpu_shader->context = wgpu_ctx;
-    wgpu_shader->hash = 0;
+    wgpu_shader_t* shader = (wgpu_shader_t*)calloc(1, sizeof(wgpu_shader_t));
+    if (!shader) return;
+    shader->context = wctx;
 
-    uint32_t ubo_size = 0;
-    uint32_t uniform_count = 0;
-    uint32_t wgsl_info_count = 0;
-    WGPUBindGroupLayoutEntry* layout_entries = wgpu_shader->bindings;
-
-    for (size_t stageIdx = 0; stageIdx < desc->stage_count; ++stageIdx)
+    // --- modules: WGSL keeps all entry points in one text, stages pointing to the same data share one module
+    for (uint32_t i = 0; i < desc->stage_count; ++i)
     {
-        if (desc->stages[stageIdx].data == nullptr || desc->stages[stageIdx].size == 0)
+        const gfx_shader_stage_data* st = &desc->stages[i];
+        if (st->data == nullptr || st->size == 0)
             continue;
+        if ((uint32_t)st->stage >= 3) {
+            wctx->dbglog(gfx_msg_error, "wgpu_create_shader %s: stage %u is not supported", label, (uint32_t)st->stage);
+            continue;
+        }
 
-        uint32_t stage_hash = gfx_utils_hash((char*)desc->stages[stageIdx].data, desc->stages[stageIdx].size, wgpu_shader->hash);
+        WGPUShaderModule module = nullptr;
+        for (uint32_t j = 0; j < i && !module; ++j)
+            if (desc->stages[j].data == st->data && (uint32_t)desc->stages[j].stage < 3)
+                module = shader->modules[desc->stages[j].stage];
 
-        gfx_shader_stage stage = desc->stages[stageIdx].stage;
-        bool is_spirv = *(uint32_t*)desc->stages[stageIdx].data == 0x07230203;
+        if (!module) {
+            const bool is_spirv = st->size >= 4 && *(const uint32_t*)st->data == 0x07230203;
 
-        wgpu_shader->flags = wgpu_shader->flags | 1 << stage;
+            WGPUShaderSourceWGSL wgsl = {};
+                wgsl.chain.sType = WGPUSType_ShaderSourceWGSL;
+                wgsl.code        = { (const char*)st->data, strnlen((const char*)st->data, st->size) };
+            WGPUShaderSourceSPIRV spirv = {};
+                spirv.chain.sType = WGPUSType_ShaderSourceSPIRV;
+                spirv.codeSize    = st->size / 4;
+                spirv.code        = (const uint32_t*)st->data;
 
-        WGPUShaderModuleWGSLDescriptor wgsl_desc = { nullptr , WGPUSType_ShaderModuleWGSLDescriptor };
-        wgsl_desc.code = (const char*)desc->stages[stageIdx].data;
+            WGPUShaderModuleDescriptor module_desc = {};
+                module_desc.label       = wgpu_str(desc->label);
+                module_desc.nextInChain = is_spirv ? &spirv.chain : &wgsl.chain;
+            module = wgpuDeviceCreateShaderModule(wctx->device, &module_desc);
+        }
 
-        WGPUShaderModuleSPIRVDescriptor spirv_desc = {nullptr, WGPUSType_ShaderModuleSPIRVDescriptor};
-        spirv_desc.code = (uint32_t*)desc->stages[stageIdx].data;
-        spirv_desc.codeSize = desc->stages[stageIdx].size / 4;
+        shader->modules[st->stage] = module;
+        strncpy(shader->entry_names[st->stage], (st->entry && st->entry[0]) ? st->entry : "main", sizeof(shader->entry_names[0]) - 1);
+        shader->flags |= 1u << st->stage;
+    }
 
-        WGPUShaderModuleDescriptor descriptor = {};
-        descriptor.nextInChain = is_spirv ? reinterpret_cast<WGPUChainedStruct*>(&spirv_desc):
-                                            reinterpret_cast<WGPUChainedStruct*>(&wgsl_desc);
-
-        WGPUShaderModule module = wgpuDeviceCreateShaderModule(wgpu_ctx->device, &descriptor);
-/*
-#ifndef EMSCRIPTEN
-        wgpuShaderModuleGetCompilationInfo(module, shader_compilation_cb, wgpu_ctx);
-#endif*/
-
-        gfx_uniform_t* uniforms = &wgpu_shader->uniforms[wgsl_info_count];
-        const char* entry = nullptr;
-        uniform_count = get_shader_uniforms((uint32_t*)desc->stages[stageIdx].data,
-                                            desc->stages[stageIdx].size, uniforms, &entry);
+    // --- bind group layout from the reflection
+    uint32_t count = 0;
+    for (uint32_t u = 0; u < desc->uniform_count; ++u)
+    {
+        const gfx_uniform_t* uniform = &desc->uniforms[u];
+        if (uniform->group != 0)
+            wctx->dbglog(gfx_msg_warning, "wgpu_create_shader %s: '%s' is in group %u, only group 0 is bound", label, uniform->name, uniform->group);
 
         WGPUShaderStage visibility = WGPUShaderStage_None;
-        switch(stage)
+        if (uniform->stage_mask & (1u << gfx_shader_vertex))   visibility |= WGPUShaderStage_Vertex;
+        if (uniform->stage_mask & (1u << gfx_shader_fragment)) visibility |= WGPUShaderStage_Fragment;
+        if (uniform->stage_mask & (1u << gfx_shader_compute))  visibility |= WGPUShaderStage_Compute;
+
+        WGPUBindGroupLayoutEntry* e = &shader->bindings[count];
+        memset(e, 0, sizeof(*e));
+        e->binding    = uniform->binding;
+        e->visibility = visibility;
+
+        // sampleType Float covers every filterable format; 32-bit float textures are filterable with float32-filterable
+        switch (uniform->type)
         {
-            case gfx_shader_vertex:
-                visibility = WGPUShaderStage_Vertex;
-                wgpu_shader->vertex.module = module;
-                wgpu_shader->vertex.entryPoint = entry ? entry: "main";
+            case gfx_uniform_ubo:
+                e->buffer.type = WGPUBufferBindingType_Uniform;
                 break;
-
-            case gfx_shader_fragment:
-                visibility = WGPUShaderStage_Fragment;
-                wgpu_shader->fragment.module = module;
-                wgpu_shader->fragment.entryPoint = entry ? entry : "main";
+            case gfx_uniform_storage_buffer:
+                e->buffer.type = uniform->storage.access == gfx_access_read ? WGPUBufferBindingType_ReadOnlyStorage : WGPUBufferBindingType_Storage;
                 break;
-
-            case gfx_shader_compute:
-                visibility = WGPUShaderStage_Compute;
-                wgpu_shader->compute.module = module;
-                wgpu_shader->compute.entryPoint = entry ? entry : "main";
+            case gfx_uniform_sampler:
+                e->sampler.type = WGPUSamplerBindingType_Filtering;
                 break;
-
+            case gfx_uniform_texture2d:
+                e->texture.viewDimension = WGPUTextureViewDimension_2D;
+                e->texture.sampleType    = WGPUTextureSampleType_Float;
+                break;
+            case gfx_uniform_texture2d_array:
+                e->texture.viewDimension = WGPUTextureViewDimension_2DArray;
+                e->texture.sampleType    = WGPUTextureSampleType_Float;
+                break;
+            case gfx_uniform_texture3d:
+                e->texture.viewDimension = WGPUTextureViewDimension_3D;
+                e->texture.sampleType    = WGPUTextureSampleType_Float;
+                break;
+            case gfx_uniform_texture2d_cube:
+                e->texture.viewDimension = WGPUTextureViewDimension_Cube;
+                e->texture.sampleType    = WGPUTextureSampleType_Float;
+                break;
             default:
-                assert(false);
-                break;
+                wctx->dbglog(gfx_msg_error, "wgpu_create_shader %s: '%s' uniform type %d is not supported by the webgpu backend", label, uniform->name, uniform->type);
+                continue;
         }
+        shader->uniforms[count] = *uniform;
+        count++;
+    }
+    shader->binding_count = count;
+    shader->uniform_count = count;
 
-        for (uint32_t u = 0; u < uniform_count; ++u)
-        {
-            if(uniforms[u].type == gfx_uniform_ubo)
-                ubo_size += uniforms[u].buffer.size;
-            layout_entries[wgsl_info_count].binding = uniforms[u].binding;
-            layout_entries[wgsl_info_count].visibility = visibility;
-
-            switch (uniforms[u].type)
-            {
-                case gfx_uniform_storage_buffer:
-                    layout_entries[wgsl_info_count].buffer.type = WGPUBufferBindingType_Storage;
-                    break;
-
-                case gfx_uniform_ubo:
-                    layout_entries[wgsl_info_count].buffer.type = WGPUBufferBindingType_Uniform;
-                    break;
-
-                case gfx_uniform_sampler:
-                    layout_entries[wgsl_info_count].sampler.type = WGPUSamplerBindingType_Filtering;
-                    break;
-
-                case gfx_uniform_texture2d:
-                    layout_entries[wgsl_info_count].texture.viewDimension = WGPUTextureViewDimension_2D;
-                    layout_entries[wgsl_info_count].texture.sampleType    = WGPUTextureSampleType_Float;
-                    break;
-
-                case gfx_uniform_texture3d:
-                    layout_entries[wgsl_info_count].texture.viewDimension = WGPUTextureViewDimension_3D;
-                    layout_entries[wgsl_info_count].texture.sampleType    = WGPUTextureSampleType_Float;
-                    break;
-
-                case gfx_uniform_texture2d_array:
-                    layout_entries[wgsl_info_count].texture.viewDimension = WGPUTextureViewDimension_2DArray;
-                    layout_entries[wgsl_info_count].texture.sampleType    = WGPUTextureSampleType_Float;
-                    break;
-
-                case gfx_uniform_texture2d_cube:
-                    layout_entries[wgsl_info_count].texture.viewDimension = WGPUTextureViewDimension_Cube;
-                    layout_entries[wgsl_info_count].texture.sampleType    = WGPUTextureSampleType_Float;
-                    break;
-
-                default: assert(false); break;
-             }
-            wgsl_info_count++;
-        }
-    } // for (size_t stageIdx = 0; stageIdx < gfx_shader_count; ++stageIdx)
-    wgpu_shader->binding_count = wgsl_info_count;
-    wgpu_shader->uniform_count = wgsl_info_count;
-
-    WGPUBindGroupLayoutDescriptor layout_descriptor = {};
-    layout_descriptor.entryCount = wgsl_info_count;
-    layout_descriptor.entries = layout_entries;
-    wgpu_shader->layout = wgpuDeviceCreateBindGroupLayout(wgpu_ctx->device, &layout_descriptor);
+    WGPUBindGroupLayoutDescriptor layout_desc = {};
+        layout_desc.label      = wgpu_str(desc->label);
+        layout_desc.entryCount = count;
+        layout_desc.entries    = shader->bindings;
+    shader->layout = wgpuDeviceCreateBindGroupLayout(wctx->device, &layout_desc);
 
     WGPUPipelineLayoutDescriptor pipeline_layout_desc = {};
-    pipeline_layout_desc.bindGroupLayoutCount = 1;
-    pipeline_layout_desc.bindGroupLayouts = &wgpu_shader->layout;
-    wgpu_shader->pipeline_layout = wgpuDeviceCreatePipelineLayout(wgpu_ctx->device, &pipeline_layout_desc);
+        pipeline_layout_desc.label                = wgpu_str(desc->label);
+        pipeline_layout_desc.bindGroupLayoutCount = 1;
+        pipeline_layout_desc.bindGroupLayouts     = &shader->layout;
+    shader->pipeline_layout = wgpuDeviceCreatePipelineLayout(wctx->device, &pipeline_layout_desc);
 
-    /*
-    uint32_t descriptor_count = 64;
-    uint32_t buffer_size = descriptor_count * ubo_size;
-
-    gfx_buffer_desc_t buffer_desc = {};
-        buffer_desc.usage = gfx_buffer_usage_uniform;
-        buffer_desc.memory_hint = gfx_memory_cpu_to_gpu;
-        buffer_desc.size = buffer_size;  //
-    wgpu_create_buffer(ctx, &buffer_desc, &wgpu_shader->buffer);
-
-    gfx_pool_create(sizeof(wgpu_descriptor_set_t), descriptor_count, &wgpu_shader->descriptor_set_pool);*/
+    *out_shader = &shader->handle;
 }
 
+uint32_t wgpu_shader_get_descriptor_set_count(gfx_shader_t* shader)
+{
+    wgpu_shader_t* s = (wgpu_shader_t*)shader;
+    return (s && s->uniform_count) ? 1u : 0u;      // one bind group (group 0)
+}
+
+uint32_t wgpu_shader_get_uniforms(gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms)
+{
+    wgpu_shader_t* s = (wgpu_shader_t*)shader;
+    if (!s || set_index != 0) return 0;
+    if (uniforms) memcpy(uniforms, s->uniforms, s->uniform_count * sizeof(gfx_uniform_t));
+    return s->uniform_count;
+}
+
+// handle: u16 hash | u16 type | u16 uniform idx | u16 field idx (+1, so that a valid location is never 0)
 struct uniform_handle_t
 {
     static uint64_t create(uint16_t hash, uint16_t type, uint16_t idx, uint16_t field)
     {
         uniform_handle_t result = {};
-            result.hash = hash;
-            result.type = type;
-            result.idx = idx;
-            result.field = field;
+            result.hash  = hash;
+            result.type  = type;
+            result.idx   = idx;
+            result.field = (uint16_t)(field + 1);
         return result.handle;
     }
 
-    union
-    {
+    union {
         uint64_t handle;
-        struct
-        {
-            uint16_t hash;  // shader hash
-            uint16_t type;  // uniform type
-            uint16_t idx;   // uniform idx
-            uint16_t field; // field idx
+        struct {
+            uint16_t hash;
+            uint16_t type;
+            uint16_t idx;
+            uint16_t field;
         };
-   };
+    };
 };
 
-uint64_t wgpu_uniform_location(gfx_shader_t * shader, const char* name)
+uint64_t wgpu_uniform_location(gfx_shader_t* shader, const char* name)
 {
-    wgpu_shader_t* wgpu_shader = (wgpu_shader_t*)shader;
+    wgpu_shader_t* s = (wgpu_shader_t*)shader;
+    if (!s || !name) return 0;
 
-    if(wgpu_shader == nullptr || name == nullptr)
-        return 0;
-
-    for(uint32_t i = 0; i < wgpu_shader->uniform_count; ++i)
+    for (uint32_t i = 0; i < s->uniform_count; ++i)
     {
-        auto uniform = &wgpu_shader->uniforms[i];
-        if (strstr(uniform->name, name)) {
-            return uniform_handle_t::create(wgpu_shader->hash, 0, i, 0);
-        }
+        const gfx_uniform_t* uniform = &s->uniforms[i];
+        if (!strcmp(uniform->name, name))       // exact match: "u_mat" must not find "u_mat2"
+            return uniform_handle_t::create((uint16_t)s->hash, (uint16_t)uniform->type, (uint16_t)i, 0);
 
-        if(wgpu_shader->uniforms[i].type == gfx_uniform_ubo)
-        {
-            for (uint32_t j = 0; j < wgpu_shader->uniforms[i].buffer.field_count; ++j)
-            {
-                if (strstr(uniform->buffer.fields[j].name, name)) {
-                    return uniform_handle_t::create(wgpu_shader->hash, 0, i, j);
-                }
-            }
-        }
+        if (uniform->type == gfx_uniform_ubo)
+            for (uint32_t j = 0; j < uniform->buffer.field_count; ++j)
+                if (!strcmp(uniform->buffer.fields[j].name, name))
+                    return uniform_handle_t::create((uint16_t)s->hash, (uint16_t)uniform->type, (uint16_t)i, (uint16_t)j);
     }
-
     return 0;
 }
 
 void wgpu_destroy_shader(gfx_context_t* ctx, gfx_shader_t* shader)
 {
-    wgpu_shader_t* wgpu_shader = (wgpu_shader_t*)shader;
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wgpu_shader_t* s = (wgpu_shader_t*)shader;
+    if (!s) return;
 
-    if(wgpu_shader->fragment.module != nullptr)
-        wgpuShaderModuleRelease(wgpu_shader->fragment.module);
+    while (s->current_pool) {
+        wgpu_descriptor_set_pool_t* pool = s->current_pool;
+        s->current_pool = pool->next;
+        wgpu_release_pool(wctx, pool);
+    }
 
-    if (wgpu_shader->vertex.module != nullptr)
-        wgpuShaderModuleRelease(wgpu_shader->vertex.module);
+    // stages built from one WGSL text share a module: release each module once
+    for (int i = 0; i < 3; ++i) {
+        if (!s->modules[i]) continue;
+        bool seen = false;
+        for (int j = 0; j < i; ++j) seen = seen || s->modules[j] == s->modules[i];
+        if (!seen) wgpuShaderModuleRelease(s->modules[i]);
+    }
+    if (s->pipeline_layout) wgpuPipelineLayoutRelease(s->pipeline_layout);
+    if (s->layout)          wgpuBindGroupLayoutRelease(s->layout);
+    free(s);
 }
 
-// --- SAMPLER ---
+// ============================================================================
+// SAMPLER
+// ============================================================================
 
 void wgpu_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler)
 {
-    wgpu_context_t* wgpu_context = from_ctx(ctx);
+    wgpu_context_t* wctx = from_ctx(ctx);
+    *out_sampler = nullptr;
 
-    WGPUSamplerDescriptor  descriptor = {0};
-       // descriptor.label = desc-> "LUT BRDF texture sampler";
-        descriptor.addressModeU = gfx_address_mode_2_webgpu(desc->mode);
-        descriptor.addressModeV = gfx_address_mode_2_webgpu(desc->mode);
-        descriptor.addressModeW = gfx_address_mode_2_webgpu(desc->mode);
-        descriptor.minFilter = gfx_filter_2_webgpu(desc->minmag);
-        descriptor.magFilter = gfx_filter_2_webgpu(desc->minmag);
-        descriptor.mipmapFilter = gfx_mipmap_filter_2_webgpu(desc->mipmap);
-        descriptor.lodMinClamp = 0.0f;
-        descriptor.lodMaxClamp = 10.0f;
-        descriptor.maxAnisotropy = desc->anisotropy;
-    auto wgpu_sampler =  wgpuDeviceCreateSampler( wgpu_context->device, &descriptor);
+    WGPUSamplerDescriptor sd = {};
+        sd.addressModeU  = gfx_address_mode_2_webgpu(desc->mode);
+        sd.addressModeV  = gfx_address_mode_2_webgpu(desc->mode);
+        sd.addressModeW  = gfx_address_mode_2_webgpu(desc->mode);
+        sd.minFilter     = gfx_filter_2_webgpu(desc->minmag);
+        sd.magFilter     = gfx_filter_2_webgpu(desc->minmag);
+        sd.mipmapFilter  = gfx_mipmap_filter_2_webgpu(desc->mipmap);
+        sd.lodMinClamp   = 0.0f;
+        sd.lodMaxClamp   = 32.0f;
+        // anisotropy needs linear min/mag/mip filtering in WebGPU
+        sd.maxAnisotropy = (desc->minmag == gfx_filter_linear && desc->mipmap == gfx_filter_linear) ? (uint16_t)gfx_max(desc->anisotropy, 1u) : 1;
+    WGPUSampler sampler = wgpuDeviceCreateSampler(wctx->device, &sd);
 
-    wgpu_sampler_t * sampler = (wgpu_sampler_t*)calloc(1, sizeof(wgpu_sampler_t));
-    if(sampler != nullptr)
-    {
-        sampler->sampler = wgpu_sampler;
-        *out_sampler = &sampler->handle;
-    }
+    wgpu_sampler_t* s = (wgpu_sampler_t*)calloc(1, sizeof(wgpu_sampler_t));
+    if (!s) { wgpuSamplerRelease(sampler); return; }
+    s->sampler = sampler;
+    *out_sampler = &s->handle;
 }
-
 
 void wgpu_destroy_sampler(gfx_context_t* ctx, gfx_sampler_t* sampler)
 {
-    wgpu_sampler_t* wgpu_sampler = (wgpu_sampler_t*) sampler;
-    wgpuSamplerRelease(wgpu_sampler->sampler);
+    (void)ctx;
+    wgpu_sampler_t* s = (wgpu_sampler_t*)sampler;
+    if (!s) return;
+    if (s->sampler) wgpuSamplerRelease(s->sampler);
+    free(s);
 }
 
-// --- TEXTURE ---
+// ============================================================================
+// TEXTURE
+// ============================================================================
 
-void wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t * desc, gfx_texture_t** out_texture)
+// desc->data: per layer (cube face / array slice) the full mip chain, as the loaders produce it
+static void wgpu_write_texture_mips(wgpu_context_t* wctx, WGPUTexture texture, const gfx_texture_desc_t* desc, uint32_t layers, uint32_t mips)
 {
-    wgpu_context_t* wgpu_ctx = from_ctx(ctx);
+    const uint32_t block = gfx_pixel_format_block(desc->format);
+    const bool is_3d = desc->type == gfx_texture3d;
+    const uint8_t* src = (const uint8_t*)desc->data;
 
-    GFX_VERBOSE(wgpu_ctx->dbglog(gfx_msg_info, "wgpu_create_texture %s(%s %d, %d, %d, %s)",
-                                 desc->label ? desc->label : "",
-                                 gfx_to_string(desc->type),
-                                 desc->width, desc->height, desc->depth, gfx_to_string(desc->format)));
+    for (uint32_t layer = 0; layer < layers; ++layer) {
+        for (uint32_t level = 0; level < mips; ++level) {
+            const uint32_t w = gfx_max(1u, desc->width  >> level);
+            const uint32_t h = gfx_max(1u, desc->height >> level);
+            const uint32_t d = is_3d ? gfx_max(1u, desc->depth >> level) : 1u;
+            const uint32_t size = gfx_utils_image_layer_size(w, h, d, desc->format);
 
-    if(desc->format == gfx_pixel_format_bc6h || desc->format == gfx_pixel_format_bc7)
-        printf("");
-
-
-    WGPUTextureDescriptor texture_desc = {};
-        texture_desc.label = desc->label ? desc->label : "";
-        texture_desc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc | WGPUTextureUsage_TextureBinding;
-        texture_desc.dimension = WGPUTextureDimension_2D;
-        texture_desc.size = { desc->width, desc->height, desc->depth == 0 ? 1 : desc->depth };
-        texture_desc.format = gfx_pixel_format_2_webgpu(desc->format);
-        texture_desc.mipLevelCount = desc->mip_levels;
-        texture_desc.sampleCount = 1;
-    WGPUTexture texture = wgpuDeviceCreateTexture(wgpu_ctx->device, &texture_desc);
-
-    WGPUTextureViewDescriptor texture_view_desc = {};
-        texture_view_desc.label = desc->label ? desc->label : "";
-        texture_view_desc.format = gfx_pixel_format_2_webgpu(desc->format);
-        texture_view_desc.dimension = WGPUTextureViewDimension_2D;
-        texture_view_desc.baseMipLevel = 0;
-        texture_view_desc.mipLevelCount = desc->mip_levels;
-        texture_view_desc.baseArrayLayer = 0;
-        texture_view_desc.arrayLayerCount = 1;
-        texture_view_desc.aspect = WGPUTextureAspect_All;
-    WGPUTextureView texture_view = wgpuTextureCreateView(texture, &texture_view_desc);
-
-    #define webgpu_max(a, b)       ( a > b ? a : b )
-
-    ptrdiff_t offset = 0;
-    for (uint32_t face = 0; face < desc->depth; ++face) {
-        for (uint32_t level = 0; level < desc->mip_levels; ++level) {
-            uint32_t width  = webgpu_max(4, desc->width  >> level);
-            uint32_t height = webgpu_max(4, desc->height >> level);
-            uint32_t depth  = webgpu_max(1, desc->depth  >> level);
-
-            uint32_t size = gfx_utils_image_layer_size(width, height, depth, desc->format);
-            uint8_t* pixels = (uint8_t*)desc->data + offset;
-
-            WGPUImageCopyTexture image = {};
-            image.texture = texture;
-            image.mipLevel = level;
-            image.aspect = WGPUTextureAspect_All;
-
-            WGPUTextureDataLayout layout = {};
-            layout.rowsPerImage = height;
-            layout.bytesPerRow = gfx_utils_image_row_pitch(desc->format, width);
-
-            WGPUExtent3D copy_size = { (uint32_t)width, (uint32_t)height, 1 };
-            wgpuQueueWriteTexture(wgpu_ctx->queue, &image, pixels, size, &layout, &copy_size);
-
-            offset += size;
+            WGPUTexelCopyTextureInfo dst = {};
+                dst.texture  = texture;
+                dst.mipLevel = level;
+                dst.origin   = { 0, 0, is_3d ? 0 : layer };
+                dst.aspect   = WGPUTextureAspect_All;
+            WGPUTexelCopyBufferLayout layout = {};
+                layout.bytesPerRow  = gfx_utils_image_row_pitch(desc->format, w);
+                layout.rowsPerImage = (h + block - 1) / block;
+            // compressed mips smaller than a block are copied as the whole (physical) block
+            WGPUExtent3D extent = { (w + block - 1) / block * block, (h + block - 1) / block * block, d };
+            wgpuQueueWriteTexture(wctx->queue, &dst, src, size, &layout, &extent);
+            src += size;
         }
     }
-
-    wgpu_texture_t * wgpu_texture = (wgpu_texture_t*)calloc(1, sizeof(wgpu_texture_t));
-    if(wgpu_texture != nullptr) {
-        wgpu_texture->texture = texture;
-        wgpu_texture->texture_view = texture_view;
-
-        *out_texture = &wgpu_texture->handle;
-     }
 }
 
-
-void wgpu_update_texture_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
+void wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
-    gfx_stub_not_implemented(wctx ? wctx->dbglog : nullptr, "wgpu_update_image_data");
+    *out_texture = nullptr;
+
+    const WGPUTextureFormat format = gfx_pixel_format_2_webgpu(desc->format);
+    if (format == WGPUTextureFormat_Undefined) {
+        wctx->dbglog(gfx_msg_error, "wgpu_create_texture %s: pixel format %s has no WebGPU equivalent", desc->label ? desc->label : "", gfx_to_string(desc->format));
+        return;
+    }
+
+    const uint32_t mips = gfx_max(1u, desc->mip_levels);
+    uint32_t layers = 1;
+    WGPUTextureDimension dimension = WGPUTextureDimension_2D;
+    WGPUTextureViewDimension view_dimension = WGPUTextureViewDimension_2D;
+    switch (desc->type) {
+        case gfx_texture2d_cube:  layers = 6; view_dimension = WGPUTextureViewDimension_Cube; break;
+        case gfx_texture2d_array: layers = gfx_max(1u, gfx_max(desc->array_layers, desc->depth)); view_dimension = WGPUTextureViewDimension_2DArray; break;
+        case gfx_texture3d:       dimension = WGPUTextureDimension_3D; view_dimension = WGPUTextureViewDimension_3D; break;
+        default:                  break;
+    }
+
+    WGPUTextureUsage usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc;
+    if ((desc->usage_flags & gfx_texture_usage_render_target) || wgpu_format_is_depth(format)) usage |= WGPUTextureUsage_RenderAttachment;
+    if (desc->usage_flags & gfx_texture_usage_storage)                                         usage |= WGPUTextureUsage_StorageBinding;
+
+    WGPUTextureDescriptor td = {};
+        td.label         = wgpu_str(desc->label);
+        td.usage         = usage;
+        td.dimension     = dimension;
+        td.size          = { desc->width, desc->height, dimension == WGPUTextureDimension_3D ? gfx_max(1u, desc->depth) : layers };
+        td.format        = format;
+        td.mipLevelCount = mips;
+        td.sampleCount   = 1;
+    WGPUTexture texture = wgpuDeviceCreateTexture(wctx->device, &td);
+    if (!texture) return;
+
+    WGPUTextureViewDescriptor vd = {};
+        vd.label           = wgpu_str(desc->label);
+        vd.format          = format;
+        vd.dimension       = view_dimension;
+        vd.mipLevelCount   = mips;
+        vd.arrayLayerCount = dimension == WGPUTextureDimension_3D ? 1 : layers;
+        vd.aspect          = WGPUTextureAspect_All;
+    WGPUTextureView view = wgpuTextureCreateView(texture, &vd);
+
+    if (desc->data)
+        wgpu_write_texture_mips(wctx, texture, desc, dimension == WGPUTextureDimension_3D ? 1 : layers, mips);
+
+    wgpu_texture_t* t = wgpu_texture_alloc(texture, view, format, desc->width, desc->height, 1);
+    if (!t) { wgpuTextureViewRelease(view); wgpuTextureRelease(texture); return; }
+    *out_texture = &t->handle;
+}
+
+// Replaces mip 0 of layer 0 (the whole level: size must be its byte size). Partial updates are not supported.
+void wgpu_update_texture_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wgpu_texture_t* t = (wgpu_texture_t*)texture;
+    if (!t || !data || t->external) return;
+    if (offset != 0) {
+        wctx->dbglog(gfx_msg_warning, "wgpu_update_texture_data: offset %u is not supported, only whole mip 0 updates", offset);
+        return;
+    }
+    WGPUTexelCopyTextureInfo dst = {};
+        dst.texture = t->texture;
+        dst.aspect  = WGPUTextureAspect_All;
+    const uint32_t rows = t->height ? t->height : 1;
+    WGPUTexelCopyBufferLayout layout = {};
+        layout.bytesPerRow  = size / rows;
+        layout.rowsPerImage = rows;
+    WGPUExtent3D extent = { t->width, t->height, 1 };
+    wgpuQueueWriteTexture(wctx->queue, &dst, data, size, &layout, &extent);
 }
 
 void wgpu_update_bindless_texture(gfx_context_t* ctx, gfx_texture_t* /*texture*/, uint32_t /*idx*/)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
-    gfx_stub_not_implemented(wctx ? wctx->dbglog : nullptr, "wgpu_update_bindless_texture");
+    gfx_stub_not_implemented(wctx ? wctx->dbglog : nullptr, "wgpu_update_bindless_texture (WebGPU has no bindless)");
 }
 
 void wgpu_texture_generate_mipmap(gfx_context_t* ctx, gfx_texture_t* /*texture*/)
 {
-    // WebGPU has no built-in mipmap generation command. Requires a custom
-    // downsample compute/render pass per level -- not implemented yet.
+    // WebGPU has no built-in mipmap generation command: needs a downsample render/compute pass per level
     wgpu_context_t* wctx = from_ctx(ctx);
     if (wctx) wctx->dbglog(gfx_msg_warning, "wgpu_texture_generate_mipmap: not supported natively, use pre-generated mips");
 }
@@ -1212,29 +1340,21 @@ void wgpu_blit_image(gfx_context_t* ctx, gfx_texture_t* src, gfx_texture_t* dst)
     wgpu_texture_t* wdst = (wgpu_texture_t*)dst;
     if (!wctx || !wsrc || !wdst) return;
 
-    WGPUImageCopyTexture src_info = {};
-    src_info.texture  = wsrc->texture;
-    src_info.mipLevel = 0;
-    src_info.aspect   = WGPUTextureAspect_All;
+    WGPUTexelCopyTextureInfo src_info = {};
+        src_info.texture = wsrc->texture;
+        src_info.aspect  = WGPUTextureAspect_All;
+    WGPUTexelCopyTextureInfo dst_info = {};
+        dst_info.texture = wdst->texture;
+        dst_info.aspect  = WGPUTextureAspect_All;
+    WGPUExtent3D extent = {
+        gfx_min(wgpuTextureGetWidth(wsrc->texture),  wgpuTextureGetWidth(wdst->texture)),
+        gfx_min(wgpuTextureGetHeight(wsrc->texture), wgpuTextureGetHeight(wdst->texture)),
+        gfx_min(wgpuTextureGetDepthOrArrayLayers(wsrc->texture), wgpuTextureGetDepthOrArrayLayers(wdst->texture)) };
 
-    WGPUImageCopyTexture dst_info = {};
-    dst_info.texture  = wdst->texture;
-    dst_info.mipLevel = 0;
-    dst_info.aspect   = WGPUTextureAspect_All;
-
-    WGPUExtent3D extent = {};
-    extent.width               = wgpuTextureGetWidth(wsrc->texture);
-    extent.height              = wgpuTextureGetHeight(wsrc->texture);
-    extent.depthOrArrayLayers  = wgpuTextureGetDepthOrArrayLayers(wsrc->texture);
-
-    WGPUCommandEncoderDescriptor enc_desc = {};
-    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(wctx->device, &enc_desc);
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(wctx->device, nullptr);
     wgpuCommandEncoderCopyTextureToTexture(encoder, &src_info, &dst_info, &extent);
-
-    WGPUCommandBufferDescriptor cmd_desc = {};
-    WGPUCommandBuffer commands = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+    WGPUCommandBuffer commands = wgpuCommandEncoderFinish(encoder, nullptr);
     wgpuQueueSubmit(wctx->queue, 1, &commands);
-
     wgpuCommandBufferRelease(commands);
     wgpuCommandEncoderRelease(encoder);
 }
@@ -1247,633 +1367,613 @@ void wgpu_texture_get_data(gfx_context_t* ctx, gfx_command_buffer_t* /*cmd*/)
 
 void wgpu_destroy_texture(gfx_context_t* ctx, gfx_texture_t* texture)
 {
-    wgpu_texture_t * wgpu_texture = (wgpu_texture_t*)texture;
-    wgpuTextureRelease(wgpu_texture->texture);
-    wgpuTextureViewRelease(wgpu_texture->texture_view);
+    (void)ctx;
+    wgpu_texture_t* t = (wgpu_texture_t*)texture;
+    if (!t || t->external) return;
+    if (t->texture_view) wgpuTextureViewRelease(t->texture_view);
+    if (t->texture)      wgpuTextureRelease(t->texture);
+    free(t);
 }
 
-// --- PIPELINE ---
+// ============================================================================
+// PIPELINE
+// ============================================================================
 
 void wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline)
 {
-    wgpu_context_t* wgpu_context = from_ctx(ctx);
-    wgpu_shader_t* wgpu_shader = (wgpu_shader_t*)desc->shader;
+    wgpu_context_t* wctx = from_ctx(ctx);
+    wgpu_shader_t* shader = (wgpu_shader_t*)desc->shader;
+    *out_pipeline = nullptr;
+    if (!shader || !shader->modules[gfx_shader_vertex]) {
+        wctx->dbglog(gfx_msg_error, "wgpu_create_pipeline: shader without a vertex stage");
+        return;
+    }
+    const gfx_render_states_desc_t& rs = desc->render_states;
 
-    gfx_render_states_desc_t render_states = desc->render_states;
+    // attachments: explicit color formats render into textures (1x), otherwise the surface (its format and MSAA)
+    const bool to_surface = rs.attachments.color == nullptr;
+    const WGPUTextureFormat color_format = to_surface ? wctx->surface_format : gfx_pixel_format_2_webgpu(rs.attachments.color[0]);
+    const uint32_t sample_count = to_surface ? wctx->sample_count : 1;
 
     WGPUBlendState blend = {};
-    blend.color.operation       = gfx_blend_op_2_webgpu(render_states.blend.color_op);      // WGPUBlendOperation_Add;
-    blend.color.srcFactor       = gfx_blend_mode_2_webgpu(render_states.blend.color_src);   // WGPUBlendFactor_One;
-    blend.color.dstFactor       = gfx_blend_mode_2_webgpu(render_states.blend.color_dst);   // WGPUBlendFactor_One;
-    blend.alpha.operation       = gfx_blend_op_2_webgpu(render_states.blend.alpha_op);      // WGPUBlendOperation_Add;
-    blend.alpha.srcFactor       = gfx_blend_mode_2_webgpu(render_states.blend.alpha_src);   // WGPUBlendFactor_One;
-    blend.alpha.dstFactor       = gfx_blend_mode_2_webgpu(render_states.blend.alpha_dst);   // WGPUBlendFactor_One;
+        blend.color.operation = gfx_blend_op_2_webgpu(rs.blend.color_op);
+        blend.color.srcFactor = gfx_blend_mode_2_webgpu(rs.blend.color_src);
+        blend.color.dstFactor = gfx_blend_mode_2_webgpu(rs.blend.color_dst);
+        blend.alpha.operation = gfx_blend_op_2_webgpu(rs.blend.alpha_op);
+        blend.alpha.srcFactor = gfx_blend_mode_2_webgpu(rs.blend.alpha_src);
+        blend.alpha.dstFactor = gfx_blend_mode_2_webgpu(rs.blend.alpha_dst);
 
     WGPUColorTargetState color_state = {};
-    color_state.format          = wgpu_context->surface_format;
-    color_state.writeMask       = WGPUColorWriteMask_All;
-    color_state.blend           = render_states.blend.enable ? &blend : nullptr;
+        color_state.format    = color_format;
+        color_state.writeMask = WGPUColorWriteMask_All;     // as the Vulkan backend
+        color_state.blend     = rs.blend.enable ? &blend : nullptr;
 
-    WGPUStencilFaceState stencil_state = {};
-    stencil_state.compare       = gfx_cmp_2_webgpu(render_states.stencil.func);     // always;
-    stencil_state.failOp        = gfx_op_2_webgpu(render_states.stencil.opFail);    // WGPUStencilOperation_Keep;
-    stencil_state.depthFailOp   = gfx_op_2_webgpu(render_states.stencil.opZFail);   // WGPUStencilOperation_Keep;
-    stencil_state.passOp        = gfx_op_2_webgpu(render_states.stencil.opPass);    // WGPUStencilOperation_Keep;
+    // a pass always has the depth attachment of its target: every pipeline declares it, disabled depth = always/no write
+    WGPUStencilFaceState stencil = {};
+        stencil.compare     = gfx_cmp_2_webgpu(rs.stencil.func);
+        stencil.failOp      = gfx_op_2_webgpu(rs.stencil.opFail);
+        stencil.depthFailOp = gfx_op_2_webgpu(rs.stencil.opZFail);
+        stencil.passOp      = gfx_op_2_webgpu(rs.stencil.opPass);
+    const bool has_stencil = wgpu_format_has_stencil(wctx->depth_format);
 
     WGPUDepthStencilState depth_state = {};
-    depth_state.depthWriteEnabled   = render_states.depth.write;
-    depth_state.depthCompare        = WGPUCompareFunction_Less;//gfx_cmp_2_webgpu(render_states.depth.mode);   // lequal
-    depth_state.stencilFront        = stencil_state;
-    depth_state.stencilBack         = stencil_state;
-    depth_state.stencilReadMask     = 0x0;
-    depth_state.stencilWriteMask    = 0x0;
-    depth_state.depthBias           = 0;
-    depth_state.depthBiasSlopeScale = 0.0f;
-    depth_state.depthBiasClamp      = 0.0f;
-    depth_state.format              = WGPUTextureFormat_Depth24PlusStencil8;
+        depth_state.format            = wctx->depth_format;
+        depth_state.depthWriteEnabled = rs.depth.write ? WGPUOptionalBool_True : WGPUOptionalBool_False;
+        depth_state.depthCompare      = rs.depth.enable ? gfx_cmp_2_webgpu(rs.depth.mode) : WGPUCompareFunction_Always;
+        depth_state.stencilFront      = stencil;
+        depth_state.stencilBack       = stencil;
+        depth_state.stencilReadMask   = has_stencil ? rs.stencil.pass : 0;
+        depth_state.stencilWriteMask  = has_stencil ? 0xFF : 0;
 
-
-    WGPUVertexAttribute attributes[16] = {};
-    WGPUVertexBufferLayout vertex_assembly[8] = {};
-    for(uint32_t i = 0; i < desc->assembly.slot_count; ++i)
+    // vertex buffers: attributes grouped by the slot they read from
+    WGPUVertexAttribute    attributes[16] = {};
+    WGPUVertexBufferLayout buffers[8]     = {};
+    const uint32_t slot_count = gfx_min(desc->assembly.slot_count, 8u);
+    uint32_t attribute_count = 0;
+    for (uint32_t i = 0; i < slot_count; ++i)
     {
-        vertex_assembly[i].arrayStride     = desc->assembly.slots[i].stride;
-        vertex_assembly[i].attributeCount  = desc->assembly.attribute_count;
-        vertex_assembly[i].attributes      = attributes;
-        for (uint32_t j = 0; j < desc->assembly.attribute_count; ++j) {
-            attributes[j].offset          = desc->assembly.attributes[j].offset;
-            attributes[j].shaderLocation  = desc->assembly.attributes[j].location;
-            attributes[j].format          = gfx_vertex_format_2_webgpu(desc->assembly.attributes[j].format);
-        }
-        switch (desc->assembly.slots[i].rate)
-        {
-            case gfx_vertex_rate_vertex:    vertex_assembly[i].stepMode = WGPUVertexStepMode_Vertex;   break;
-            case gfx_vertex_rate_instance:  vertex_assembly[i].stepMode = WGPUVertexStepMode_Instance; break;
+        buffers[i].arrayStride = desc->assembly.slots[i].stride;
+        buffers[i].stepMode    = desc->assembly.slots[i].rate == gfx_vertex_rate_instance ? WGPUVertexStepMode_Instance : WGPUVertexStepMode_Vertex;
+        buffers[i].attributes  = &attributes[attribute_count];
+        for (uint32_t j = 0; j < desc->assembly.attribute_count && attribute_count < 16; ++j) {
+            if (desc->assembly.attributes[j].binding != i && slot_count > 1) continue;
+            WGPUVertexAttribute* a = &attributes[attribute_count++];
+            a->offset         = desc->assembly.attributes[j].offset;
+            a->shaderLocation = desc->assembly.attributes[j].location;
+            a->format         = gfx_vertex_format_2_webgpu(desc->assembly.attributes[j].format);
+            buffers[i].attributeCount++;
         }
     }
 
-    WGPUVertexState vertex_state = wgpu_shader->vertex;
-    vertex_state.bufferCount = desc->assembly.slot_count;
-    vertex_state.buffers = vertex_assembly;
+    WGPUVertexState vertex = {};
+        vertex.module      = shader->modules[gfx_shader_vertex];
+        vertex.entryPoint  = wgpu_str(shader->entry_names[gfx_shader_vertex]);
+        vertex.bufferCount = slot_count;
+        vertex.buffers     = buffers;
 
     WGPUFragmentState fragment = {};
-    uint32_t fragment_mask = 1u << gfx_shader_fragment;
-    if((wgpu_shader->flags & fragment_mask) == fragment_mask)
-    {
-        wgpu_shader->fragment.targetCount = 1;
-        wgpu_shader->fragment.targets = &color_state;
+    const bool has_fragment = shader->modules[gfx_shader_fragment] != nullptr;
+    if (has_fragment) {
+        fragment.module      = shader->modules[gfx_shader_fragment];
+        fragment.entryPoint  = wgpu_str(shader->entry_names[gfx_shader_fragment]);
+        fragment.targetCount = 1;
+        fragment.targets     = &color_state;
     }
 
-    WGPUMultisampleState multisample    = { nullptr, 1, 0xFFFFFFFF , false};
-
-    WGPUPrimitiveState   primitive      = { nullptr };
-        primitive.topology  = gfx_topology_2_webgpu(desc->assembly.topology);
-        primitive.frontFace = gfx_face_2_webgpu(render_states.face);
-        primitive.cullMode  = gfx_cull_2_webgpu(render_states.culling);
-        primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
-
-    WGPURenderPipelineDescriptor descriptor = {};
-    descriptor.layout       = wgpu_shader->pipeline_layout;
-    descriptor.depthStencil = &depth_state;
-    descriptor.multisample  = multisample;
-    descriptor.primitive    = primitive;
-    descriptor.vertex       = vertex_state;
-    descriptor.fragment     = &wgpu_shader->fragment;
-    descriptor.label        = "fuck";
-    WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(wgpu_context->device, &descriptor);
+    WGPURenderPipelineDescriptor pd = {};
+        pd.label                  = wgpu_str("gfx pipeline");
+        pd.layout                 = shader->pipeline_layout;
+        pd.vertex                 = vertex;
+        pd.primitive.topology     = gfx_topology_2_webgpu(desc->assembly.topology);
+        pd.primitive.frontFace    = gfx_face_2_webgpu(rs.face);
+        pd.primitive.cullMode     = gfx_cull_2_webgpu(rs.culling);
+        pd.depthStencil           = &depth_state;
+        pd.multisample.count      = sample_count;
+        pd.multisample.mask       = 0xFFFFFFFFu;
+        pd.fragment               = has_fragment ? &fragment : nullptr;
+    WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(wctx->device, &pd);
+    if (!render_pipeline) return;
 
     wgpu_pipeline_t* pipeline = (wgpu_pipeline_t*)calloc(1, sizeof(wgpu_pipeline_t));
-    if(pipeline != nullptr)
-    {
-        pipeline->pipeline = render_pipeline;
-        *out_pipeline = &pipeline->handle;
-    }
-}
-
-void wgpu_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline)
-{
-    wgpu_context_t* wctx = from_ctx(ctx);
-    wctx->dbglog(gfx_msg_error, "wgpu_create_compute_pipeline not implemented");
+    if (!pipeline) { wgpuRenderPipelineRelease(render_pipeline); return; }
+    pipeline->pipeline = render_pipeline;
+    *out_pipeline = &pipeline->handle;
 }
 
 void wgpu_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
 {
-    wgpu_pipeline_t * wgpu_pipeline = (wgpu_pipeline_t*)pipeline;
-    wgpuRenderPipelineRelease(wgpu_pipeline->pipeline);
+    (void)ctx;
+    wgpu_pipeline_t* p = (wgpu_pipeline_t*)pipeline;
+    if (!p) return;
+    if (p->pipeline) wgpuRenderPipelineRelease(p->pipeline);
+    free(p);
+}
+
+void wgpu_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline)
+{
+    wgpu_context_t* wctx = from_ctx(ctx);
+    *out_pipeline = nullptr;
+    wgpu_shader_t* shader = desc ? (wgpu_shader_t*)desc->shader : nullptr;
+    if (!shader || !shader->modules[gfx_shader_compute]) {
+        wctx->dbglog(gfx_msg_error, "wgpu_create_compute_pipeline: shader without a compute stage");
+        return;
+    }
+
+    WGPUComputePipelineDescriptor cd = {};
+        cd.label              = wgpu_str("gfx compute pipeline");
+        cd.layout             = shader->pipeline_layout;
+        cd.compute.module     = shader->modules[gfx_shader_compute];
+        cd.compute.entryPoint = wgpu_str(shader->entry_names[gfx_shader_compute]);
+    WGPUComputePipeline compute = wgpuDeviceCreateComputePipeline(wctx->device, &cd);
+    if (!compute) return;
+
+    wgpu_compute_pipeline_t* p = (wgpu_compute_pipeline_t*)calloc(1, sizeof(wgpu_compute_pipeline_t));
+    if (!p) { wgpuComputePipelineRelease(compute); return; }
+    p->pipeline = compute;
+    *out_pipeline = &p->handle;
 }
 
 void wgpu_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline)
 {
-    // wgpu_create_compute_pipeline is not yet implemented — nothing to release
+    (void)ctx;
+    wgpu_compute_pipeline_t* p = (wgpu_compute_pipeline_t*)pipeline;
+    if (!p) return;
+    if (p->pipeline) wgpuComputePipelineRelease(p->pipeline);
+    free(p);
 }
 
-void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline)
+void wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* /*desc*/, gfx_pipeline_t** pipeline)
 {
-    wgpu_context_t* wctx = from_ctx(ctx);
-    wctx->dbglog(gfx_msg_error, "wgpu_create_mesh_pipeline not implemented");
+    *pipeline = nullptr;
+    from_ctx(ctx)->dbglog(gfx_msg_error, "wgpu_create_mesh_pipeline: WebGPU has no mesh shaders");
 }
 
-void wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
+void wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* /*desc*/, gfx_pipeline_raytrace_t** pipeline)
 {
-    wgpu_context_t* wctx = from_ctx(ctx);
-    wctx->dbglog(gfx_msg_error, "wgpu_create_raytrace_pipeline not implemented");
+    *pipeline = nullptr;
+    from_ctx(ctx)->dbglog(gfx_msg_error, "wgpu_create_raytrace_pipeline: WebGPU has no ray tracing");
 }
 
-void wgpu_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
-{
-}
-
-void wgpu_destroy_raytrace_pipeline(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline)
-{
-}
-
-// --- RENDER TARGET ---
-
-void wgpu_create_render_target(gfx_context_t* ctx, gfx_render_target_desc_t* desc, gfx_render_target_t** out_target)
-{
-    wgpu_context_t * wctx = from_ctx(ctx);
-    wctx->dbglog(gfx_msg_error, "wgpu_create_render_target not implemented");
-}
-
-
-void wgpu_destroy_render_target(gfx_context_t* ctx, gfx_render_target_t* texture)
+void wgpu_destroy_raytrace_pipeline(gfx_context_t* /*ctx*/, gfx_pipeline_raytrace_t* /*pipeline*/)
 {
 }
 
-// --- DESCRIPTOR SET ---
+// ============================================================================
+// DESCRIPTOR SET
+// ============================================================================
 
-void wgpu_create_descriptor_set_pool(gfx_context_t* ctx, wgpu_shader_t * shader, uint32_t capacity, wgpu_descriptor_set_pool_t** out_pool)
+static void wgpu_release_pool(wgpu_context_t* wctx, wgpu_descriptor_set_pool_t* pool)
 {
-    wgpu_context_t* wctx = from_ctx(ctx);
+    for (wgpu_descriptor_set_pool_t** p = &wctx->pools; *p; p = &(*p)->ctx_next)
+        if (*p == pool) { *p = pool->ctx_next; break; }
 
+    for (uint32_t i = 0; i < pool->capacity; ++i)
+        if (pool->descriptor_sets[i].bind_group) wgpuBindGroupRelease(pool->descriptor_sets[i].bind_group);
+    if (pool->ubo_buffer) wgpu_destroy_buffer(&wctx->handle, pool->ubo_buffer);
+    if (pool->shader && pool->shader->current_pool == pool) pool->shader->current_pool = pool->next;
+    free(pool->ubo_buffer_data_ptr);
+    free(pool->descriptor_sets);
+    free(pool);
+}
+
+static void wgpu_create_descriptor_set_pool(wgpu_context_t* wctx, wgpu_shader_t* shader, uint32_t capacity, wgpu_descriptor_set_pool_t** out_pool)
+{
+    // every UBO of a set gets its own aligned slice of the set's block: ubo_offsets[i] relative to the block start
+    const uint32_t alignment = gfx_max(wctx->limits.minUniformBufferOffsetAlignment, 16u);
     uint32_t ubo_size = 0;
-    for(uint32_t i = 0; i < shader->uniform_count; ++i)
-    {
-        if(shader->uniforms[i].type == gfx_uniform_ubo)
-            ubo_size += shader->uniforms[i].buffer.size;
+    uint32_t ubo_offsets[WGPU_MAX_BINDINGS] = {};
+    for (uint32_t i = 0; i < shader->uniform_count; ++i) {
+        if (shader->uniforms[i].type != gfx_uniform_ubo) continue;
+        ubo_offsets[i] = ubo_size;
+        ubo_size = gfx_utils_align_up(ubo_size + shader->uniforms[i].buffer.size, alignment);
     }
-
-    uint32_t aligment = wctx->limits.limits.minUniformBufferOffsetAlignment;
-    ubo_size = gfx_utils_align_up(ubo_size, aligment);
 
     wgpu_descriptor_set_pool_t* pool = (wgpu_descriptor_set_pool_t*)calloc(1, sizeof(wgpu_descriptor_set_pool_t));
-    pool->capacity = capacity;
+    pool->capacity       = capacity;
     pool->free_set_count = capacity;
-    pool->next_free = 0;
+    pool->shader         = shader;
 
-    uint32_t ubo_buffer_size = ubo_size * capacity;
-    if(ubo_buffer_size > 0 )
-    {
+    if (ubo_size > 0) {
         gfx_buffer_desc_t desc = {};
+            desc.label = "descriptor set uniforms";
             desc.usage = gfx_buffer_usage_uniform;
-            desc.size = ubo_buffer_size;
-        wgpu_create_buffer(ctx, &desc, &pool->ubo_buffer);
-        pool->ubo_buffer_data_size = ubo_buffer_size;
-        pool->ubo_buffer_data_ptr = (uint8_t*)calloc(ubo_buffer_size, 1);
+            desc.size  = ubo_size * capacity;
+        wgpu_create_buffer(&wctx->handle, &desc, &pool->ubo_buffer);
+        pool->ubo_buffer_data_size = ubo_size * capacity;
+        pool->ubo_buffer_data_ptr  = (uint8_t*)calloc(pool->ubo_buffer_data_size, 1);
     }
-    pool->descriptor_sets = (wgpu_descriptor_set_t*)calloc(sizeof(wgpu_descriptor_set_t), capacity);
+    pool->descriptor_sets = (wgpu_descriptor_set_t*)calloc(capacity, sizeof(wgpu_descriptor_set_t));
+    WGPUBuffer ubo = pool->ubo_buffer ? ((wgpu_buffer_t*)pool->ubo_buffer)->buffer : nullptr;
 
-    for(uint32_t j = 0; j < capacity; ++j)
+    for (uint32_t j = 0; j < capacity; ++j)
     {
-        auto descriptor_set = &pool->descriptor_sets[j];
-        descriptor_set->isfree = true;
-        descriptor_set->shader = shader;
-        descriptor_set->owner_pool = pool;
-        descriptor_set->index_in_pool = j;
+        wgpu_descriptor_set_t* set = &pool->descriptor_sets[j];
+        set->isfree           = true;
+        set->shader           = shader;
+        set->owner_pool       = pool;
+        set->index_in_pool    = j;
+        set->bind_group_dirty = true;
 
-        auto ubo_offset = ubo_size * j;
-        for (uint32_t i = 0; i < shader->binding_count; ++i)
-        {
-            descriptor_set->bindings[i].binding = shader->bindings[i].binding;
-
-            if (shader->bindings[i].sampler.type != WGPUSamplerBindingType_Undefined)
-                descriptor_set->bindings[i].sampler = ((wgpu_sampler_t*)wctx->default_sampler)->sampler;
-
-            if (shader->bindings[i].texture.sampleType != WGPUTextureSampleType_Undefined)
-                descriptor_set->bindings[i].textureView = ((wgpu_texture_t*)wctx->default_texture)->texture_view;
-
-            if (shader->bindings[i].buffer.type != WGPUBufferBindingType_Undefined) {
-                descriptor_set->bindings[i].buffer = ((wgpu_buffer_t*)pool->ubo_buffer)->buffer;
-                descriptor_set->bindings[i].size = shader->uniforms[i].buffer.size;
-                descriptor_set->bindings[i].offset = ubo_offset;
-                descriptor_set->ubo_data_ptr = pool->ubo_buffer_data_ptr + ubo_offset;
-                descriptor_set->dynamic_offset = ubo_offset;
+        // defaults until the user writes the entries: the context's texture/sampler, the set's UBO slices
+        for (uint32_t i = 0; i < shader->binding_count; ++i) {
+            const WGPUBindGroupLayoutEntry* layout = &shader->bindings[i];
+            WGPUBindGroupEntry* e = &set->bindings[i];
+            e->binding = layout->binding;
+            if (layout->sampler.type != WGPUSamplerBindingType_BindingNotUsed && layout->sampler.type != WGPUSamplerBindingType_Undefined)
+                e->sampler = ((wgpu_sampler_t*)wctx->default_sampler)->sampler;
+            if (layout->texture.sampleType != WGPUTextureSampleType_BindingNotUsed && layout->texture.sampleType != WGPUTextureSampleType_Undefined)
+                e->textureView = ((wgpu_texture_t*)wctx->default_texture)->texture_view;
+            if (layout->buffer.type == WGPUBufferBindingType_Uniform && ubo) {
+                e->buffer = ubo;
+                e->offset = (uint64_t)ubo_size * j + ubo_offsets[i];
+                e->size   = shader->uniforms[i].buffer.size;
             }
         }
-        WGPUBindGroupDescriptor bg_desc = {};
-            bg_desc.label       = "uniform_buffer_bind_group";
-            bg_desc.layout      = shader->layout;
-            bg_desc.entryCount  = shader->binding_count;
-            bg_desc.entries     = descriptor_set->bindings;
-        descriptor_set->bind_group = wgpuDeviceCreateBindGroup(wctx->device, &bg_desc);
     }
 
+    pool->ctx_next = wctx->pools;
+    wctx->pools = pool;
     *out_pool = pool;
 }
 
-
-void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
+void wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* gshader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
 {
     wgpu_context_t* wctx = from_ctx(ctx);
-    wgpu_shader_t*  wgpu_shader = (wgpu_shader_t*)shader;
-
-    if(wgpu_shader == nullptr)
-    {
-        wctx->dbglog(gfx_msg_error, "wgpu_create_descriptor_set - shader is null");
+    wgpu_shader_t* shader = (wgpu_shader_t*)gshader;
+    *out_descriptor = nullptr;
+    if (!shader) {
+        wctx->dbglog(gfx_msg_error, "wgpu_create_descriptor_set: shader is null");
         return;
     }
+    if (set_idx != 0)
+        wctx->dbglog(gfx_msg_warning, "wgpu_create_descriptor_set: set %u requested, the webgpu backend has set 0 only", set_idx);
 
-    if(wgpu_shader->current_pool == nullptr)
-    {
-        wgpu_create_descriptor_set_pool(ctx, wgpu_shader, 256, &wgpu_shader->current_pool);
-    }
-
-    if(wgpu_shader->current_pool->free_set_count == 0)
-    {
-        wctx->dbglog(gfx_msg_warning, "TODO: push pool before allocarte new one");
-        wgpu_create_descriptor_set_pool(ctx, wgpu_shader, 1024, &wgpu_shader->current_pool);
-    }
-
-    for (uint32_t i = wgpu_shader->current_pool->next_free; i < wgpu_shader->current_pool->capacity; i++)
-    {
-        if(wgpu_shader->current_pool->descriptor_sets[i].isfree){
-            wgpu_shader->current_pool->descriptor_sets[i].isfree = false;
-
-            wgpu_shader->current_pool->count++;
-            wgpu_shader->current_pool->free_set_count--;
-            wgpu_shader->current_pool->next_free = i + 1;
-
-            *out_descriptor = (gfx_descriptor_set_t*)(&wgpu_shader->current_pool->descriptor_sets[i].handle);
+    // a free set in any pool of the shader, else a new (bigger) pool in front of the list
+    for (wgpu_descriptor_set_pool_t* pool = shader->current_pool; pool; pool = pool->next) {
+        if (pool->free_set_count == 0) continue;
+        for (uint32_t n = 0; n < pool->capacity; ++n) {
+            const uint32_t i = (pool->next_free + n) % pool->capacity;
+            wgpu_descriptor_set_t* set = &pool->descriptor_sets[i];
+            if (!set->isfree) continue;
+            set->isfree = false;
+            pool->count++;
+            pool->free_set_count--;
+            pool->next_free = (i + 1) % pool->capacity;
+            *out_descriptor = &set->handle;
             return;
         }
     }
-}
 
+    wgpu_descriptor_set_pool_t* pool = nullptr;
+    wgpu_create_descriptor_set_pool(wctx, shader, shader->current_pool ? shader->current_pool->capacity * 2 : 64, &pool);
+    pool->next = shader->current_pool;
+    shader->current_pool = pool;
+    wgpu_create_descriptor_set(ctx, gshader, set_idx, out_descriptor);
+}
 
 void wgpu_uniform_update_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size)
 {
-    wgpu_descriptor_set_t* wgpu_set = (wgpu_descriptor_set_t*)set;
-    wgpu_descriptor_set_pool_t * pool = wgpu_set->owner_pool;
-    wgpu_shader_t* wgpu_shader = wgpu_set->shader;
-    wgpu_context_t* wctx = wgpu_shader->context;
+    wgpu_descriptor_set_t* wset = (wgpu_descriptor_set_t*)set;
+    if (!wset || !data || handle == 0) return;
+    wgpu_descriptor_set_pool_t* pool = wset->owner_pool;
+    wgpu_shader_t* shader = wset->shader;
 
-    uniform_handle_t uhandle = { handle };
-    if(uhandle.hash != wgpu_shader->hash)
-        return;
+    uniform_handle_t uh = { handle };
+    if (uh.hash != (uint16_t)shader->hash || uh.field == 0) return;
+    const uint32_t idx = uh.idx, field = uh.field - 1u;
 
-    uint64_t idx = uhandle.idx;
-    uint16_t child_id = uhandle.field;
+    if (idx >= shader->uniform_count || shader->uniforms[idx].type != gfx_uniform_ubo || !pool->ubo_buffer ||
+        wset->bindings[idx].buffer != ((wgpu_buffer_t*)pool->ubo_buffer)->buffer || field >= shader->uniforms[idx].buffer.field_count)
+        return;     // not one of the pool's UBO slices (a user buffer was bound with wgpu_uniform_set_buffer)
 
+    // CPU copy of the pool, uploaded at frame end; bindings[idx].offset already includes this set's and UBO's slice
+    const uint32_t field_offset = shader->uniforms[idx].buffer.fields[field].offset;
+    const uint32_t ubo_bytes    = shader->uniforms[idx].buffer.size;
+    if (field_offset >= ubo_bytes) return;
+    size = gfx_min(size, ubo_bytes - field_offset);
+    memcpy(pool->ubo_buffer_data_ptr + wset->bindings[idx].offset + field_offset, data, size);
     pool->dirty = true;
-    wgpu_buffer_t* wgpu_buffer = (wgpu_buffer_t*)wgpu_set->bindings[idx].buffer;
-    if(wgpu_set->bindings[idx].buffer != nullptr)
-    {
-        WGPUBuffer buffer = wgpu_set->bindings[idx].buffer;
-        uint64_t offset = wgpu_set->bindings[idx].offset;
-
-        uint64_t field_offset = wgpu_shader->uniforms[idx].buffer.fields[child_id].offset;
-
-        memcpy(wgpu_set->ubo_data_ptr + field_offset, data, size);
-
-        //wgpuQueueWriteBuffer(wctx->queue, buffer, offset + field_offset, data, size);
-    }
 }
 
-void wgpu_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buff, uint32_t offset)
+void wgpu_uniform_set_buffer(gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset)
 {
-    wgpu_descriptor_set_t* wgpu_set = (wgpu_descriptor_set_t*)set;
+    wgpu_descriptor_set_t* wset = (wgpu_descriptor_set_t*)set;
+    wgpu_buffer_t* wbuffer = (wgpu_buffer_t*)buffer;
+    if (!wset || !wbuffer || handle == 0) return;
+    uniform_handle_t uh = { handle };
+    if (uh.idx >= wset->shader->uniform_count) return;
 
-    wgpu_shader_t*  wgpu_shader  = wgpu_set->shader;
-    wgpu_context_t* wctx = wgpu_shader->context;
-    wgpu_buffer_t*  wgpu_buffer  = (wgpu_buffer_t*)buff;
-
-    uint64_t idx = handle;
-    if(wgpu_set->bindings[idx].buffer != wgpu_buffer->buffer)
-    {
-        wgpu_set->bindings[idx].buffer = wgpu_buffer->buffer;
-        wgpu_set->bindings[idx].offset = offset;
-
-        WGPUBindGroupDescriptor bg_desc = {};
-        bg_desc.layout = wgpu_shader->layout;
-        bg_desc.entryCount = wgpu_shader->binding_count;
-        bg_desc.entries = wgpu_set->bindings;
-        WGPUBindGroup bind_group = wgpuDeviceCreateBindGroup(wctx->device, &bg_desc);
-
-        if (wgpu_set->bind_group)
-            wgpuBindGroupRelease(wgpu_set->bind_group);
-
-        wgpu_set->bind_group = bind_group;
-    }
+    WGPUBindGroupEntry* e = &wset->bindings[uh.idx];
+    e->buffer = wbuffer->buffer;
+    e->offset = offset;
+    e->size   = WGPU_WHOLE_SIZE;
+    wset->bind_group_dirty = true;
 }
-
 
 void wgpu_uniform_set_texture(gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture)
 {
-    wgpu_descriptor_set_t * wgpu_set = (wgpu_descriptor_set_t*)set;
+    wgpu_descriptor_set_t* wset = (wgpu_descriptor_set_t*)set;
+    wgpu_texture_t* wtexture = (wgpu_texture_t*)texture;
+    if (!wset || !wtexture || handle == 0) return;
+    uniform_handle_t uh = { handle };
+    if (uh.idx >= wset->shader->uniform_count) return;
 
-    wgpu_shader_t*  wgpu_shader  = wgpu_set->shader;
-    wgpu_context_t* wctx = wgpu_shader->context;
-    wgpu_texture_t* wgpu_texture = (wgpu_texture_t*)texture;
-
-    if(wgpu_texture == nullptr)
-    {
-        return;
-    }
-
-    uniform_handle_t uh { handle };
-    uint64_t idx = uh.idx;
-    if(wgpu_set->bindings[idx].textureView != wgpu_texture->texture_view)
-    {
-        wgpu_set->bindings[idx].textureView = wgpu_texture->texture_view;
-
-        WGPUBindGroupDescriptor bg_desc = {};
-        bg_desc.layout     = wgpu_shader->layout;
-        bg_desc.entryCount = wgpu_shader->binding_count;
-        bg_desc.entries    = wgpu_set->bindings;
-        WGPUBindGroup bind_group = wgpuDeviceCreateBindGroup(wctx->device, &bg_desc);
-
-        if(wgpu_set->bind_group)
-            wgpuBindGroupRelease(wgpu_set->bind_group);
-
-        wgpu_set->bind_group = bind_group;
+    if (wset->bindings[uh.idx].textureView != wtexture->texture_view) {
+        wset->bindings[uh.idx].textureView = wtexture->texture_view;
+        wset->bind_group_dirty = true;
     }
 }
-
 
 void wgpu_uniform_set_sampler(gfx_descriptor_set_t* set, uint64_t handle, gfx_sampler_t* sampler)
 {
-    wgpu_descriptor_set_t* wgpu_set = (wgpu_descriptor_set_t*)set;
-    wgpu_shader_t* wgpu_shader = wgpu_set->shader;
-    wgpu_context_t* wgpu_ctx = wgpu_shader->context;
-    wgpu_sampler_t* wgpu_sampler = (wgpu_sampler_t*)sampler;
+    wgpu_descriptor_set_t* wset = (wgpu_descriptor_set_t*)set;
+    wgpu_sampler_t* wsampler = (wgpu_sampler_t*)sampler;
+    if (!wset || !wsampler || handle == 0) return;
+    uniform_handle_t uh = { handle };
+    if (uh.hash != (uint16_t)wset->shader->hash || uh.idx >= wset->shader->uniform_count) return;
 
-    uniform_handle_t uh{ handle };
-    if(uh.hash != wgpu_shader->hash)
-        return;
-
-    uint64_t idx = uh.idx;
-    if (wgpu_set->bindings[idx].sampler != wgpu_sampler->sampler)
-    {
-        wgpu_set->bindings[idx].sampler = wgpu_sampler->sampler;
-
-        WGPUBindGroupDescriptor bg_desc = {};
-            bg_desc.layout = wgpu_shader->layout;
-            bg_desc.entryCount = wgpu_shader->binding_count;
-            bg_desc.entries = wgpu_set->bindings;
-        WGPUBindGroup bind_group = wgpuDeviceCreateBindGroup(wgpu_ctx->device, &bg_desc);
-        if (wgpu_set->bind_group)
-            wgpuBindGroupRelease(wgpu_set->bind_group);
-
-        wgpu_set->bind_group = bind_group;
+    if (wset->bindings[uh.idx].sampler != wsampler->sampler) {
+        wset->bindings[uh.idx].sampler = wsampler->sampler;
+        wset->bind_group_dirty = true;
     }
 }
-
 
 void wgpu_destroy_descriptor_set(gfx_context_t* ctx, gfx_descriptor_set_t* descriptor)
 {
-    wgpu_descriptor_set_t* wgpu_descriptor = (wgpu_descriptor_set_t*)descriptor;
-    wgpu_descriptor_set_pool_t * pool = wgpu_descriptor->owner_pool;
+    (void)ctx;
+    wgpu_descriptor_set_t* wset = (wgpu_descriptor_set_t*)descriptor;
+    if (!wset || wset->isfree) return;
+    wgpu_descriptor_set_pool_t* pool = wset->owner_pool;
 
-    wgpu_descriptor->isfree = true;
-    pool->next_free = wgpu_descriptor->index_in_pool;
-    pool->count--;
-
-    wgpu_shader_t* shader = wgpu_descriptor->shader;
-}
-
-// --- COMMAND BUFFER ---
-
-void wgpu_create_cmd(gfx_context_t* ctx, gfx_command_buffer_t** out_cmd)
-{
-    wgpu_context_t* wctx = from_ctx(ctx);
-
-    wgpu_command_buffer_t * wgpu_cmd = (wgpu_command_buffer_t*)calloc(1, sizeof(wgpu_command_buffer_t));
-    if(wgpu_cmd != nullptr) {
-        wgpu_cmd->ctx = wctx;
-        *out_cmd = &wgpu_cmd->handle;
+    // back to the defaults of a fresh set (the UBO slice entries stay, their data is reset)
+    wgpu_context_t* wctx = wset->shader->context;
+    for (uint32_t i = 0; i < wset->shader->binding_count; ++i) {
+        WGPUBindGroupEntry* e = &wset->bindings[i];
+        if (e->sampler)     e->sampler     = ((wgpu_sampler_t*)wctx->default_sampler)->sampler;
+        if (e->textureView) e->textureView = ((wgpu_texture_t*)wctx->default_texture)->texture_view;
     }
-    //wgpu_cmd->encoder = wgpuDeviceCreateCommandEncoder(wgpu_context->device, nullptr);
+    wset->bind_group_dirty = true;
+    wset->isfree = true;
+    pool->next_free = wset->index_in_pool;
+    pool->count--;
+    pool->free_set_count++;
 }
 
-
-void wgpu_destroy_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd)
+static bool wgpu_prepare_bind_group(wgpu_descriptor_set_t* set)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    printf("gfx_destroy_cmd not inmplemented\n");
+    if (!set->bind_group_dirty && set->bind_group) return true;
+    wgpu_shader_t* shader = set->shader;
+    for (uint32_t i = 0; i < shader->binding_count; ++i) {
+        const WGPUBindGroupEntry* e = &set->bindings[i];
+        if (!e->buffer && !e->sampler && !e->textureView) {
+            shader->context->dbglog(gfx_msg_warning, "descriptor set: '%s' (binding %u) has no resource, draw skipped", shader->uniforms[i].name, e->binding);
+            return false;
+        }
+    }
+    WGPUBindGroupDescriptor bg = {};
+        bg.layout     = shader->layout;
+        bg.entryCount = shader->binding_count;
+        bg.entries    = set->bindings;
+    WGPUBindGroup group = wgpuDeviceCreateBindGroup(shader->context->device, &bg);
+    if (set->bind_group) wgpuBindGroupRelease(set->bind_group);
+    set->bind_group = group;
+    set->bind_group_dirty = false;
+    return group != nullptr;
 }
 
-void wgpu_cmd_begin(gfx_command_buffer_t* cmd)
+// ============================================================================
+// COMMANDS
+// ============================================================================
+
+static WGPUColor wgpu_unpack_color(uint32_t rgba)     // 0xRRGGBBAA, as the Vulkan backend
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_context_t* wctx = wgpu_cmd->ctx;
-
-    if(wgpu_cmd->encoder != nullptr)
-        assert(false);
-
-    wgpu_cmd->encoder = wgpuDeviceCreateCommandEncoder(wctx->device, nullptr);
+    WGPUColor c = { ((rgba >> 24) & 0xFF) / 255.0, ((rgba >> 16) & 0xFF) / 255.0, ((rgba >> 8) & 0xFF) / 255.0, (rgba & 0xFF) / 255.0 };
+    return c;
 }
 
-
+// target: pass->color_attachment[] (textures), else pass->target, else the frame's back buffer.
+// gfx_load_op_dont_care clears (WebGPU has no "don't care" load, clear is the cheap one).
 void wgpu_cmd_begin_pass(gfx_command_buffer_t* cmd, gfx_pass_info_t* pass)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_render_target_t* wgpu_target = (wgpu_render_target_t*)pass->target;
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_context_t* wctx = wcmd->ctx;
+    if (!wcmd->encoder) {
+        wctx->dbglog(gfx_msg_error, "wgpu_cmd_begin_pass: command buffer is not recording (use the frame's cmd)");
+        return;
+    }
+    if (wcmd->pass) wgpu_cmd_end_pass(cmd);
 
-    WGPUColor clearcolor = { 0.2f, 0.3f, 0.4f, 1.0f };
+    WGPURenderPassColorAttachment colors[4] = {};
+    uint32_t color_count = 0;
+    WGPUTextureView depth_view = nullptr;
+    WGPUTextureFormat depth_format = WGPUTextureFormat_Undefined;
+    uint32_t width = 0, height = 0;
 
-    WGPURenderPassColorAttachment colorAttachment = {};
-    colorAttachment.view = wgpu_target->view;
-    colorAttachment.resolveTarget = nullptr;
-    colorAttachment.loadOp = WGPULoadOp_Clear;
-    colorAttachment.storeOp = WGPUStoreOp_Store;
-    colorAttachment.clearValue = {0.2f, 0.3f, 0.4f, 1.0f};
-    #ifndef EMSCRIPTEN
-    colorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    #endif
+    if (pass->color_attachment[0]) {
+        for (uint32_t i = 0; i < 4 && pass->color_attachment[i]; ++i) {
+            wgpu_texture_t* t = (wgpu_texture_t*)pass->color_attachment[i];
+            colors[color_count].view    = t->texture_view;
+            colors[color_count].loadOp  = pass->color_load_op[i] == gfx_load_op_load ? WGPULoadOp_Load : WGPULoadOp_Clear;
+            color_count++;
+            width = t->width; height = t->height;
+        }
+        if (pass->depth_attachment) {
+            wgpu_texture_t* d = (wgpu_texture_t*)pass->depth_attachment;
+            depth_view = d->texture_view;
+            depth_format = d->format;
+        }
+    } else {
+        GFX_DISABLE_DEPRECATED_WARNING_BEGIN
+        wgpu_render_target_t* rt = pass->target ? (wgpu_render_target_t*)pass->target : wcmd->default_target;
+        GFX_DISABLE_DEPRECATED_WARNING_END
+        if (!rt) {
+            wctx->dbglog(gfx_msg_error, "wgpu_cmd_begin_pass: no target");
+            return;
+        }
+        colors[0].view          = rt->color;
+        colors[0].resolveTarget = rt->resolve;
+        colors[0].loadOp        = pass->color_load_op[0] == gfx_load_op_load ? WGPULoadOp_Load : WGPULoadOp_Clear;
+        color_count  = 1;
+        depth_view   = rt->depth;
+        depth_format = wctx->depth_format;
+        width = rt->width; height = rt->height;
+    }
 
-    bool has_depth = wgpu_target->depth_stencil_atachment != nullptr;
-    WGPUTextureView depht_view = has_depth ? wgpu_target->depth_stencil_atachment->texture_view : nullptr;
+    for (uint32_t i = 0; i < color_count; ++i) {
+        colors[i].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+        // MSAA: the multisampled image is only needed until it is resolved
+        colors[i].storeOp    = colors[i].resolveTarget ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
+        colors[i].clearValue = wgpu_unpack_color(pass->color_clear_value);
+    }
 
-    WGPURenderPassDepthStencilAttachment depthAttachment = {};
-        depthAttachment.view = depht_view;
+    WGPURenderPassDepthStencilAttachment depth = {};
+        depth.view            = depth_view;
+        depth.depthLoadOp     = pass->depth_load_op == gfx_load_op_load ? WGPULoadOp_Load : WGPULoadOp_Clear;
+        depth.depthStoreOp    = WGPUStoreOp_Store;
+        depth.depthClearValue = pass->depth_clear_value;
+    if (wgpu_format_has_stencil(depth_format)) {
+        depth.stencilLoadOp     = depth.depthLoadOp;
+        depth.stencilStoreOp    = WGPUStoreOp_Store;
+        depth.stencilClearValue = pass->stencil_clear_value;
+    }
 
-        depthAttachment.depthClearValue = 1.0;
-        depthAttachment.depthLoadOp = WGPULoadOp_Clear;
-        depthAttachment.depthStoreOp = WGPUStoreOp_Store;
-        depthAttachment.depthReadOnly = false;
+    WGPURenderPassDescriptor rp = {};
+        rp.colorAttachmentCount   = color_count;
+        rp.colorAttachments       = colors;
+        rp.depthStencilAttachment = depth_view ? &depth : nullptr;
+    wcmd->pass = wgpuCommandEncoderBeginRenderPass(wcmd->encoder, &rp);
 
-        depthAttachment.stencilClearValue = 0;
-        depthAttachment.stencilLoadOp = WGPULoadOp_Clear;
-        depthAttachment.stencilStoreOp = WGPUStoreOp_Store;
-
-    WGPURenderPassDescriptor renderPass = {};
-    renderPass.colorAttachmentCount = 1;
-    renderPass.colorAttachments = &colorAttachment;
-    renderPass.depthStencilAttachment = has_depth ? &depthAttachment : nullptr;
-
-    wgpu_cmd->pass = wgpuCommandEncoderBeginRenderPass(wgpu_cmd->encoder, &renderPass);
+    // as the Vulkan backend: the whole target
+    if (width && height) {
+        wgpuRenderPassEncoderSetViewport(wcmd->pass, 0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f);
+        wgpuRenderPassEncoderSetScissorRect(wcmd->pass, 0, 0, width, height);
+    }
 }
-
 
 void wgpu_cmd_end_pass(gfx_command_buffer_t* cmd)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-
-    wgpuRenderPassEncoderEnd(wgpu_cmd->pass);
-    wgpuRenderPassEncoderRelease(wgpu_cmd->pass);
-    wgpu_cmd->pass = nullptr;
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (!wcmd->pass) return;
+    wgpuRenderPassEncoderEnd(wcmd->pass);
+    wgpuRenderPassEncoderRelease(wcmd->pass);
+    wcmd->pass = nullptr;
 }
-
 
 void wgpu_cmd_begin_compute_pass(gfx_command_buffer_t* cmd)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    if (wgpu_cmd->pass || wgpu_cmd->compute_pass) return; // another pass is active
-    WGPUComputePassDescriptor desc = {};
-    wgpu_cmd->compute_pass = wgpuCommandEncoderBeginComputePass(wgpu_cmd->encoder, &desc);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (!wcmd->encoder || wcmd->pass || wcmd->compute_pass) return;     // another pass is active
+    wcmd->compute_pass = wgpuCommandEncoderBeginComputePass(wcmd->encoder, nullptr);
 }
-
 
 void wgpu_cmd_end_compute_pass(gfx_command_buffer_t* cmd)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    if (!wgpu_cmd->compute_pass) return;
-    wgpuComputePassEncoderEnd(wgpu_cmd->compute_pass);
-    wgpuComputePassEncoderRelease(wgpu_cmd->compute_pass);
-    wgpu_cmd->compute_pass = nullptr;
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (!wcmd->compute_pass) return;
+    wgpuComputePassEncoderEnd(wcmd->compute_pass);
+    wgpuComputePassEncoderRelease(wcmd->compute_pass);
+    wcmd->compute_pass = nullptr;
 }
-
 
 void wgpu_cmd_bind_compute_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_compute_t* pipeline)
 {
-    // TODO: depends on wgpu_create_compute_pipeline, which is not implemented yet.
-    (void)cmd; (void)pipeline;
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_compute_pipeline_t* p = (wgpu_compute_pipeline_t*)pipeline;
+    if (wcmd->compute_pass && p) wgpuComputePassEncoderSetPipeline(wcmd->compute_pass, p->pipeline);
 }
-
 
 void wgpu_cmd_scissor(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpuRenderPassEncoderSetScissorRect(wgpu_cmd->pass, x, y, w, h);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (wcmd->pass) wgpuRenderPassEncoderSetScissorRect(wcmd->pass, x, y, w, h);
 }
-
 
 void wgpu_cmd_viewport(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpuRenderPassEncoderSetViewport(wgpu_cmd->pass, (float)x, (float)y, (float)w, (float)h, 0.0f, 1.0f);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (wcmd->pass) wgpuRenderPassEncoderSetViewport(wcmd->pass, (float)x, (float)y, (float)w, (float)h, 0.0f, 1.0f);
 }
-
 
 void wgpu_cmd_bind_pipeline(gfx_command_buffer_t* cmd, gfx_pipeline_t* pipeline)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_pipeline_t * wgpu_pipeline = (wgpu_pipeline_t*)pipeline;
-
-    wgpuRenderPassEncoderSetPipeline(wgpu_cmd->pass, wgpu_pipeline->pipeline);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_pipeline_t* p = (wgpu_pipeline_t*)pipeline;
+    if (wcmd->pass && p) wgpuRenderPassEncoderSetPipeline(wcmd->pass, p->pipeline);
 }
-
 
 void wgpu_cmd_bind_descriptor_set(gfx_command_buffer_t* cmd, uint32_t slot, gfx_descriptor_set_t* set)
 {
-    wgpu_command_buffer_t*  wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_descriptor_set_t*  wgpu_set = (wgpu_descriptor_set_t*)set;
-    wgpu_descriptor_set_pool_t*  pool = wgpu_set->owner_pool;
-    wgpu_context_t *        wgpu_ctx  = wgpu_cmd->ctx;
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_descriptor_set_t* wset = (wgpu_descriptor_set_t*)set;
+    if (!wset || !wgpu_prepare_bind_group(wset)) return;
 
-    if(pool->dirty)
-    {
-        wgpu_buffer_t *buffer =  (wgpu_buffer_t*)pool->ubo_buffer;
-        wgpuQueueWriteBuffer(wgpu_ctx->queue, buffer->buffer, 0, pool->ubo_buffer_data_ptr, pool->ubo_buffer_data_size);
-        pool->dirty = false;
-    }
-
-    wgpuRenderPassEncoderSetBindGroup(wgpu_cmd->pass, slot, wgpu_set->bind_group, 0, &wgpu_set->dynamic_offset);
+    if (wcmd->pass)              wgpuRenderPassEncoderSetBindGroup(wcmd->pass, slot, wset->bind_group, 0, nullptr);
+    else if (wcmd->compute_pass) wgpuComputePassEncoderSetBindGroup(wcmd->compute_pass, slot, wset->bind_group, 0, nullptr);
 }
-
 
 void wgpu_cmd_bind_buffer_ib(gfx_command_buffer_t* cmd, gfx_index_format format, uint32_t offset, gfx_buffer_t* buffer)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_buffer_t*  wgpu_buffer = (wgpu_buffer_t*)buffer;
-
-    WGPUIndexFormat idx_format = (format == gfx_index_format_16) ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32;
-
-    wgpuRenderPassEncoderSetIndexBuffer(wgpu_cmd->pass, wgpu_buffer->buffer, idx_format, offset, WGPU_WHOLE_SIZE);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_buffer_t* b = (wgpu_buffer_t*)buffer;
+    if (!wcmd->pass || !b) return;
+    const WGPUIndexFormat index_format = (format == gfx_index_format_16) ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32;
+    wgpuRenderPassEncoderSetIndexBuffer(wcmd->pass, b->buffer, index_format, offset, WGPU_WHOLE_SIZE);
 }
-
 
 void wgpu_cmd_bind_buffer_vb(gfx_command_buffer_t* cmd, uint32_t slot, uint32_t offset, gfx_buffer_t* buffer)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_buffer_t * wgpu_buffer = (wgpu_buffer_t*)buffer;
-
-    wgpuRenderPassEncoderSetVertexBuffer(wgpu_cmd->pass, slot, wgpu_buffer->buffer, offset, WGPU_WHOLE_SIZE);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_buffer_t* b = (wgpu_buffer_t*)buffer;
+    if (wcmd->pass && b) wgpuRenderPassEncoderSetVertexBuffer(wcmd->pass, slot, b->buffer, offset, WGPU_WHOLE_SIZE);
 }
 
-//
-//  wgpu_cmd_draw
-//
 void wgpu_cmd_draw(gfx_command_buffer_t* cmd, uint32_t vertex_count, uint32_t instance_count)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-
-    wgpuRenderPassEncoderDraw(wgpu_cmd->pass, vertex_count, instance_count, 0, 0);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (wcmd->pass) wgpuRenderPassEncoderDraw(wcmd->pass, vertex_count, gfx_max(instance_count, 1u), 0, 0);
 }
 
-//
-//  gfx_cmd_draw_indexed
-//
 void wgpu_cmd_draw_indexed(gfx_command_buffer_t* cmd, uint32_t index_count, uint32_t first_idx, uint32_t instance_count, uint32_t vertex_offset)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-
-    wgpuRenderPassEncoderDrawIndexed(wgpu_cmd->pass, index_count, instance_count, first_idx, vertex_offset, 0);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (wcmd->pass) wgpuRenderPassEncoderDrawIndexed(wcmd->pass, index_count, gfx_max(instance_count, 1u), first_idx, (int32_t)vertex_offset, 0);
 }
 
 void wgpu_cmd_draw_indexed_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride)
 {
-    // WebGPU supports indirect draws, but does not support multi-draw in one call in all implementations.
-    // We emulate draw_count by issuing draw_count calls, each at offset + i*stride.
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_buffer_t* wgpu_buffer = (wgpu_buffer_t*)buffer;
-    if (wgpu_cmd == nullptr || wgpu_cmd->pass == nullptr || wgpu_buffer == nullptr)
-        return;
-
+    // WebGPU has no multi-draw: draw_count indirect draws at offset + i * stride (indirect_data_t layout, see the contract)
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    wgpu_buffer_t* b = (wgpu_buffer_t*)buffer;
+    if (!wcmd->pass || !b) return;
     for (uint32_t i = 0; i < draw_count; ++i)
-    {
-        uint64_t off = (uint64_t)offset + (uint64_t)i * (uint64_t)stride;
-        wgpuRenderPassEncoderDrawIndexedIndirect(wgpu_cmd->pass, wgpu_buffer->buffer, off);
-    }
+        wgpuRenderPassEncoderDrawIndexedIndirect(wcmd->pass, b->buffer, (uint64_t)offset + (uint64_t)i * stride);
 }
 
-
-//
-//  gfx_cmd_dispatch_compute
-//
 void wgpu_cmd_dispatch_compute(gfx_command_buffer_t* cmd, uint32_t x, uint32_t y, uint32_t z)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-
-    wgpuComputePassEncoderDispatchWorkgroups(wgpu_cmd->compute_pass, x, y, z);
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (wcmd->compute_pass) wgpuComputePassEncoderDispatchWorkgroups(wcmd->compute_pass, x, y, z);
 }
-
 
 void wgpu_cmd_push_marker(gfx_command_buffer_t* cmd, const char* marker)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    (void)wgpu_cmd; (void)marker;
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (wcmd->pass)              wgpuRenderPassEncoderPushDebugGroup(wcmd->pass, wgpu_str(marker));
+    else if (wcmd->compute_pass) wgpuComputePassEncoderPushDebugGroup(wcmd->compute_pass, wgpu_str(marker));
+    else if (wcmd->encoder)      wgpuCommandEncoderPushDebugGroup(wcmd->encoder, wgpu_str(marker));
 }
 
 void wgpu_cmd_pop_marker(gfx_command_buffer_t* cmd)
 {
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    (void)wgpu_cmd;
+    wgpu_command_buffer_t* wcmd = (wgpu_command_buffer_t*)cmd;
+    if (wcmd->pass)              wgpuRenderPassEncoderPopDebugGroup(wcmd->pass);
+    else if (wcmd->compute_pass) wgpuComputePassEncoderPopDebugGroup(wcmd->compute_pass);
+    else if (wcmd->encoder)      wgpuCommandEncoderPopDebugGroup(wcmd->encoder);
 }
 
+// contract B: WebGPU tracks resource states itself, barriers are hints for explicit APIs only
 void wgpu_cmd_buffer_barrier(gfx_command_buffer_t* cmd, gfx_buffer_t** buffers, uint32_t count, gfx_barrier src, gfx_barrier dst)
 {
-    // WebGPU resource states are tracked by the implementation; explicit barriers are not exposed.
     (void)cmd; (void)buffers; (void)count; (void)src; (void)dst;
 }
 
@@ -1882,40 +1982,4 @@ void wgpu_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** texture
     (void)cmd; (void)textures; (void)count; (void)src; (void)dst;
 }
 
-
-//
-// gfx_cmd_end
-//
-void wgpu_cmd_end(gfx_command_buffer_t* cmd)
-{
-    wgpu_command_buffer_t* wgpu_cmd = (wgpu_command_buffer_t*)cmd;
-    wgpu_context_t* wctx = wgpu_cmd->ctx;
-
-    if(wgpu_cmd->encoder != nullptr)
-    {
-        wgpu_cmd->commands = wgpuCommandEncoderFinish(wgpu_cmd->encoder, nullptr);
-        wgpuCommandEncoderRelease(wgpu_cmd->encoder);
-        wgpu_cmd->encoder = nullptr;
-    }
-}
-
-//
-// gfx_cmd_end
-//
-void wgpu_submit_cmd(gfx_context_t* ctx, gfx_command_buffer_t* cmd, gfx_submit_options options)
-{
-    wgpu_context_t* wctx = from_ctx(ctx);
-    wgpu_command_buffer_t * cmd_buffer = (wgpu_command_buffer_t *)cmd;
-
-    wgpuInstanceProcessEvents(wctx->instance);
-
-    if(cmd_buffer->commands != nullptr)
-    {
-        wgpuQueueSubmit(wctx->queue, 1, &cmd_buffer->commands);
-        wgpuCommandBufferRelease(cmd_buffer->commands);
-
-        cmd_buffer->encoder = nullptr;
-    }
-}
-
-#endif
+#endif // WEBGPU_AVAILABLE

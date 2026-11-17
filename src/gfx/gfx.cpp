@@ -9,7 +9,8 @@
     #define VULKAN_AVAILABLE
 #endif
 
-#if __has_include(<webgpu/webgpu.h>)
+// same detection as gfx_webgpu.h: emscripten ships <webgpu/webgpu.h>, the desktop Dawn build has <webgpu.h>
+#if defined(__EMSCRIPTEN__) || __has_include(<webgpu.h>)
     #define WEBGPU_AVAILABLE
 #endif
 
@@ -922,7 +923,8 @@ void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
 
 // --- CONTEXT ---
 void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps) {
-    g_tbl->pfn_get_caps(ctx, caps);
+    if (g_tbl->pfn_get_caps) g_tbl->pfn_get_caps(ctx, caps);
+    else if (caps)           memset(caps, 0, sizeof(*caps));
 }
 
 // --- SWAPCHAIN ---
@@ -1328,6 +1330,15 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
 #ifdef WEBGPU_AVAILABLE
     // CONTEXT
     func_table->pfn_init                    = wgpu_init;
+    func_table->pfn_destroy                 = wgpu_destroy;
+    func_table->pfn_get_caps                = wgpu_get_caps;
+
+    // SURFACE / FRAME
+    func_table->pfn_surface_create          = wgpu_surface_create;
+    func_table->pfn_surface_destroy         = wgpu_surface_destroy;
+    func_table->pfn_surface_set_vsync       = wgpu_surface_set_vsync;
+    func_table->pfn_frame_begin             = wgpu_frame_begin;
+    func_table->pfn_frame_end               = wgpu_frame_end;
 
     // BUFFER
     func_table->pfn_buffer_create           = wgpu_create_buffer;
@@ -1336,6 +1347,8 @@ void gfx_init_webgpu(gfx_api_pfn* func_table)
 
     // SHADER
     func_table->pfn_shader_create           = wgpu_create_shader;
+    func_table->pfn_shader_get_descriptor_set_count = wgpu_shader_get_descriptor_set_count;
+    func_table->pfn_shader_get_uniforms     = wgpu_shader_get_uniforms;
     func_table->pfn_uniform_location        = wgpu_uniform_location;
     func_table->pfn_shader_destroy          = wgpu_destroy_shader;
 
