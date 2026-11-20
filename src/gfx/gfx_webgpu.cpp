@@ -1405,7 +1405,10 @@ void wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pip
 
     WGPUColorTargetState color_state = {};
         color_state.format    = color_format;
-        color_state.writeMask = WGPUColorWriteMask_All;     // as the Vulkan backend
+        color_state.writeMask = (rs.color_mask.red   ? WGPUColorWriteMask_Red   : WGPUColorWriteMask_None)
+                              | (rs.color_mask.green ? WGPUColorWriteMask_Green : WGPUColorWriteMask_None)
+                              | (rs.color_mask.blue  ? WGPUColorWriteMask_Blue  : WGPUColorWriteMask_None)
+                              | (rs.color_mask.alpha ? WGPUColorWriteMask_Alpha : WGPUColorWriteMask_None);
         color_state.blend     = rs.blend.enable ? &blend : nullptr;
 
     // a pass always has the depth attachment of its target: every pipeline declares it, disabled depth = always/no write

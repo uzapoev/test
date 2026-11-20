@@ -382,18 +382,6 @@ typedef enum gfx_load_op {
 } gfx_load_op;
 
 
-typedef enum gfx_pipeline_flags {
-    gfx_colormask_r     = 1 << 0,       /**< Enable Red color channel output writes */
-    gfx_colormask_g     = 1 << 1,       /**< Enable Green color channel output writes */
-    gfx_colormask_b     = 1 << 2,       /**< Enable Blue color channel output writes */
-    gfx_colormask_a     = 1 << 3,       /**< Enable Alpha color channel output writes */
-    gfx_colormask_rgba  = gfx_colormask_r | gfx_colormask_g | gfx_colormask_b | gfx_colormask_a, /**< Full RGBA color write permissions enabled */
-    gfx_depth_test      = 1 << 4,       /**< Enable hardware depth testing */
-    gfx_depth_write     = 1 << 5,       /**< Enable writing calculated fragment depth values into the depth buffer */
-    gfx_blend           = 1 << 6,       /**< Enable color alpha blending equations for the render target */
-    gfx_stencil         = 1 << 7,       /**< Enable stencil test pipeline operations */
-} gfx_pipeline_flags;
-
 
 typedef enum gfx_semantic {
     gfx_position,                       /**< Vertex positions data array (e.g., location/slot 0) */
@@ -794,49 +782,59 @@ typedef struct gfx_vertex_assembly {
 // --- Fixed-Function Render States Descriptors ---
 // ============================================================================
 
+// The parts are named so that a caller can keep (and reflect, see material_data.h) one part without the rest.
+// Every state is said once: a bool/enum field, no flag mask beside it. The primitive topology is gfx_vertex_assembly's.
+
+typedef struct gfx_blend_state_t {
+    bool                enable      = false;                /**< Globally toggles frame buffer blend interpolation math engines */
+    gfx_blend_mode      color_src   = gfx_blend_mode_one;   /**< Color equation scaling factor values source input multipliers */
+    gfx_blend_mode      color_dst   = gfx_blend_mode_one;   /**< Color equation scaling factor values target destination multipliers */
+    gfx_blend_op        color_op    = gfx_blend_op_add;     /**< Arithmetic operator equation combining calculated color factors */
+
+    gfx_blend_mode      alpha_src   = gfx_blend_mode_one;   /**< Alpha equation scaling factor values source input multipliers */
+    gfx_blend_mode      alpha_dst   = gfx_blend_mode_one;   /**< Alpha equation scaling factor values target destination multipliers */
+    gfx_blend_op        alpha_op    = gfx_blend_op_add;     /**< Arithmetic operator equation combining calculated alpha factors */
+} gfx_blend_state_t;
+
+
+typedef struct gfx_depth_state_t {
+    bool                enable      = true;                 /**< Depth test; off = every fragment passes (the write still follows `write`) */
+    bool                write       = true;                 /**< Toggles locking z-buffer outputs for updating pixel depth values */
+    gfx_cmp             mode        = gfx_cmp_lequal;       /**< Evaluation comparison math operators matching test conditions pass */
+} gfx_depth_state_t;
+
+
+typedef struct gfx_stencil_state_t {
+    gfx_cmp             func        = gfx_cmp_always;       /**< Testing condition comparison math operators matching stencil bits */
+    uint8_t             ref         = 0;                    /**< Reference integer mask bit matching stencil validation checks */
+    uint8_t             pass        = 0xFF;                 /**< Bitwise verification logic mask filters applied on dynamic reads */
+
+    gfx_stencil_op      opPass      = gfx_stencil_op_keep;  /**< Updates executed when depth testing and stencil validations both pass */
+    gfx_stencil_op      opFail      = gfx_stencil_op_keep;  /**< Updates executed when stencil validation fails immediately */
+    gfx_stencil_op      opZFail     = gfx_stencil_op_keep;  /**< Updates executed when stencil validation passes but depth testing fails */
+} gfx_stencil_state_t;
+
+
+typedef struct gfx_color_mask_t {
+    bool                red         = true;                 /**< Allow calculations to write pixels to output Red color channels */
+    bool                green       = true;                 /**< Allow calculations to write pixels to output Green color channels */
+    bool                blue        = true;                 /**< Allow calculations to write pixels to output Blue color channels */
+    bool                alpha       = true;                 /**< Allow calculations to write pixels to output Alpha color channels; all off = no color write (depth only) */
+} gfx_color_mask_t;
+
+
 typedef struct gfx_render_states_desc_t {
-    gfx_topology            topology    = gfx_topology_triangles;   /**< Hardware fallback primitive reconstruction topology rules */
     gfx_cull                culling     = gfx_cull_none;            /**< Hardware backface culling execution boundary options policies */
     gfx_face                face        = gfx_face_ccw;             /**< Winding evaluation determining vertex normal orientation directions */
-    uint32_t                states      = gfx_colormask_rgba | gfx_depth_test | gfx_depth_write; /**< Bitmask combinations mapping gfx_pipeline_flags */
 
     struct {
         gfx_pixel_format*   color;              /**< Array of pixel formats matching output color render pass attachments formats */
     } attachments;
 
-    struct {
-        bool                enable      = false;                /**< Globally toggles frame buffer blend interpolation math engines */
-        gfx_blend_mode      color_src   = gfx_blend_mode_one;   /**< Color equation scaling factor values source input multipliers */
-        gfx_blend_mode      color_dst   = gfx_blend_mode_one;   /**< Color equation scaling factor values target destination multipliers */
-        gfx_blend_op        color_op    = gfx_blend_op_add;     /**< Arithmetic operator equation combining calculated color factors */
-
-        gfx_blend_mode      alpha_src   = gfx_blend_mode_one;   /**< Alpha equation scaling factor values source input multipliers */
-        gfx_blend_mode      alpha_dst   = gfx_blend_mode_one;   /**< Alpha equation scaling factor values target destination multipliers */
-        gfx_blend_op        alpha_op    = gfx_blend_op_add;     /**< Arithmetic operator equation combining calculated alpha factors */
-    } blend;
-    
-    struct {
-        bool                enable      = true;                 /**< Globally toggles geometry visibility depth testing routines */
-        bool                write       = true;                 /**< Toggles locking z-buffer outputs for updating pixel depth values */
-        gfx_cmp             mode        = gfx_cmp_lequal;       /**< Evaluation comparison math operators matching test conditions pass */
-    } depth;
-
-    struct {
-        gfx_cmp             func        = gfx_cmp_always;       /**< Testing condition comparison math operators matching stencil bits */
-        uint8_t             ref         = 0;                    /**< Reference integer mask bit matching stencil validation checks */
-        uint8_t             pass        = 0xFF;                 /**< Bitwise verification logic mask filters applied on dynamic reads */
-
-        gfx_stencil_op      opPass      = gfx_stencil_op_keep;  /**< Updates executed when depth testing and stencil validations both pass */
-        gfx_stencil_op      opFail      = gfx_stencil_op_keep;  /**< Updates executed when stencil validation fails immediately */
-        gfx_stencil_op      opZFail     = gfx_stencil_op_keep;  /**< Updates executed when stencil validation passes but depth testing fails */
-    } stencil;
-
-    struct {
-        bool                red         = true;                 /**< Allow calculations to write pixels to output Red color channels */
-        bool                green       = true;                 /**< Allow calculations to write pixels to output Green color channels */
-        bool                blue        = true;                 /**< Allow calculations to write pixels to output Blue color channels */
-        bool                alpha       = true;                 /**< Allow calculations to write pixels to output Alpha color channels */
-    } color_mask;
+    gfx_blend_state_t       blend;
+    gfx_depth_state_t       depth;
+    gfx_stencil_state_t     stencil;
+    gfx_color_mask_t        color_mask;
 } gfx_render_states_desc_t;
 
 

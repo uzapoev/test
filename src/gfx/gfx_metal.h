@@ -1204,7 +1204,7 @@ static void metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc,
     pd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
     gfx_render_states_desc_t* rs = &desc->render_states;
-    if ((rs->states & gfx_blend) || rs->blend.enable) {
+    if (rs->blend.enable) {
         pd.colorAttachments[0].blendingEnabled = YES;
         pd.colorAttachments[0].sourceRGBBlendFactor = metal_blend_factor(rs->blend.color_src);
         pd.colorAttachments[0].destinationRGBBlendFactor = metal_blend_factor(rs->blend.color_dst);
@@ -1219,11 +1219,7 @@ static void metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc,
     if (rs->color_mask.green) mask |= MTLColorWriteMaskGreen;
     if (rs->color_mask.blue)  mask |= MTLColorWriteMaskBlue;
     if (rs->color_mask.alpha) mask |= MTLColorWriteMaskAlpha;
-    if (rs->states & gfx_colormask_rgba)
-        mask = MTLColorWriteMaskAll;
-    if (mask == MTLColorWriteMaskNone)
-        mask = MTLColorWriteMaskAll;
-    pd.colorAttachments[0].writeMask = mask;
+    pd.colorAttachments[0].writeMask = mask;                // all off = no color write (depth only pass)
 
     NSError* error = nil;
     id<MTLRenderPipelineState> pso = [mctx->device newRenderPipelineStateWithDescriptor:pd error:&error];
@@ -1235,17 +1231,15 @@ static void metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc,
     }
 
     MTLDepthStencilDescriptor* dd = [[MTLDepthStencilDescriptor alloc] init];
-    bool depth_test = (rs->states & gfx_depth_test) || rs->depth.enable;
-    bool depth_write = (rs->states & gfx_depth_write) || rs->depth.write;
-    dd.depthCompareFunction = depth_test ? metal_cmp_map[rs->depth.mode] : MTLCompareFunctionAlways;
-    dd.depthWriteEnabled = depth_write ? YES : NO;
+    dd.depthCompareFunction = rs->depth.enable ? metal_cmp_map[rs->depth.mode] : MTLCompareFunctionAlways;
+    dd.depthWriteEnabled = rs->depth.write ? YES : NO;
 
     metal_pipeline_t* mp = (metal_pipeline_t*)calloc(1, sizeof(metal_pipeline_t));
     mp->pipeline = pso;
     mp->depth_state = [mctx->device newDepthStencilStateWithDescriptor:dd];
     mp->face = metal_face_map[rs->face];
     mp->cull_mode = metal_cull_map[rs->culling];
-    mp->topology = metal_topology_map[rs->topology];
+    mp->topology = metal_topology_map[desc->assembly.topology];
     *out_pipeline = &mp->handle;
 }
 

@@ -3352,12 +3352,16 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     // blend
     VkPipelineColorBlendAttachmentState blend_attachment    = {};
     blend_attachment.blendEnable            = desc->render_states.blend.enable;
-    blend_attachment.colorWriteMask         = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    const gfx_color_mask_t& cm = desc->render_states.color_mask;
+    blend_attachment.colorWriteMask         = (cm.red   ? VK_COLOR_COMPONENT_R_BIT : 0) | (cm.green ? VK_COLOR_COMPONENT_G_BIT : 0)
+                                            | (cm.blue  ? VK_COLOR_COMPONENT_B_BIT : 0) | (cm.alpha ? VK_COLOR_COMPONENT_A_BIT : 0);
 
     blend_attachment.srcColorBlendFactor    = gfx_blend_mode_2_vk(desc->render_states.blend.color_src);
     blend_attachment.dstColorBlendFactor    = gfx_blend_mode_2_vk(desc->render_states.blend.color_dst);
+    blend_attachment.colorBlendOp           = gfx_blend_op_2_vk(desc->render_states.blend.color_op);
     blend_attachment.srcAlphaBlendFactor    = gfx_blend_mode_2_vk(desc->render_states.blend.alpha_src);
     blend_attachment.dstAlphaBlendFactor    = gfx_blend_mode_2_vk(desc->render_states.blend.alpha_dst);
+    blend_attachment.alphaBlendOp           = gfx_blend_op_2_vk(desc->render_states.blend.alpha_op);
 
 
     VkPipelineColorBlendStateCreateInfo blend_state = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
