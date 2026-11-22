@@ -393,17 +393,17 @@ static void metal_ensure_depth_texture(metal_surface_t* surface) {
 // CONTEXT
 // ============================================================================
 
-static void metal_init(gfx_settings_t* settings, gfx_context_t** out_ctx) {
-    if (!settings || !out_ctx) return;
+static gfx_result metal_init(gfx_settings_t* settings, gfx_context_t** out_ctx) {
+    if (!settings || !out_ctx) return gfx_error_invalid_parameter;
 
     metal_context_t* mctx = (metal_context_t*)calloc(1, sizeof(metal_context_t));
-    if (!mctx) return;
+    if (!mctx) return gfx_error_out_of_memory;
 
     mctx->device = MTLCreateSystemDefaultDevice();
     mctx->color_format = MTLPixelFormatBGRA8Unorm;
     if (!mctx->device) {
         free(mctx);
-        return;
+        return gfx_error_not_supported;
     }
 
     mctx->cmd_queue = [mctx->device newCommandQueue];
@@ -476,6 +476,7 @@ static void metal_init(gfx_settings_t* settings, gfx_context_t** out_ctx) {
     mctx->default_texture = &def_tex->handle;
 
     *out_ctx = &mctx->handle;
+    return gfx_ok;
 }
 
 static void metal_destroy(gfx_context_t* ctx) {
@@ -511,9 +512,9 @@ static void metal_get_caps(gfx_context_t* ctx, gfx_caps_t* caps) {
 // SURFACE / FRAME
 // ============================================================================
 
-static void metal_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface) {
+static gfx_result metal_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface) {
     metal_context_t* mctx = from_ctx(ctx);
-    if (!mctx || !desc || !out_surface) return;
+    if (!mctx || !desc || !out_surface) return gfx_error_invalid_parameter;
 
     metal_surface_t* surface = (metal_surface_t*)calloc(1, sizeof(metal_surface_t));
     surface->mctx = mctx;
@@ -548,6 +549,7 @@ static void metal_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, g
 
     metal_ensure_depth_texture(surface);
     *out_surface = &surface->handle;
+    return gfx_ok;
 }
 
 static void metal_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface) {
@@ -662,9 +664,9 @@ static void metal_frame_end(gfx_frame_t* frame) {
 // BUFFER
 // ============================================================================
 
-static void metal_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer) {
+static gfx_result metal_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer) {
     metal_context_t* mctx = from_ctx(ctx);
-    if (!mctx || !desc || !out_buffer) return;
+    if (!mctx || !desc || !out_buffer) return gfx_error_invalid_parameter;
 
     MTLResourceOptions options = MTLResourceStorageModeShared;
     switch (desc->memory_hint) {
@@ -691,7 +693,7 @@ static void metal_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx
     if (!buffer) {
         mctx->dbglog(gfx_msg_error, "metal: failed to create buffer size=%u", desc->size);
         *out_buffer = nullptr;
-        return;
+        return gfx_error_out_of_memory;
     }
     if (desc->label)
         buffer.label = [NSString stringWithUTF8String:desc->label];
@@ -701,6 +703,7 @@ static void metal_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx
     mbuf->usage = desc->usage;
     mbuf->size = desc->size;
     *out_buffer = &mbuf->handle;
+    return gfx_ok;
 }
 
 static void metal_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset) {
@@ -798,9 +801,9 @@ static uint32_t metal_merge_uniforms(gfx_uniform_t* uniforms, uint32_t count) {
     return count;
 }
 
-static void metal_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader) {
+static gfx_result metal_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader) {
     metal_context_t* mctx = from_ctx(ctx);
-    if (!mctx || !desc || !out_shader) return;
+    if (!mctx || !desc || !out_shader) return gfx_error_invalid_parameter;
 
     metal_shader_t* mshader = (metal_shader_t*)calloc(1, sizeof(metal_shader_t));
     NSError* error = nil;
@@ -893,6 +896,7 @@ static void metal_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx
     }
 
     *out_shader = &mshader->handle;
+    return gfx_ok;
 }
 
 static uint32_t metal_shader_get_descriptor_set_count(gfx_shader_t* shader) {
@@ -964,9 +968,9 @@ static void metal_shader_destroy(gfx_context_t* ctx, gfx_shader_t* shader) {
 // SAMPLER / TEXTURE
 // ============================================================================
 
-static void metal_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler) {
+static gfx_result metal_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler) {
     metal_context_t* mctx = from_ctx(ctx);
-    if (!mctx || !desc || !out_sampler) return;
+    if (!mctx || !desc || !out_sampler) return gfx_error_invalid_parameter;
 
     MTLSamplerDescriptor* sd = [MTLSamplerDescriptor new];
     sd.minFilter = metal_filter_map[desc->minmag];
@@ -980,6 +984,7 @@ static void metal_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, g
     metal_sampler_t* s = (metal_sampler_t*)calloc(1, sizeof(metal_sampler_t));
     s->sampler = [mctx->device newSamplerStateWithDescriptor:sd];
     *out_sampler = &s->handle;
+    return gfx_ok;
 }
 
 static void metal_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler) {
@@ -990,15 +995,15 @@ static void metal_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler) {
     free(s);
 }
 
-static void metal_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture) {
+static gfx_result metal_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture) {
     metal_context_t* mctx = from_ctx(ctx);
-    if (!mctx || !desc || !out_texture) return;
+    if (!mctx || !desc || !out_texture) return gfx_error_invalid_parameter;
 
     MTLPixelFormat fmt = metal_pixel_format(desc->format);
     if (fmt == MTLPixelFormatInvalid) {
         mctx->dbglog(gfx_msg_error, "metal: unsupported pixel format %d", (int)desc->format);
         *out_texture = nullptr;
-        return;
+        return gfx_error_format_not_supported;
     }
 
     uint32_t mips = desc->mip_levels ? desc->mip_levels : 1;
@@ -1030,7 +1035,7 @@ static void metal_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, g
     if (!texture) {
         mctx->dbglog(gfx_msg_error, "metal: texture create failed");
         *out_texture = nullptr;
-        return;
+        return gfx_error_out_of_memory;
     }
     if (desc->label)
         texture.label = [NSString stringWithUTF8String:desc->label];
@@ -1073,6 +1078,7 @@ static void metal_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, g
     mtex->height = desc->height;
     mtex->mip_levels = mips;
     *out_texture = &mtex->handle;
+    return gfx_ok;
 }
 
 static void metal_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset) {
@@ -1168,15 +1174,15 @@ static MTLBlendOperation metal_blend_op(gfx_blend_op op) {
     }
 }
 
-static void metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline) {
+static gfx_result metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline) {
     metal_context_t* mctx = from_ctx(ctx);
-    if (!mctx || !desc || !out_pipeline) return;
+    if (!mctx || !desc || !out_pipeline) return gfx_error_invalid_parameter;
 
     metal_shader_t* mshader = (metal_shader_t*)desc->shader;
     if (!mshader || !mshader->vertex_func || !mshader->fragment_func) {
         mctx->dbglog(gfx_msg_error, "metal: pipeline requires vertex+fragment functions");
         *out_pipeline = nullptr;
-        return;
+        return gfx_error_shader_invalid;
     }
 
     MTLVertexDescriptor* vd = [[MTLVertexDescriptor alloc] init];
@@ -1227,7 +1233,7 @@ static void metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc,
         mctx->dbglog(gfx_msg_error, "metal PSO failed: %s",
                      error ? [[error localizedDescription] UTF8String] : "?");
         *out_pipeline = nullptr;
-        return;
+        return gfx_error;
     }
 
     MTLDepthStencilDescriptor* dd = [[MTLDepthStencilDescriptor alloc] init];
@@ -1241,6 +1247,7 @@ static void metal_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc,
     mp->cull_mode = metal_cull_map[rs->culling];
     mp->topology = metal_topology_map[desc->assembly.topology];
     *out_pipeline = &mp->handle;
+    return gfx_ok;
 }
 
 static void metal_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline) {
@@ -1252,15 +1259,15 @@ static void metal_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
     free(mp);
 }
 
-static void metal_pipeline_compute_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline) {
+static gfx_result metal_pipeline_compute_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline) {
     metal_context_t* mctx = from_ctx(ctx);
-    if (!mctx || !desc || !out_pipeline) return;
+    if (!mctx || !desc || !out_pipeline) return gfx_error_invalid_parameter;
 
     metal_shader_t* mshader = (metal_shader_t*)desc->shader;
     if (!mshader || !mshader->compute_func) {
         mctx->dbglog(gfx_msg_error, "metal: compute pipeline needs compute function");
         *out_pipeline = nullptr;
-        return;
+        return gfx_error_shader_invalid;
     }
 
     NSError* error = nil;
@@ -1270,12 +1277,13 @@ static void metal_pipeline_compute_create(gfx_context_t* ctx, gfx_compute_pipeli
         mctx->dbglog(gfx_msg_error, "metal compute PSO failed: %s",
                      error ? [[error localizedDescription] UTF8String] : "?");
         *out_pipeline = nullptr;
-        return;
+        return gfx_error;
     }
 
     metal_pipeline_compute_t* mp = (metal_pipeline_compute_t*)calloc(1, sizeof(metal_pipeline_compute_t));
     mp->pipeline = pso;
     *out_pipeline = &mp->handle;
+    return gfx_ok;
 }
 
 static void metal_cmd_begin_compute_pass(gfx_command_buffer_t* cmd) {
@@ -1316,18 +1324,20 @@ static void metal_pipeline_compute_destroy(gfx_context_t* ctx, gfx_pipeline_comp
     free(mp);
 }
 
-static void metal_mesh_pipeline_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline) {
+static gfx_result metal_mesh_pipeline_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline) {
     metal_context_t* mctx = from_ctx(ctx);
     (void)desc;
     gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_mesh_pipeline_create");
     if (out_pipeline) *out_pipeline = nullptr;
+    return gfx_error_not_supported;
 }
 
-static void metal_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** out_pipeline) {
+static gfx_result metal_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** out_pipeline) {
     metal_context_t* mctx = from_ctx(ctx);
     (void)desc;
     gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_pipeline_raytrace_create");
     if (out_pipeline) *out_pipeline = nullptr;
+    return gfx_error_not_supported;
 }
 
 static void metal_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline) {
@@ -1403,12 +1413,12 @@ static void metal_create_descriptor_set_pool(metal_context_t* mctx, metal_shader
     }
 }
 
-static void metal_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx,
+static gfx_result metal_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx,
                                         gfx_descriptor_set_t** out_descriptor) {
     metal_context_t* mctx = from_ctx(ctx);
     metal_shader_t* mshader = (metal_shader_t*)shader;
     (void)set_idx;
-    if (!mctx || !mshader || !out_descriptor) return;
+    if (!mctx || !mshader || !out_descriptor) return gfx_error_invalid_parameter;
 
     if (!mshader->current_pool)
         metal_create_descriptor_set_pool(mctx, mshader, 2048, &mshader->current_pool);
@@ -1424,10 +1434,11 @@ static void metal_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader
             pool->free_set_count--;
             pool->next_free = i + 1;
             *out_descriptor = &pool->descriptor_sets[i].handle;
-            return;
+            return gfx_ok;
         }
     }
     *out_descriptor = nullptr;
+    return gfx_error_pool_exhausted;
 }
 
 static void metal_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle,
@@ -1767,23 +1778,25 @@ static void metal_cmd_draw_mesh_tasks_indirect(gfx_command_buffer_t* cmd, gfx_bu
     gfx_stub_not_implemented(mcmd && mcmd->mctx ? mcmd->mctx->dbglog : nullptr, "metal_cmd_draw_mesh_tasks_indirect");
 }
 
-static void metal_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc,
+static gfx_result metal_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc,
                                                 gfx_acceleration_structure_t** out_as) {
     metal_context_t* mctx = from_ctx(ctx);
     (void)desc;
     gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_acceleration_structure_create");
     if (out_as) *out_as = nullptr;
+    return gfx_error_not_supported;
 }
 
 static void metal_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t* as) {
     (void)ctx; (void)as;
 }
 
-static void metal_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** out_sbt) {
+static gfx_result metal_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** out_sbt) {
     metal_context_t* mctx = from_ctx(ctx);
     (void)desc;
     gfx_stub_not_implemented(mctx ? mctx->dbglog : nullptr, "metal_sbt_create");
     if (out_sbt) *out_sbt = nullptr;
+    return gfx_error_not_supported;
 }
 
 static void metal_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t* sbt) {

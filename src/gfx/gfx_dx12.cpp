@@ -35,16 +35,17 @@ static void dx12_stub_log(gfx_context_t* ctx, gfx_msg type, const char* msg)
     if (dctx && dctx->dbglog) dctx->dbglog(type, "%s", msg);
 }
 
-extern "C" void dx12_init(gfx_settings_t* settings, gfx_context_t** out_ctx)
+extern "C" gfx_result dx12_init(gfx_settings_t* settings, gfx_context_t** out_ctx)
 {
     dx12_context_t* dctx = (dx12_context_t*)calloc(1, sizeof(dx12_context_t));
-    if (!dctx) return;
+    if (!dctx) return gfx_error_out_of_memory;
 
     dctx->dbglog = settings ? settings->dbglog : nullptr;
     dctx->allocator = settings ? settings->allocator : nullptr;
     *out_ctx = &dctx->handle;
 
     dx12_stub_log(*out_ctx, gfx_msg_warning, "DX12 backend is stubbed (no device created).");
+    return gfx_ok;
 }
 
 
@@ -61,29 +62,32 @@ extern "C" void dx12_destroy(gfx_context_t *out_ctx)
 }
 
 
-extern "C" void dx12_create_buffer(gfx_context_t* /*ctx*/, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
+extern "C" gfx_result dx12_create_buffer(gfx_context_t* /*ctx*/, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
 {
     dx12_buffer_t* b = (dx12_buffer_t*)calloc(1, sizeof(dx12_buffer_t));
     if (b && desc) b->size = desc->size;
     *out_buffer = b ? &b->handle : nullptr;
+    return b ? gfx_ok : gfx_error_out_of_memory;
 }
 
 extern "C" void dx12_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t * buffer) { free(buffer); }
 
 
-extern "C" void dx12_create_shader(gfx_context_t* /*ctx*/, gfx_shader_desc_t* /*desc*/, gfx_shader_t** out_shader)
+extern "C" gfx_result dx12_create_shader(gfx_context_t* /*ctx*/, gfx_shader_desc_t* /*desc*/, gfx_shader_t** out_shader)
 {
     dx12_shader_t* s = (dx12_shader_t*)calloc(1, sizeof(dx12_shader_t));
     *out_shader = s ? &s->handle : nullptr;
+    return s ? gfx_ok : gfx_error_out_of_memory;
 }
 
-extern "C" void dx12_create_sampler(gfx_context_t* /*ctx*/, gfx_sampler_desc_t* /*desc*/, gfx_sampler_t** out_sampler)
+extern "C" gfx_result dx12_create_sampler(gfx_context_t* /*ctx*/, gfx_sampler_desc_t* /*desc*/, gfx_sampler_t** out_sampler)
 {
     dx12_sampler_t* s = (dx12_sampler_t*)calloc(1, sizeof(dx12_sampler_t));
     *out_sampler = s ? &s->handle : nullptr;
+    return s ? gfx_ok : gfx_error_out_of_memory;
 }
 
-extern "C" void dx12_create_texture(gfx_context_t* /*ctx*/, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
+extern "C" gfx_result dx12_create_texture(gfx_context_t* /*ctx*/, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
 {
     dx12_texture_t* t = (dx12_texture_t*)calloc(1, sizeof(dx12_texture_t));
     if (t && desc) {
@@ -93,30 +97,35 @@ extern "C" void dx12_create_texture(gfx_context_t* /*ctx*/, gfx_texture_desc_t* 
         t->fmt = desc->format;
     }
     *out_texture = t ? &t->handle : nullptr;
+    return t ? gfx_ok : gfx_error_out_of_memory;
 }
 
-extern "C" void dx12_create_pipeline(gfx_context_t* /*ctx*/, gfx_pipeline_desc_t* /*desc*/, gfx_pipeline_t** out_pipeline)
+extern "C" gfx_result dx12_create_pipeline(gfx_context_t* /*ctx*/, gfx_pipeline_desc_t* /*desc*/, gfx_pipeline_t** out_pipeline)
 {
     dx12_pipeline_t* p = (dx12_pipeline_t*)calloc(1, sizeof(dx12_pipeline_t));
     *out_pipeline = p ? &p->handle : nullptr;
+    return p ? gfx_ok : gfx_error_out_of_memory;
 }
 
-extern "C" void dx12_create_compute_pipeline(gfx_context_t* /*ctx*/, gfx_compute_pipeline_desc_t* /*desc*/, gfx_pipeline_compute_t** out_pipeline)
+extern "C" gfx_result dx12_create_compute_pipeline(gfx_context_t* /*ctx*/, gfx_compute_pipeline_desc_t* /*desc*/, gfx_pipeline_compute_t** out_pipeline)
 {
     dx12_compute_pipeline_t* p = (dx12_compute_pipeline_t*)calloc(1, sizeof(dx12_compute_pipeline_t));
     *out_pipeline = p ? &p->handle : nullptr;
+    return p ? gfx_ok : gfx_error_out_of_memory;
 }
 
 
-extern "C" void dx12_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc, gfx_pipeline_t **out_pipeline)
+extern "C" gfx_result dx12_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t * desc, gfx_pipeline_t **out_pipeline)
 {
+    return gfx_error_not_supported;
 }
 extern "C" void dx12_destroy_mesh_pipeline(gfx_context_t * ctx, gfx_pipeline_t * pipeline)
 {
 }
 
-extern "C" void dx12_create_raytrace_pipeline(gfx_context_t * ctx, gfx_raytrace_pipeline_desc_t * desc, gfx_pipeline_raytrace_t **out_pipeline)
+extern "C" gfx_result dx12_create_raytrace_pipeline(gfx_context_t * ctx, gfx_raytrace_pipeline_desc_t * desc, gfx_pipeline_raytrace_t **out_pipeline)
 {
+    return gfx_error_not_supported;
 }
 
 extern "C" void dx12_destroy_raytrace_pipeline(gfx_context_t * ctx, gfx_pipeline_raytrace_t* pipeline)
@@ -130,10 +139,11 @@ extern "C" void dx12_create_render_target(gfx_context_t* /*ctx*/, gfx_render_tar
     *out_target = t ? &t->handle : nullptr;
 }
 
-extern "C" void dx12_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
+extern "C" gfx_result dx12_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_descriptor)
 {
     dx12_descriptor_set_t* s = (dx12_descriptor_set_t*)calloc(1, sizeof(dx12_descriptor_set_t));
     *out_descriptor = s ? &s->handle : nullptr;
+    return s ? gfx_ok : gfx_error_out_of_memory;
 }
 
 extern "C" void dx12_create_cmd(gfx_context_t* /*ctx*/, gfx_command_buffer_t** out_cmd)

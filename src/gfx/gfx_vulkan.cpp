@@ -1178,13 +1178,13 @@ static void vk_gpu_memstatus(gfx_context_t * ctx)
 
 // --- CONTEXT ---
 
-void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
+gfx_result vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
 {
     assert(cfg && out_ctx);
 
     vk_context_t* vctx = (vk_context_t*)calloc(1, sizeof(vk_context_t));
     if (vctx == nullptr)
-        return;
+        return gfx_error_out_of_memory;
 
     if( cfg->allocator != nullptr )
         vctx->allocator = *cfg->allocator;
@@ -1351,6 +1351,7 @@ void vk_create_renderer(gfx_settings_t* cfg, gfx_context_t** out_ctx)
     }
     
     *out_ctx = &vctx->handle;
+    return gfx_ok;
 }
 
 void vk_get_caps(gfx_context_t* _ctx, gfx_caps_t *caps)
@@ -1639,12 +1640,16 @@ static bool _vk_reset_surface(vk_context_t* ctx, vk_surface_t* surface)
     return true;
 }
 
-void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface)
+gfx_result vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface)
 {
     vk_context_t * vctx = from_ctx(ctx);
 
     uint64_t handle = 0;
     vk_surface_t * surface = (vk_surface_t*)gfx_handle_pool_allocate_data(vctx->surface_pool, &handle);
+    if (surface == nullptr) {
+        vctx->dbg_log(gfx_msg_error, "failed to allocate vk_surface_t");
+        return gfx_error_pool_exhausted;
+    }
 
     // create timeline semaphore (frame sync) and binary semaphores (swapchain acquire/present)
     surface->timeline = _vk_create_semaphore(vctx->vk_device, true);
@@ -1684,6 +1689,7 @@ void vk_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface
     
     surface->handle = { handle };
     *out_surface = &surface->handle;
+    return gfx_ok;
 }
 
 // The present mode is picked when the swapchain is (re)created, so only mark the surface: vk_frame_begin rebuilds it before the next frame.
@@ -2026,7 +2032,7 @@ void _vk_create_renderpass(vk_context_t* vctx, VkFormat colorformat, VkFormat de
 
 
 // --- BUFFER ---
-void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
+gfx_result vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer)
 {
     vk_context_t * vctx = from_ctx(ctx);
 
@@ -2076,13 +2082,12 @@ void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
 
     uint64_t handle = 0;
     vk_buffer_t* buffer = (vk_buffer_t*)gfx_handle_pool_allocate_data(vctx->buffers_pool, &handle);
-    buffer->handle = { handle };
-
     if(!buffer)
     {
         vctx->dbg_log(gfx_msg_error, "failed to allocate vk_buffer_t %s", desc->label ? desc->label : "");
-        return;
+        return gfx_error_pool_exhausted;
     }
+    buffer->handle = { handle };
 
     buffer->is_mapped = mapped;
 
@@ -2091,6 +2096,7 @@ void vk_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t*
 
     *out_buffer = &buffer->handle;
     vk_gpu_memstatus(ctx);
+    return gfx_ok;
 }
 
 
@@ -2531,7 +2537,7 @@ static void _vk_create_descriptor_layouts(vk_context_t * ctx, vk_shader_t* shade
 
 
 
-void vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader)
+gfx_result vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader)
 {
     vk_context_t* vctx = from_ctx(ctx);
 
@@ -2539,14 +2545,14 @@ void vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
     {
         *out_shader = nullptr;
         vctx->dbg_log(gfx_msg_error, "error in shader (stages_count == 0)");
-        return;
+        return gfx_error_shader_invalid;
     }
 
     uint64_t handle = 0;
     vk_shader_t* shader = (vk_shader_t*)gfx_handle_pool_allocate_data(vctx->shaders_pool, &handle);
     if (shader == NULL) {
         vctx->dbg_log(gfx_msg_error, "failed to allocate shader %s", desc->label);
-        return;
+        return gfx_error_pool_exhausted;
     }
     shader->handle          = { handle };
     shader->stage_count    = desc->stage_count;
@@ -2566,6 +2572,7 @@ void vk_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t*
         shader->default_sets[i] = (vk_descriptor_set_t*)default_set;
     }
     *out_shader = &shader->handle;
+    return gfx_ok;
 }
 
 static gfx_uniform_loc_t make_uniform_loc(uint32_t shader_hash, gfx_uniform_type type, uint8_t set_idx,uint8_t binding_idx, uint8_t field_idx = 0)
@@ -2683,7 +2690,7 @@ uint64_t _descriptor_set_layout_hash(VkDescriptorSetLayoutBinding* bindings, siz
 };
 
 
-void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
+gfx_result vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set)
 {
     assert(ctx && shader && out_set);
 
@@ -2692,7 +2699,7 @@ void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
 
     if (set_idx > (vk_shader->set_count - 1)) {
         vctx->dbg_log(gfx_msg_error, "Descriptor set index(%u) is out of bounds(valid range is 0 to %u)", set_idx, vk_shader->set_count - 1);
-        return;
+        return gfx_error_out_of_range;
     }
 
     // 
@@ -2717,13 +2724,14 @@ void vk_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t
             // requested for (uniform lookup and the "handle from another shader" check use it)
             pool->descriptor_sets[pos].shader = vk_shader;
             *out_set = &pool->descriptor_sets[pos].handle;
-            return;
+            return gfx_ok;
         }
     }
 
     for (int i = 0; i < 1024; ++i) {
         printf("\n%d", pool->descriptor_sets[i].index_in_pool);
     }
+    return gfx_error_pool_exhausted;
 }
 
 
@@ -2908,7 +2916,7 @@ void vk_descriptor_set_write_sampler(gfx_descriptor_set_t* set, uint64_t handle,
 
 // --- SAMPLER ---
 
-void vk_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler)
+gfx_result vk_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler)
 {
     assert(ctx && desc && out_sampler);
     *out_sampler = nullptr;
@@ -2918,7 +2926,7 @@ void vk_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler
     uint64_t handle = 0;
     vk_sampler_t* sampler = (vk_sampler_t*)gfx_handle_pool_allocate_data(vctx->sampler_pool, &handle);
     if (sampler == nullptr)
-        return;
+        return gfx_error_pool_exhausted;
 
     // anisotropy doen't work with point filtration
     VkBool32 use_aniso = (desc->minmag != gfx_filter_point);
@@ -2947,11 +2955,12 @@ void vk_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler
         vctx->dbg_log(gfx_msg_error, "failed to create sampler");
 
         gfx_handle_pool_free(vctx->sampler_pool, handle);
-        return;
+        return gfx_error;
     }
 
     sampler->handle = { handle };
     *out_sampler = &sampler->handle;
+    return gfx_ok;
 }
 
 
@@ -2967,10 +2976,10 @@ void vk_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler)
 
 // --- TEXTURE ---
 
-void vk_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
+gfx_result vk_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture)
 {
     if( (ctx == nullptr) || (desc == nullptr) || (out_texture == nullptr))
-        return;
+        return gfx_error_invalid_parameter;
 
     *out_texture = nullptr;
 
@@ -2988,7 +2997,7 @@ void vk_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
     vkGetPhysicalDeviceFormatProperties(vctx->vk_physical_device, format, &properties);
     if((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
         vctx->dbg_log(gfx_msg_error, "not supported pixel format %s", gfx_to_string(desc->format));
-        return;
+        return gfx_error_format_not_supported;
     }
 
     auto snap0 = gfx_gpu_ram_usage(ctx);
@@ -3057,6 +3066,7 @@ void vk_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture
         vk_debug_set_texture_name(vctx, texture, desc->label);
     }
     vk_gpu_memstatus(ctx);
+    return texture ? gfx_ok : gfx_error_pool_exhausted;
 }
 
 void vk_texture_update_data(gfx_context_t* ctx, gfx_texture_t* /*texture*/, void* /*data*/, uint32_t /*size*/, uint32_t /*offset*/)
@@ -3283,7 +3293,7 @@ void vk_texture_destroy(gfx_context_t* ctx, gfx_texture_t* _texture)
 
 // --- PIPELINE ---
 
-void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline)
+gfx_result vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline)
 {
     assert(ctx);
     vk_context_t* vctx = (vk_context_t*)ctx;
@@ -3292,7 +3302,7 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     if(vkshader == nullptr)
     {
         vctx->dbg_log(gfx_msg_error, "failed to create pipeline: shader is NULL");
-        return;
+        return gfx_error_invalid_parameter;
     }
 
     VkVertexInputBindingDescription vertex_descriptor[8] = {};
@@ -3406,23 +3416,29 @@ void vk_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipel
     if(vkpipeline == nullptr)
     {
         vctx->dbg_log(gfx_msg_error, "failed to allocate vk_pipeline_t");
-        return;
+        return gfx_error_pool_exhausted;
     }
-    vkCreateGraphicsPipelines(vctx->vk_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vkpipeline->pipeline);
+    VkResult vk_result = vkCreateGraphicsPipelines(vctx->vk_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vkpipeline->pipeline);
+    if (vk_result != VK_SUCCESS) {
+        vctx->dbg_log(gfx_msg_error, "vkCreateGraphicsPipelines failed with %s error", string_VkResult(vk_result));
+        gfx_handle_pool_free(vctx->pipeline_pool, handle);
+        return gfx_error;
+    }
     vkpipeline->handle = { handle };
     vkpipeline->shader = vkshader;
     *out_pipeline = &vkpipeline->handle;
+    return gfx_ok;
 }
 
 
-void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline)
+gfx_result vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline)
 {
     vk_context_t* vctx = (vk_context_t*)ctx;
     vk_shader_t* vkshader = (vk_shader_t*)desc->shader;
 
     if (vkshader == nullptr) {
         vctx->dbg_log(gfx_msg_error, "failed to create pipeline: shader is NULL");
-        return;
+        return gfx_error_invalid_parameter;
     }
 
     VkPipelineShaderStageCreateInfo * compute_stage = nullptr;
@@ -3434,7 +3450,7 @@ void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t*
 
     if(compute_stage == nullptr) {
         vctx->dbg_log(gfx_msg_error, "shader(%s) doesn't have compute stage", vkshader->label);
-        return;
+        return gfx_error_shader_invalid;
     }
 
     // Pipeline
@@ -3447,7 +3463,7 @@ void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t*
         if (result != VK_SUCCESS) {
             auto err_str = string_VkResult(result);
             vctx->dbg_log(gfx_msg_error, "vkCreateComputePipelines failed with %s error", err_str);
-            return;
+            return gfx_error;
         }
     }
 
@@ -3456,7 +3472,7 @@ void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t*
 
     if(vk_pipeline == nullptr) {
         vctx->dbg_log(gfx_msg_error, "failed to allocate vk_compute_pipeline_t");
-        return;
+        return gfx_error_pool_exhausted;
     }
 
     vk_pipeline->handle     = { handle };
@@ -3464,6 +3480,7 @@ void vk_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t*
     vk_pipeline->pipeline   = pipeline;
 
     *out_pipeline = &vk_pipeline->handle;
+    return gfx_ok;
 }
 
 void vk_destroy_pipeline(gfx_context_t* ctx, gfx_pipeline_t* pipeline)
@@ -3492,16 +3509,18 @@ void vk_destroy_compute_pipeline(gfx_context_t* ctx, gfx_pipeline_compute_t* pip
     }
 }
 
-void vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline)
+gfx_result vk_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline)
 {
     vk_context_t* vctx = from_ctx(ctx);
     gfx_stub_not_implemented(vctx->dbg_log, "vk_create_mesh_pipeline");
+    return gfx_error_not_supported;
 }
 
-void vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
+gfx_result vk_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline)
 {
     vk_context_t* vctx = from_ctx(ctx);
     gfx_stub_not_implemented(vctx->dbg_log, "vk_create_raytrace_pipeline");
+    return gfx_error_not_supported;
 }
 
 void vk_destroy_mesh_pipeline(gfx_context_t* ctx, gfx_pipeline_t* desc)
@@ -3915,10 +3934,11 @@ void vk_cmd_draw_mesh_tasks_indirect(gfx_command_buffer_t* cmd, gfx_buffer_t* bu
 }
 
 
-void vk_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** out_acc)
+gfx_result vk_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** out_acc)
 {
     vk_context_t* vctx = from_ctx(ctx);
     gfx_stub_not_implemented(vctx->dbg_log, "gfx_acceleration_structure_create");
+    return gfx_error_not_supported;
 }
 
 void vk_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t acceleration_structure)
@@ -3927,10 +3947,11 @@ void vk_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_stru
     gfx_stub_not_implemented(vctx->dbg_log, "gfx_acceleration_structure_destroy");
 }
 
-void vk_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** out)
+gfx_result vk_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** out)
 {
     vk_context_t* vctx = from_ctx(ctx);
     gfx_stub_not_implemented(vctx->dbg_log, "gfx_sbt_create");
+    return gfx_error_not_supported;
 }
 
 void vk_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t sbt)

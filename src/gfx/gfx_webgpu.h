@@ -208,27 +208,27 @@ typedef struct wgpu_frame_t {
 } wgpu_frame_t;
 
 
-gfx_api void     wgpu_init(gfx_settings_t * settings, gfx_context_t** ctx);
+gfx_api gfx_result wgpu_init(gfx_settings_t * settings, gfx_context_t** ctx);
 gfx_api void     wgpu_destroy(gfx_context_t* ctx);
 gfx_api void     wgpu_get_caps(gfx_context_t* ctx, gfx_caps_t* caps);
 
-gfx_api void     wgpu_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
+gfx_api gfx_result wgpu_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
 gfx_api void     wgpu_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface);
 gfx_api gfx_result wgpu_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t* surface, bool vsync);
 gfx_api void     wgpu_frame_begin(gfx_context_t* ctx, gfx_surface_t* surface, gfx_frame_t** out_frame);
 gfx_api void     wgpu_frame_end(gfx_frame_t* frame);
 
-gfx_api void     wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
-gfx_api void     wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+gfx_api gfx_result wgpu_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+gfx_api gfx_result wgpu_create_shader(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
 gfx_api uint32_t wgpu_shader_get_descriptor_set_count(gfx_shader_t* shader);
 gfx_api uint32_t wgpu_shader_get_uniforms(gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms);
-gfx_api void     wgpu_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
-gfx_api void     wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
-gfx_api void     wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-gfx_api void     wgpu_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
-gfx_api void     wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-gfx_api void     wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
-gfx_api void     wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t se_idx, gfx_descriptor_set_t** descriptor);
+gfx_api gfx_result wgpu_create_sampler(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+gfx_api gfx_result wgpu_create_texture(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+gfx_api gfx_result wgpu_create_pipeline(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api gfx_result wgpu_create_compute_pipeline(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
+gfx_api gfx_result wgpu_create_mesh_pipeline(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+gfx_api gfx_result wgpu_create_raytrace_pipeline(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+gfx_api gfx_result wgpu_create_descriptor_set(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t se_idx, gfx_descriptor_set_t** descriptor);
 
 gfx_api void     wgpu_destroy_buffer(gfx_context_t* ctx, gfx_buffer_t* buffer);
 gfx_api void     wgpu_destroy_shader(gfx_context_t* ctx, gfx_shader_t* buffer);

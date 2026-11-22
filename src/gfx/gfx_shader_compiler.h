@@ -22,21 +22,26 @@ typedef enum shader_compile_option {
 } shader_compile_option;
 
 
-typedef struct compiled_stage_t {
+typedef struct gfx_shader_compiler_stage_t {
     gfx_shader_stage        stage;
-    char                    stage_entry_point_name[64];
-    uint32_t                stage_data_size;
-    char*                   stage_data;
-} compiled_stage_t;
+    char                    entry[64];      // entry point name
+    uint32_t                size;
+    char*                   data;
+} gfx_shader_compiler_stage_t;
 
 
-typedef struct compiled_shader_program_t {
+typedef struct gfx_shader_compiler_result_t {
     uint32_t                keyword_count;
     char*                   keywords[64];
 
-    uint32_t                blob_count;
-    compiled_stage_t*       blobs;
-} compiled_shader_program_t;
+    uint32_t                        blob_count;
+    gfx_shader_compiler_stage_t*    blobs;
+
+    // reflection of the target (Slang program layout); stage_mask = stages that really use the resource,
+    // resources no stage uses are dropped.
+    uint32_t                uniform_count;
+    gfx_uniform_t*          uniforms;
+} gfx_shader_compiler_result_t;
 
 
 typedef struct gfx_shader_compiler_request_desc_t {
@@ -59,11 +64,23 @@ struct gfx_shader_compiler_context_t;
 extern "C" void gfx_shader_compiler_context_create(uint64_t options, gfx_shader_compiler_context_t ** compiler_context);
 extern "C" void gfx_shader_compiler_context_destroy(gfx_shader_compiler_context_t * compiler_context);
 
-extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, gfx_shader_compiler_request_desc_t * desc, compiled_shader_program_t * programs);
-//extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, const char* name, const char* data, uint32_t size, shader_compile_target target, uint64_t options, compiled_shader_program_t * programs);
+// Returns 1 on success: free the result with gfx_shader_compiler_result_free. Returns 0 on failure, nothing to free.
+extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, gfx_shader_compiler_request_desc_t * desc, gfx_shader_compiler_result_t * result);
+extern "C" void gfx_shader_compiler_result_free(gfx_shader_compiler_result_t * result);
+//extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, const char* name, const char* data, uint32_t size, shader_compile_target target, uint64_t options, gfx_shader_compiler_result_t * result);
 
 
 #if defined (GFX_SHADER_COMPILER_IMPL)
+
+extern "C" void gfx_shader_compiler_result_free(gfx_shader_compiler_result_t * result)
+{
+    if (result == nullptr) return;
+    for (uint32_t i = 0; i < result->blob_count; ++i)
+        free(result->blobs[i].data);
+    free(result->blobs);
+    free(result->uniforms);
+    memset(result, 0, sizeof(*result));
+}
 
 #if __has_include(<slang/slang.h>)
 #include <slang/slang.h>
@@ -164,6 +181,237 @@ static void _find_pragma_multicompile(const char* data, char keywords[32][64], i
         while (isspace(*line) && *line != '\n') line++;
     }
 }
+
+// ---- reflection from the Slang program layout ----
+
+static gfx_format _slang_scalar_format(slang::TypeReflection::ScalarType st, uint32_t n)
+{
+    switch (st) {
+        case slang::TypeReflection::ScalarType::Int32:
+        case slang::TypeReflection::ScalarType::Bool:    return n <= 2 ? gfx_format_int2  : gfx_format_int4;
+        case slang::TypeReflection::ScalarType::UInt32:  return n <= 2 ? gfx_format_uint2 : gfx_format_uint4;
+        default:                                         return n <= 1 ? gfx_format_float1 : (n == 2 ? gfx_format_float2 : gfx_format_float4);
+    }
+}
+
+// Same conventions as the SPIR-V reflection the backends were written against:
+// vector: count 1, stride 8/16; matrix: float4 x rows; array: count = elements, stride = array stride.
+static void _slang_fill_field(slang::TypeLayoutReflection* tl, const char* name, uint32_t offset, gfx_uniform_t* u, uint32_t field_idx)
+{
+    auto* field = &u->buffer.fields[field_idx];
+    memset(field, 0, sizeof(*field));
+    strncpy(field->name, name ? name : "", sizeof(field->name) - 1);
+    field->offset = (uint16_t)offset;
+
+    const uint32_t size = (uint32_t)tl->getSize(SLANG_PARAMETER_CATEGORY_UNIFORM);
+    switch (tl->getKind())
+    {
+        case slang::TypeReflection::Kind::Scalar:
+            field->type = _slang_scalar_format(tl->getScalarType(), 1);
+            field->count = 1;
+            field->stride = (uint16_t)size;
+            break;
+
+        case slang::TypeReflection::Kind::Vector: {
+            uint32_t n = (uint32_t)tl->getElementCount();
+            field->type = _slang_scalar_format(tl->getElementTypeLayout()->getScalarType(), n);
+            field->count = 1;
+            field->stride = (uint16_t)(n <= 2 ? 8 : 16);
+        } break;
+
+        case slang::TypeReflection::Kind::Matrix: {
+            uint32_t rows = tl->getRowCount() ? tl->getRowCount() : 1;
+            field->type = gfx_format_float4;
+            field->count = (uint16_t)rows;
+            field->stride = (uint16_t)(size / rows);
+        } break;
+
+        case slang::TypeReflection::Kind::Array: {
+            slang::TypeLayoutReflection* el = tl->getElementTypeLayout();
+            uint32_t n = (uint32_t)tl->getElementCount();
+            switch (el->getKind()) {
+                case slang::TypeReflection::Kind::Scalar: field->type = _slang_scalar_format(el->getScalarType(), 1); break;
+                case slang::TypeReflection::Kind::Vector: field->type = _slang_scalar_format(el->getElementTypeLayout()->getScalarType(), (uint32_t)el->getElementCount()); break;
+                default:                                  field->type = gfx_format_float4; break;
+            }
+            field->count = (uint16_t)n;
+            field->stride = (uint16_t)tl->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM);
+        } break;
+
+        default: // structs and anything else: raw float4 rows, still writable through the field offset
+            field->type = gfx_format_float4;
+            field->stride = 16;
+            field->count = (uint16_t)((size + 15) / 16);
+            break;
+    }
+}
+
+// Fields of a constant buffer element struct.
+static void _slang_fill_ubo_fields(const char* shader_name, slang::TypeLayoutReflection* element, gfx_uniform_t* u)
+{
+    const uint32_t max_fields = (uint32_t)(sizeof(u->buffer.fields) / sizeof(u->buffer.fields[0]));
+    uint32_t count = element ? element->getFieldCount() : 0;
+    if (count > max_fields) {
+        printf("\n[shader compiler] %s: '%s' has %u fields, only %u are reflected", shader_name, u->name, count, max_fields);
+        count = max_fields;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        slang::VariableLayoutReflection* f = element->getFieldByIndex(i);
+        _slang_fill_field(f->getTypeLayout(), f->getName(), (uint32_t)f->getOffset(SLANG_PARAMETER_CATEGORY_UNIFORM), u, i);
+    }
+    u->buffer.field_count = (uint16_t)count;
+    u->buffer.size = (uint16_t)((element ? element->getSize(SLANG_PARAMETER_CATEGORY_UNIFORM) + 15 : 15) & ~(size_t)15);
+}
+
+typedef struct _slang_location_t {
+    SlangParameterCategory  category;
+    uint32_t                space;
+    uint32_t                index;
+} _slang_location_t;
+
+// Program layout -> gfx_uniform_t list (stage_mask left 0) + where each one lives, for the usage query.
+static uint32_t _slang_reflect_layout(const char* shader_name, slang::ProgramLayout* layout, shader_compile_target target,
+                                      gfx_uniform_t* uniforms, _slang_location_t* locations, uint32_t max_uniforms)
+{
+    uint32_t count = 0;
+    // one shared binding space (Vulkan/WebGPU) or the D3D/Metal register classes (b/t/s/u, Metal buffer/texture/sampler)
+    const bool descriptor_slots = target == shader_target_spirv || target == shader_target_wgsl || target == shader_target_glsl;
+    const SlangParameterCategory cb_category = descriptor_slots ? SLANG_PARAMETER_CATEGORY_DESCRIPTOR_TABLE_SLOT : SLANG_PARAMETER_CATEGORY_CONSTANT_BUFFER;
+    const uint32_t max_fields = (uint32_t)(sizeof(uniforms->buffer.fields) / sizeof(uniforms->buffer.fields[0]));
+
+    // global ordinary uniforms ("uniform float4 x;" at file scope) are packed by Slang into one implicit constant buffer
+    const uint32_t param_count = layout->getParameterCount();
+    if (layout->getGlobalConstantBufferSize() > 0 && count < max_uniforms)
+    {
+        gfx_uniform_t* u = &uniforms[count];
+        memset(u, 0, sizeof(*u));
+        strncpy(u->name, "globalParams", sizeof(u->name) - 1);
+        u->type    = gfx_uniform_ubo;
+        u->group   = 0;
+        u->binding = (uint16_t)layout->getGlobalConstantBufferBinding();
+
+        uint32_t fcount = 0;
+        for (uint32_t i = 0; i < param_count; ++i) {
+            slang::VariableLayoutReflection* p = layout->getParameterByIndex(i);
+            if ((SlangParameterCategory)p->getCategory() != SLANG_PARAMETER_CATEGORY_UNIFORM) continue;
+            if (fcount >= max_fields) {
+                printf("\n[shader compiler] %s: more than %u global uniforms, '%s' is not reflected", shader_name, max_fields, p->getName());
+                continue;
+            }
+            _slang_fill_field(p->getTypeLayout(), p->getName(), (uint32_t)p->getOffset(SLANG_PARAMETER_CATEGORY_UNIFORM), u, fcount++);
+        }
+        u->buffer.field_count = (uint16_t)fcount;
+        u->buffer.size = (uint16_t)((layout->getGlobalConstantBufferSize() + 15) & ~(size_t)15);
+        locations[count] = { cb_category, 0, u->binding };
+        count++;
+    }
+
+    for (uint32_t i = 0; i < param_count && count < max_uniforms; ++i)
+    {
+        slang::VariableLayoutReflection* p = layout->getParameterByIndex(i);
+        const SlangParameterCategory category = (SlangParameterCategory)p->getCategory();
+        if (category == SLANG_PARAMETER_CATEGORY_UNIFORM || category == SLANG_PARAMETER_CATEGORY_NONE)
+            continue;   // global ordinary data is handled above
+        if (p->getCategoryCount() > 1) {
+            printf("\n[shader compiler] %s: '%s' mixes resource kinds (struct with resources?), not reflected", shader_name, p->getName());
+            continue;
+        }
+
+        slang::TypeLayoutReflection* tl = p->getTypeLayout();
+        gfx_uniform_t* u = &uniforms[count];
+        memset(u, 0, sizeof(*u));
+        strncpy(u->name, p->getName() ? p->getName() : "", sizeof(u->name) - 1);
+        u->binding = (uint16_t)p->getOffset(category);
+        u->group   = (uint16_t)p->getBindingSpace(category);
+
+        switch (tl->getKind())
+        {
+            case slang::TypeReflection::Kind::ConstantBuffer:
+                u->type = gfx_uniform_ubo;
+                _slang_fill_ubo_fields(shader_name, tl->getElementTypeLayout(), u);
+                break;
+
+            case slang::TypeReflection::Kind::SamplerState:
+                u->type = gfx_uniform_sampler;
+                break;
+
+            case slang::TypeReflection::Kind::Resource: {
+                const SlangResourceShape shape  = tl->getResourceShape();
+                const SlangResourceShape base   = (SlangResourceShape)(shape & SLANG_RESOURCE_BASE_SHAPE_MASK);
+                const SlangResourceAccess access = tl->getResourceAccess();
+                const bool writable = access == SLANG_RESOURCE_ACCESS_READ_WRITE || access == SLANG_RESOURCE_ACCESS_WRITE;
+                const bool arrayed  = (shape & SLANG_TEXTURE_ARRAY_FLAG) != 0;
+
+                if (base == SLANG_STRUCTURED_BUFFER || base == SLANG_BYTE_ADDRESS_BUFFER) {
+                    u->type = gfx_uniform_storage_buffer;
+                    u->storage.access = writable ? gfx_access_rw : gfx_access_read;
+                    if (base == SLANG_STRUCTURED_BUFFER)
+                        _slang_fill_ubo_fields(shader_name, tl->getElementTypeLayout(), u);
+                    break;
+                }
+
+                u->texture.access = access == SLANG_RESOURCE_ACCESS_WRITE ? gfx_access_write : (writable ? gfx_access_rw : gfx_access_read);
+                switch (base) {
+                    case SLANG_TEXTURE_2D:   u->texture.dimension = arrayed ? gfx_texture2d_array : gfx_texture2d;
+                                             u->type = arrayed ? gfx_uniform_texture2d_array : gfx_uniform_texture2d; break;
+                    case SLANG_TEXTURE_3D:   u->texture.dimension = gfx_texture3d;      u->type = gfx_uniform_texture3d;      break;
+                    case SLANG_TEXTURE_CUBE: u->texture.dimension = gfx_texture2d_cube; u->type = gfx_uniform_texture2d_cube; break;
+                    default:
+                        printf("\n[shader compiler] %s: '%s' resource shape %d is not supported", shader_name, u->name, (int)base);
+                        continue;
+                }
+                if (writable) u->type = gfx_uniform_storage_image;
+            } break;
+
+            default:
+                printf("\n[shader compiler] %s: '%s' kind %d is not supported", shader_name, u->name, (int)tl->getKind());
+                continue;
+        }
+
+        locations[count] = { category, u->group, u->binding };
+        count++;
+    }
+    return count;
+}
+
+// Reflection of a compiled request: layout of the (single) target + which entry point really uses what
+// (IMetadata::isParameterLocationUsed, after dead code elimination). Unused resources are dropped.
+static void _slang_reflect_program(SlangCompileRequest* request, const char* shader_name, shader_compile_target target,
+                                   const gfx_shader_stage* entry_point_stages, int entry_point_count, gfx_shader_compiler_result_t* program)
+{
+    slang::ProgramLayout* layout = (slang::ProgramLayout*)spGetReflection(request);
+    if (layout == nullptr)
+        return;
+
+    gfx_uniform_t       uniforms[32];
+    _slang_location_t   locations[32];
+    const uint32_t count = _slang_reflect_layout(shader_name, layout, target, uniforms, locations, 32);
+
+    slang::IComponentType* linked = nullptr;
+    spCompileRequest_getProgramWithEntryPoints(request, &linked);
+    for (int ep = 0; ep < entry_point_count; ++ep)
+    {
+        const uint16_t stage_bit = (uint16_t)(1u << entry_point_stages[ep]);
+        slang::IMetadata* metadata = nullptr;
+        if (linked == nullptr || SLANG_FAILED(linked->getEntryPointMetadata(ep, 0, &metadata)) || metadata == nullptr) {
+            for (uint32_t i = 0; i < count; ++i) uniforms[i].stage_mask |= stage_bit;    // unknown: assume used
+            continue;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            bool used = false;
+            metadata->isParameterLocationUsed(locations[i].category, locations[i].space, locations[i].index, used);
+            if (used) uniforms[i].stage_mask |= stage_bit;
+        }
+        metadata->release();
+    }
+    if (linked) linked->release();
+
+    program->uniforms = (gfx_uniform_t*)calloc(count ? count : 1, sizeof(gfx_uniform_t));
+    program->uniform_count = 0;
+    for (uint32_t i = 0; i < count; ++i)
+        if (uniforms[i].stage_mask != 0)
+            program->uniforms[program->uniform_count++] = uniforms[i];
+}
 /*
 static void _reflect_slang_program(SlangCompileRequest* compile_request, gfx_shader_meta_t* out_meta)
 {
@@ -232,7 +480,7 @@ extern "C" void gfx_shader_compiler_context_destroy(gfx_shader_compiler_context_
 }
 
 
-static int gfx_compile_shader(gfx_shader_compiler_context_t * context, const char* name, const char* data, uint32_t size, shader_compile_target target, uint64_t options, compiled_shader_program_t * program)
+static int gfx_compile_shader(gfx_shader_compiler_context_t * context, const char* name, const char* data, uint32_t size, shader_compile_target target, uint64_t options, gfx_shader_compiler_result_t * program)
 {
     if(context == nullptr) return 0;
 
@@ -262,8 +510,12 @@ static int gfx_compile_shader(gfx_shader_compiler_context_t * context, const cha
     if (SLANG_FAILED(outSession->createCompileRequest(&compile_request)))
     {
         printf("\n Failed to create CompileRequest ");
+        outSession->release();
         return 0;
     }
+
+    // our own #pragma vertex/fragment/compute/multicompile are "unknown pragma" (15601) for slang
+    spOverrideDiagnosticSeverity(compile_request, 15601, SLANG_SEVERITY_DISABLED);
 
     // add defines
     //spAddPreprocessorDefine(compile_request, "DEEP_THOUGHT", "" );    // #define DEEP_THOUGHT
@@ -286,8 +538,11 @@ static int gfx_compile_shader(gfx_shader_compiler_context_t * context, const cha
 
     // Slang's SPIR-V backend is stable when emitting SPIR-V 1.3 and later, however, support for SPIR-V 1.0, 1.1 and 1.2 is still experimental
     // spirv_1_3 spirv_1_4 spirv_1_5
-    auto profile = context->global_session->findProfile("spirv_1_3");
-    spSetTargetProfile(compile_request, target_id, profile);
+    if (target == shader_target_spirv)
+    {
+        auto profile = context->global_session->findProfile("spirv_1_3");
+        spSetTargetProfile(compile_request, target_id, profile);
+    }
 
     const char* stage_names [] = {
         pragma_entry_point_vertex_name,
@@ -301,8 +556,15 @@ static int gfx_compile_shader(gfx_shader_compiler_context_t * context, const cha
         SLANG_STAGE_COMPUTE
     };
 
+    const gfx_shader_stage gfx_stages [] = {
+        gfx_shader_vertex,
+        gfx_shader_fragment,
+        gfx_shader_compute
+    };
+
     int slang_entry_point_index_count = 0;
     int slang_entry_point_indexes[8] = { };
+    gfx_shader_stage entry_point_stages[8] = { };
     char entry_point_names[8][64]    = { }; // creepy
 
     for(int i = 0; i < _countof(stage_names); ++i)
@@ -312,48 +574,61 @@ static int gfx_compile_shader(gfx_shader_compiler_context_t * context, const cha
             continue;
 
         int entrypoint_id = spAddEntryPoint(compile_request, translation_unit, ep_name, slang_stages[i]);
+        entry_point_stages[slang_entry_point_index_count] = gfx_stages[i];
         slang_entry_point_indexes[slang_entry_point_index_count++] = entrypoint_id;
     }
 
-    if(SLANG_FAILED(spCompile(compile_request)))
+    const bool compiled = SLANG_SUCCEEDED(spCompile(compile_request));
+
+    // errors, and warnings of a successful compilation
+    const char * diagnostics = spGetDiagnosticOutput(compile_request);
+    if (diagnostics && diagnostics[0])
+        printf("\n[shader compiler] %s:\n%s", name ? name : "", diagnostics);
+
+    int ok = compiled ? 1 : 0;
+    if (compiled)
     {
-        const char * diagnostics = spGetDiagnosticOutput(compile_request);
-        printf(diagnostics);
-        spDestroyCompileRequest(compile_request);
-        return 0;
-    }
+        _slang_reflect_program(compile_request, name, target, entry_point_stages, slang_entry_point_index_count, program);
 
-    //gfx_shader_meta_t meta = {};
-    //_reflect_slang_program(compile_request, &meta);
+        program->blob_count = slang_entry_point_index_count;
+        program->blobs = (gfx_shader_compiler_stage_t*)calloc(slang_entry_point_index_count, sizeof(gfx_shader_compiler_stage_t));
 
-    program->blob_count = slang_entry_point_index_count;
-    program->blobs = (compiled_stage_t*)calloc(slang_entry_point_index_count, sizeof(compiled_stage_t));
-
-    for (size_t i = 0; i < slang_entry_point_index_count; i++)
-    {
-        ISlangBlob* shlang_blob = nullptr;
-        if (SLANG_SUCCEEDED(spGetEntryPointCodeBlob(compile_request, slang_entry_point_indexes[i], target_id, &shlang_blob)))
+        for (int i = 0; i < slang_entry_point_index_count && ok; i++)
         {
-           // _reflect_slang_program(compile_request, target_id, &meta);
+            ISlangBlob* shlang_blob = nullptr;
+            if (SLANG_FAILED(spGetEntryPointCodeBlob(compile_request, slang_entry_point_indexes[i], target_id, &shlang_blob)) || !shlang_blob)
+            {
+                printf("\n[shader compiler] %s: no code for entry point '%s'", name ? name : "", entry_point_names[i]);
+                ok = 0;
+                break;
+            }
 
-            program->blobs[i].stage_data_size = (uint32_t)shlang_blob->getBufferSize();
-            program->blobs[i].stage_data = (char*)calloc(1, shlang_blob->getBufferSize());
-            strncpy(program->blobs[i].stage_entry_point_name, entry_point_names[i], sizeof(program->blobs[i].stage_entry_point_name) - 2);
+            gfx_shader_compiler_stage_t* stage = &program->blobs[i];
+            stage->stage = entry_point_stages[i];
+            stage->size  = (uint32_t)shlang_blob->getBufferSize();
+            stage->data  = (char*)calloc(1, stage->size);
+            strncpy(stage->entry, entry_point_names[i], sizeof(stage->entry) - 1);
 
-            if (program->blobs[i].stage_data != nullptr)
-                memcpy(program->blobs[i].stage_data, shlang_blob->getBufferPointer(), shlang_blob->getBufferSize());
+            if (stage->data != nullptr)
+                memcpy(stage->data, shlang_blob->getBufferPointer(), stage->size);
+            else
+                ok = 0;
 
             shlang_blob->Release();
         }
+
+        if (!ok)
+            gfx_shader_compiler_result_free(program);
     }
 
     spDestroyCompileRequest(compile_request);
-    return 1;
+    outSession->release();
+    return ok;
 }
 
-extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, gfx_shader_compiler_request_desc_t * desc, compiled_shader_program_t * programs)
+extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, gfx_shader_compiler_request_desc_t * desc, gfx_shader_compiler_result_t * result)
 {
-    return gfx_compile_shader(context, desc->name, desc->data, desc->size, desc->target, desc->options, programs);
+    return gfx_compile_shader(context, desc->name, desc->data, desc->size, desc->target, desc->options, result);
 }
 /*
 struct gfx_shader_meta_t{};
@@ -475,7 +750,7 @@ extern "C" void gfx_shader_compiler_context_destroy(gfx_shader_compiler_context_
     printf("\ngfx_shader_compiler_context_destroy: install slang shader compiler tool: ");
 }
 
-extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, gfx_shader_compiler_request_desc_t * desc, compiled_shader_program_t * programs) {
+extern "C" int gfx_compile_shader(gfx_shader_compiler_context_t * context, gfx_shader_compiler_request_desc_t * desc, gfx_shader_compiler_result_t * result) {
     printf("\ngfx_compile_shader: install slang shader compiler tool: ");
     return 0;
 }

@@ -879,17 +879,43 @@ gfx_api gfx_backend  gfx_detect_backend()
 #endif
 }
 
-void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
+// Common body of every gfx_*_create: checks arguments, calls the backend, guarantees *out == nullptr on failure.
+// fn is the backend pfn (null = not implemented by this backend), args are passed to it before out.
+template<typename Fn, typename T, typename... Args>
+static gfx_result gfx_create_call(const char* name, Fn fn, bool args_ok, T** out, Args... args)
 {
+    if (!out)
+        return gfx_error_invalid_parameter;
+    *out = nullptr;
+    if (!args_ok)
+        return gfx_error_invalid_parameter;
+    if (!fn) {
+        gfx_stub_not_implemented(nullptr, name);
+        return gfx_error_not_supported;
+    }
+    gfx_result res = fn(args..., out);
+    if (res != gfx_ok)
+        *out = nullptr;
+    else if (!*out)
+        res = gfx_error;            // backend reported success but produced nothing
+    return res;
+}
+
+gfx_result gfx_init(gfx_settings_t* settings, gfx_context_t** out_ctx)
+{
+    if (!out_ctx || !settings)
+        return gfx_error_invalid_parameter;
+    *out_ctx = nullptr;
+
     if(g_tbl != nullptr) {
         _gfx_error(nullptr, gfx_msg_error, "Graphics subsystem is already initialized. Only one instance is allowed.");
-        return;
+        return gfx_error_invalid_state;
     }
 
     g_tbl = (gfx_api_pfn*)calloc(1, sizeof(gfx_api_pfn));
     if(!g_tbl) {
         _gfx_error(nullptr, gfx_msg_error, "Failed to allocate memory for the graphics API function table.");
-        return;
+        return gfx_error_out_of_memory;
     }
 
     gfx_backend backend = settings->backend;
@@ -915,9 +941,17 @@ void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx)
         #ifdef DX12_AVAILABLE
         case gfx_backend_d3d12:     gfx_init_dx12(g_tbl);   break;
         #endif
+
+        default: break;
     }
 
-    g_tbl->pfn_init(settings, ctx);
+    // backend not compiled in or its init failed: drop the table so gfx_init can be retried with another backend
+    gfx_result res = gfx_create_call("gfx_init", g_tbl->pfn_init, true, out_ctx, settings);
+    if (res != gfx_ok) {
+        free(g_tbl);
+        g_tbl = nullptr;
+    }
+    return res;
 }
 
 
@@ -929,16 +963,14 @@ void gfx_get_caps(gfx_context_t* ctx, gfx_caps_t* caps) {
 
 // --- SWAPCHAIN ---
 
-gfx_surface_t gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc)
+gfx_result gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface)
 {
-    gfx_surface_t * surface = nullptr;
-    g_tbl->pfn_surface_create(ctx, desc, &surface);
-    return { surface ->idx };
+    return gfx_create_call("gfx_surface_create", g_tbl ? g_tbl->pfn_surface_create : nullptr, ctx && desc, out_surface, ctx, desc);
 }
 
-void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface)
+void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface)
 {
-    g_tbl->pfn_surface_destroy(ctx, &surface);
+    g_tbl->pfn_surface_destroy(ctx, surface);
 }
 
 gfx_result gfx_surface_set_vsync(gfx_context_t* ctx, gfx_surface_t surface, bool vsync)
@@ -964,13 +996,8 @@ gfx_result gfx_end_frame(gfx_frame_t* frame)
 }
 
 // --- BUFFER ---
-void gfx_create_buffer(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer) {
-    g_tbl->pfn_buffer_create(ctx, desc, buffer);
-}
-gfx_api gfx_buffer_t* gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc) {
-    gfx_buffer_t* result = nullptr;
-    g_tbl->pfn_buffer_create(ctx, desc, &result);
-    return result;
+gfx_api gfx_result gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer) {
+    return gfx_create_call("gfx_buffer_create", g_tbl ? g_tbl->pfn_buffer_create : nullptr, ctx && desc, out_buffer, ctx, desc);
 }
 gfx_api void gfx_buffer_update_data(gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset) {
     g_tbl->pfn_buffer_update_data(ctx, buffer, data, size, offset);
@@ -981,10 +1008,8 @@ void gfx_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer) {
 }
 
 // --- SHADER ---
-gfx_api gfx_shader_t* gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc) {
-    gfx_shader_t* result = nullptr;
-    g_tbl->pfn_shader_create(ctx, desc, &result);
-    return result;
+gfx_api gfx_result gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader) {
+    return gfx_create_call("gfx_shader_create", g_tbl ? g_tbl->pfn_shader_create : nullptr, ctx && desc, out_shader, ctx, desc);
 }
 
 uint32_t gfx_shader_get_descriptor_set_count(gfx_shader_t* shader) {
@@ -1005,10 +1030,8 @@ void gfx_shader_destroy(gfx_context_t* ctx, gfx_shader_t* buffer) {
 }
 
 // --- SAMPLER ---
-gfx_api gfx_sampler_t* gfx_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc) {
-    gfx_sampler_t* result = nullptr;
-    g_tbl->pfn_sampler_create(ctx, desc, &result);
-    return result;
+gfx_api gfx_result gfx_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler) {
+    return gfx_create_call("gfx_sampler_create", g_tbl ? g_tbl->pfn_sampler_create : nullptr, ctx && desc, out_sampler, ctx, desc);
 }
 
 void gfx_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler) {
@@ -1016,10 +1039,8 @@ void gfx_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler) {
 }
 
 // --- TEXTURE ---
-gfx_api gfx_texture_t* gfx_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc) {
-    gfx_texture_t* result = nullptr;
-    g_tbl->pfn_texture_create(ctx, desc, &result);
-    return result;
+gfx_api gfx_result gfx_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture) {
+    return gfx_create_call("gfx_texture_create", g_tbl ? g_tbl->pfn_texture_create : nullptr, ctx && desc, out_texture, ctx, desc);
 }
 
 gfx_api void gfx_texture_update_data(gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset) {
@@ -1052,17 +1073,13 @@ void gfx_texture_destroy(gfx_context_t* ctx, gfx_texture_t* texture) {
 }
 
 // --- PIPELINE ---
-gfx_api gfx_pipeline_t* gfx_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc) {
-    gfx_pipeline_t* result = nullptr;
-    g_tbl->pfn_pipeline_create(ctx, desc, &result);
-    return result;
+gfx_api gfx_result gfx_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline) {
+    return gfx_create_call("gfx_pipeline_create", g_tbl ? g_tbl->pfn_pipeline_create : nullptr, ctx && desc, out_pipeline, ctx, desc);
 }
 
 
-gfx_api gfx_pipeline_compute_t* gfx_compute_pipeline_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc) {
-    gfx_pipeline_compute_t* pipeline = nullptr;
-    g_tbl->pfn_pipeline_compute_create(ctx, desc, &pipeline);
-    return pipeline;
+gfx_api gfx_result gfx_compute_pipeline_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline) {
+    return gfx_create_call("gfx_compute_pipeline_create", g_tbl ? g_tbl->pfn_pipeline_compute_create : nullptr, ctx && desc, out_pipeline, ctx, desc);
 }
 void gfx_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline) {
     g_tbl->pfn_pipeline_destroy(ctx, pipeline);
@@ -1071,18 +1088,12 @@ void gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compute_t* pi
     if (!g_tbl || !g_tbl->pfn_pipeline_compute_destroy) { gfx_stub_not_implemented(nullptr, "gfx_compute_pipeline_destroy"); return; }
     g_tbl->pfn_pipeline_compute_destroy(ctx, pipeline);
 }
-gfx_api gfx_pipeline_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc) {
-    gfx_pipeline_t* result = nullptr;
-    if (!g_tbl || !g_tbl->pfn_mesh_pipeline_create) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_mesh_create"); return result; }
-    g_tbl->pfn_mesh_pipeline_create(ctx, desc, &result);
-    return result;
+gfx_api gfx_result gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline) {
+    return gfx_create_call("gfx_pipeline_mesh_create", g_tbl ? g_tbl->pfn_mesh_pipeline_create : nullptr, ctx && desc, out_pipeline, ctx, desc);
 }
 
-gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc) {
-    gfx_pipeline_raytrace_t* result = nullptr;
-    if (!g_tbl || !g_tbl->pfn_pipeline_raytrace_create) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_create"); return result; }
-    g_tbl->pfn_pipeline_raytrace_create(ctx, desc, &result);
-    return result;
+gfx_api gfx_result gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** out_pipeline) {
+    return gfx_create_call("gfx_pipeline_raytrace_create", g_tbl ? g_tbl->pfn_pipeline_raytrace_create : nullptr, ctx && desc, out_pipeline, ctx, desc);
 }
 gfx_api void gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline) {
     if (!g_tbl || !g_tbl->pfn_pipeline_raytrace_destroy) { gfx_stub_not_implemented(nullptr, "gfx_pipeline_raytrace_destroy"); return; }
@@ -1091,10 +1102,8 @@ gfx_api void gfx_pipeline_raytrace_destroy(gfx_context_t* ctx, gfx_pipeline_rayt
 
 
 // --- DESCRIPTOR SET ---
-gfx_api gfx_descriptor_set_t* gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx) {
-    gfx_descriptor_set_t* result = nullptr;
-    g_tbl->pfn_descriptor_set_create(ctx, shader, set_idx, &result);
-    return result;
+gfx_api gfx_result gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set) {
+    return gfx_create_call("gfx_descriptor_set_create", g_tbl ? g_tbl->pfn_descriptor_set_create : nullptr, ctx && shader, out_set, ctx, shader, set_idx);
 }
 void gfx_descriptor_set_write_buffer_data(gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size) {
     g_tbl->pfn_descriptor_set_write_buffer_data(set, handle, data, size);
@@ -1180,31 +1189,27 @@ void gfx_cmd_texture_barrier(gfx_command_buffer_t* cmd, gfx_texture_t** textures
     g_tbl->pfn_cmd_texture_barrier(cmd, textures, count, src, dst);
 }
 
-gfx_acceleration_structure_t gfx_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc)
+gfx_result gfx_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** out_as)
 {
-    gfx_acceleration_structure_t *as = nullptr;
-    g_tbl->pfn_acceleration_structure_create(ctx, desc, &as);
-    return *as;
+    return gfx_create_call("gfx_acceleration_structure_create", g_tbl ? g_tbl->pfn_acceleration_structure_create : nullptr, ctx && desc, out_as, ctx, desc);
 }
 
 
-void gfx_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t acceleration_structure)
+void gfx_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t* acceleration_structure)
 {
-    g_tbl->pfn_acceleration_structure_destroy(ctx, &acceleration_structure);
+    g_tbl->pfn_acceleration_structure_destroy(ctx, acceleration_structure);
 }
 
 
-gfx_sbt_t gfx_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc)
+gfx_result gfx_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** out_sbt)
 {
-    gfx_sbt_t *sbt = nullptr;
-    g_tbl->pfn_sbt_create(ctx, desc, &sbt);
-    return *sbt;
+    return gfx_create_call("gfx_sbt_create", g_tbl ? g_tbl->pfn_sbt_create : nullptr, ctx && desc, out_sbt, ctx, desc);
 }
 
 
-void gfx_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t sbt)
+void gfx_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t* sbt)
 {
-    g_tbl->pfn_sbt_destroy(ctx, &sbt);
+    g_tbl->pfn_sbt_destroy(ctx, sbt);
 }
 
 
@@ -1236,12 +1241,12 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
 {
     memset(func_table, 0, sizeof(gfx_api_pfn));
 #ifdef VULKAN_AVAILABLE
-    assign_extern( func_table->pfn_init,     void, vk_create_renderer,  (gfx_settings_t * settings, gfx_context_t ** ctx) );
+    assign_extern( func_table->pfn_init,     gfx_result, vk_create_renderer,  (gfx_settings_t * settings, gfx_context_t ** ctx) );
     assign_extern( func_table->pfn_destroy,  void, vk_destroy_renderer, (gfx_context_t * ctx) );
     assign_extern( func_table->pfn_get_caps, void, vk_get_caps,         (gfx_context_t * ctx, gfx_caps_t * caps) );
 
     // SURFACE
-    assign_extern(func_table->pfn_surface_create,  void, vk_surface_create, (gfx_context_t * ctx, gfx_surface_desc_t * desc, gfx_surface_t ** out_surface) );
+    assign_extern(func_table->pfn_surface_create,  gfx_result, vk_surface_create, (gfx_context_t * ctx, gfx_surface_desc_t * desc, gfx_surface_t ** out_surface) );
     assign_extern(func_table->pfn_surface_destroy, void, vk_surface_destroy, (gfx_context_t * ctx, gfx_surface_t * surface) );
     assign_extern(func_table->pfn_surface_set_vsync, gfx_result, vk_surface_set_vsync, (gfx_context_t * ctx, gfx_surface_t * surface, bool vsync) );
 
@@ -1250,7 +1255,7 @@ void gfx_init_vulkan(gfx_api_pfn* func_table)
     assign_extern(func_table->pfn_frame_end,    void, vk_frame_end, (gfx_frame_t * frame));
 
     // BUFFER
-    assign_extern(func_table->pfn_buffer_create,      void, vk_buffer_create,       (gfx_context_t * ctx, gfx_buffer_desc_t * desc, gfx_buffer_t * *out_buffer));
+    assign_extern(func_table->pfn_buffer_create,      gfx_result, vk_buffer_create,       (gfx_context_t * ctx, gfx_buffer_desc_t * desc, gfx_buffer_t * *out_buffer));
     assign_extern(func_table->pfn_buffer_update_data, void, vk_buffer_update_data,  (gfx_context_t * ctx, gfx_buffer_t * buffer, void* data, uint32_t size, uint32_t offset));
     assign_extern(func_table->pfn_buffer_destroy,     void, vk_buffer_destroy,      (gfx_context_t * ctx, gfx_buffer_t * buffer));
 

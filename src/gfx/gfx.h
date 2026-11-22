@@ -13,13 +13,14 @@
 *       surface_desc.vsync              = true;
 *       surface_desc.preferred_format   = gfx_pixel_format_rgba8;
 *       surface_desc.sample_count       = gfx_sample_1x;
-*   auto surface = gfx_surface_create(ctx, &surface_desc);
+*   gfx_surface_t * surface = nullptr;
+*   gfx_surface_create(ctx, &surface_desc, &surface);
 * 
 *   gfx_pass_info_t pass = {0}
 *       pass.clear_color = rgba(255,255,255,255);
 *       pass.clear_depth = 0;
 * 
-*   auto frame = gfx_begin_frame(ctx, &surface);
+*   auto frame = gfx_begin_frame(ctx, surface);
 *       gfx_cmd_begin_pass(frame->cmd, &pass);
 * 
 *       // draw here
@@ -941,9 +942,10 @@ typedef struct gfx_timestamp_t {
 /**
  * @brief Initializes the primary graphics subsystem context based on requested settings.
  * @param settings Pointer to the initial runtime and limits configuration.
- * @param[out] ctx Pointer to a pointer that will store the allocated context handle.
+ * @param[out] out_ctx Receives the allocated context handle.
+ * @return gfx_ok on success; on error *out_ctx is set to nullptr and the gfx_result says why.
  */
-gfx_api void gfx_init(gfx_settings_t* settings, gfx_context_t** ctx);
+gfx_api gfx_result gfx_init(gfx_settings_t* settings, gfx_context_t** out_ctx);
 
 /**
  * @brief Queries the hardware capabilities matrix and supported features of the active GPU.
@@ -963,15 +965,16 @@ gfx_api void gfx_get_stats(gfx_context_t* ctx, gfx_stats_t* stats);
  * @brief Creates an OS-tied presentation surface viewport.
  * @param ctx Reference to the active graphics context.
  * @param desc Configuration parameters for the presentation window.
- * @return A unique type-safe handle to the created surface.
+ * @param[out] out_surface Receives the created surface.
+ * @return gfx_ok on success; on error *out_surface is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_surface_t gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc);
+gfx_api gfx_result gfx_surface_create(gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
 
 /**
  * @brief Safely tears down and releases an active presentation surface viewport.
  * @param surface Handle of the surface to destroy.
  */
-gfx_api void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t surface);
+gfx_api void gfx_surface_destroy(gfx_context_t* ctx, gfx_surface_t* surface);
 
 /**
  * @brief Switches vertical synchronization of a surface while it is in use (an options menu, for example).
@@ -1006,9 +1009,10 @@ gfx_api gfx_result gfx_end_frame(gfx_frame_t* frame);
  * @brief Allocates a new hardware data buffer (Vertex, Index, Uniform, or Storage).
  * @param ctx Reference to the active graphics context.
  * @param desc Properties and usage flags driving the allocation layout.
- * @return Pointer to the allocated internal buffer wrapper state.
+ * @param[out] out_buffer Receives the allocated buffer.
+ * @return gfx_ok on success; on error *out_buffer is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_buffer_t* gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc);
+gfx_api gfx_result gfx_buffer_create(gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** out_buffer);
 
 /**
  * @brief Synchronously uploads raw host memory data into an existing hardware buffer slot.
@@ -1037,9 +1041,10 @@ gfx_api void gfx_buffer_destroy(gfx_context_t* ctx, gfx_buffer_t* buffer);
  * @brief Compiles and links an executable multi-stage shader program binary.
  * @param ctx Reference to the active graphics context.
  * @param desc Structural assembly bytecode configurations.
- * @return Pointer to the compiled internal shader state mapping metadata.
+ * @param[out] out_shader Receives the compiled shader.
+ * @return gfx_ok on success; on error *out_shader is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_shader_t* gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc);
+gfx_api gfx_result gfx_shader_create(gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** out_shader);
 
 /**
  * @brief Queries the total number of unique descriptor set layout groupings used by the shader.
@@ -1082,9 +1087,10 @@ gfx_api void gfx_shader_destroy(gfx_context_t* ctx, gfx_shader_t* shader);
  * @param ctx Reference to the active graphics context.
  * @param shader Reference pointer to the compiled shader program defining the layout.
  * @param set_idx Mapping index of the descriptor group set register (e.g., set = X).
- * @return Pointer to the allocated resource descriptor set binding tracker.
+ * @param[out] out_set Receives the allocated descriptor set.
+ * @return gfx_ok on success; on error *out_set is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_descriptor_set_t* gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx);
+gfx_api gfx_result gfx_descriptor_set_create(gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** out_set);
 
 /**
  * @brief Schedules an immediate update writing host-provided raw values into a set's UBO memory slice.
@@ -1136,9 +1142,10 @@ gfx_api void gfx_descriptor_set_destroy(gfx_context_t* ctx, gfx_descriptor_set_t
  * @brief Allocates an immutable hardware state block for filtering texture coordinate lookups.
  * @param ctx Reference to the active graphics context.
  * @param desc Properties configuring edge wrapping and anisotropy rules.
- * @return Pointer to the allocated internal sampler asset structure.
+ * @param[out] out_sampler Receives the allocated sampler.
+ * @return gfx_ok on success; on error *out_sampler is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_sampler_t* gfx_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc);
+gfx_api gfx_result gfx_sampler_create(gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** out_sampler);
 
 /**
  * @brief Deallocates hardware states tracking an active sampler asset block.
@@ -1151,9 +1158,10 @@ gfx_api void gfx_sampler_destroy(gfx_context_t* ctx, gfx_sampler_t* sampler);
  * @brief Allocates an empty or populated dimensional image texture memory object.
  * @param ctx Reference to the active graphics context.
  * @param desc Resolution dimensions, pixel format layouts, and capability rules flags.
- * @return Pointer to the allocated internal texture asset structure.
+ * @param[out] out_texture Receives the allocated texture.
+ * @return gfx_ok on success; on error *out_texture is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_texture_t* gfx_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc);
+gfx_api gfx_result gfx_texture_create(gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** out_texture);
 
 /**
  * @brief Synchronously pushes raw pixel host arrays directly into an active texture block.
@@ -1211,9 +1219,10 @@ gfx_api void gfx_texture_destroy(gfx_context_t* ctx, gfx_texture_t* texture);
  * @brief Compiles a full fixed+programmable vertex and fragment state machine pipeline.
  * @param ctx Reference to the active graphics context.
  * @param desc Inputs layouts assembly links, render states, and shaders packages.
- * @return Pointer to the allocated monolithic graphics pipeline state object.
+ * @param[out] out_pipeline Receives the graphics pipeline.
+ * @return gfx_ok on success; on error *out_pipeline is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_pipeline_t* gfx_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc);
+gfx_api gfx_result gfx_pipeline_create(gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline);
 
 /**
  * @brief Destroys and cleans up an active graphics pipeline state object.
@@ -1226,9 +1235,10 @@ gfx_api void gfx_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipeline);
  * @brief Compiles a hardware data-parallel compute pipeline state machine layout.
  * @param ctx Reference to the active graphics context.
  * @param desc Properties wrapping target single-stage compute shader modules.
- * @return Pointer to the allocated monolithic compute pipeline state object.
+ * @param[out] out_pipeline Receives the compute pipeline.
+ * @return gfx_ok on success; on error *out_pipeline is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_pipeline_compute_t* gfx_compute_pipeline_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc);
+gfx_api gfx_result gfx_compute_pipeline_create(gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** out_pipeline);
 
 /**
  * @brief Destroys and cleans up an active compute pipeline state object.
@@ -1241,9 +1251,10 @@ gfx_api void gfx_compute_pipeline_destroy(gfx_context_t* ctx, gfx_pipeline_compu
  * @brief Compiles a next-gen task and mesh geometry acceleration pipeline state layout.
  * @param ctx Reference to the active graphics context.
  * @param desc Geometry processing properties packing mesh shader configurations.
- * @return Pointer to the allocated monolithic mesh shading pipeline state object.
+ * @param[out] out_pipeline Receives the mesh shading pipeline.
+ * @return gfx_ok on success; on error *out_pipeline is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_pipeline_t* gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc);
+gfx_api gfx_result gfx_pipeline_mesh_create(gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** out_pipeline);
 
 /**
  * @brief Destroys and cleans up an active mesh shading pipeline state object.
@@ -1256,9 +1267,10 @@ gfx_api void gfx_pipeline_mesh_destroy(gfx_context_t* ctx, gfx_pipeline_t* pipel
  * @brief Compiles a hardware-accelerated ray tracing raygen/hit/miss pipeline state object.
  * @param ctx Reference to the active graphics context.
  * @param desc Intersection acceleration properties driving shader binding tables.
- * @return Pointer to the allocated monolithic ray tracing pipeline state object.
+ * @param[out] out_pipeline Receives the ray tracing pipeline.
+ * @return gfx_ok on success; on error *out_pipeline is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_pipeline_raytrace_t* gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc);
+gfx_api gfx_result gfx_pipeline_raytrace_create(gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** out_pipeline);
 
 /**
  * @brief Destroys and cleans up an active ray tracing pipeline state object.
@@ -1589,31 +1601,33 @@ typedef struct gfx_sbt_desc_t {
  * @brief Allocates empty internal buffers required to drive hardware acceleration structure builds.
  * @param ctx Reference to the active graphics context.
  * @param desc Properties configuring geometries lists data weights bounds or instancing scales.
- * @return A unique type-safe handle to the created acceleration structure.
+ * @param[out] out_as Receives the acceleration structure.
+ * @return gfx_ok on success; on error *out_as is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_acceleration_structure_t gfx_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc);
+gfx_api gfx_result gfx_acceleration_structure_create(gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** out_as);
 
 /**
  * @brief Releases hardware allocations bound to an active acceleration structure object.
  * @param ctx Reference to the active graphics context.
  * @param acceleration_structure Handle of the structure to destroy.
  */
-gfx_api void gfx_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t acceleration_structure);
+gfx_api void gfx_acceleration_structure_destroy(gfx_context_t* ctx, gfx_acceleration_structure_t* acceleration_structure);
 
 /**
  * @brief Allocates an organized Shader Binding Table (SBT) buffer backing ray tracing shader dispatches.
  * @param ctx Reference to the active graphics context.
  * @param desc Properties defining pipeline group index layouts associations maps rules.
- * @return A unique type-safe handle to the initialized shader binding table.
+ * @param[out] out_sbt Receives the shader binding table.
+ * @return gfx_ok on success; on error *out_sbt is set to nullptr and the gfx_result says why.
  */
-gfx_api gfx_sbt_t gfx_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc);
+gfx_api gfx_result gfx_sbt_create(gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** out_sbt);
 
 /**
  * @brief Releases hardware storage allocations bound to an active Shader Binding Table buffer.
  * @param ctx Reference to the active graphics context.
  * @param sbt Handle of the shader binding table instance to destroy.
  */
-gfx_api void gfx_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t sbt);
+gfx_api void gfx_sbt_destroy(gfx_context_t* ctx, gfx_sbt_t* sbt);
 
 // ============================================================================
 // --- Ray Tracing Command Recording Dispatches ---
@@ -1639,7 +1653,7 @@ gfx_api void gfx_cmd_build_acceleration_structure(gfx_command_buffer_t* cmd, gfx
 gfx_api void gfx_cmd_trace_rays(gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
 
 
-gfx_api void gfx_cmd_trace_ray_query(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t tlas, uint32_t width, uint32_t height, uint32_t depth = 1);
+gfx_api void gfx_cmd_trace_ray_query(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t tlas, uint32_t width, uint32_t height, uint32_t depth);
 
 
 // ============================================================================
@@ -1663,7 +1677,7 @@ gfx_api void gfx_cmd_trace_ray_query(gfx_command_buffer_t* cmd, gfx_acceleration
 
 uint32_t            gfx_utils_thread_id();
 
-uint32_t            gfx_utils_hash(const void * data, uint32_t size, uint32_t seed = 0);
+uint32_t            gfx_utils_hash(const void * data, uint32_t size, uint32_t seed);
 
 gfx_api uint32_t    gfx_utils_image_layer_size(uint32_t width, uint32_t height, uint32_t depth, gfx_pixel_format format);
 

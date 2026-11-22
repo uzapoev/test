@@ -13,12 +13,12 @@ bool                gfx_pixel_format_is_srgb(gfx_pixel_format f);
  typedef struct gfx_api_pfn
  {
      // CONTEXT
-     void     (*pfn_init)            (gfx_settings_t* settings, gfx_context_t** ctx);
+     gfx_result (*pfn_init)            (gfx_settings_t* settings, gfx_context_t** ctx);
      void     (*pfn_destroy)         (gfx_context_t* ctx);
      void     (*pfn_get_caps)        (gfx_context_t* ctx, gfx_caps_t* caps);
 
      // SWAPCHAIN / SURFACE
-     void     (*pfn_surface_create)  (gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
+     gfx_result (*pfn_surface_create)  (gfx_context_t* ctx, gfx_surface_desc_t* desc, gfx_surface_t** out_surface);
      void     (*pfn_surface_destroy) (gfx_context_t* ctx, gfx_surface_t* surface);
      gfx_result (*pfn_surface_set_vsync) (gfx_context_t* ctx, gfx_surface_t* surface, bool vsync);    // optional (null = not supported)
 
@@ -26,19 +26,19 @@ bool                gfx_pixel_format_is_srgb(gfx_pixel_format f);
      void     (*pfn_frame_end)       (gfx_frame_t* frame);
 
      // BUFFER
-     void     (*pfn_buffer_create)       (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
+     gfx_result (*pfn_buffer_create)       (gfx_context_t* ctx, gfx_buffer_desc_t* desc, gfx_buffer_t** buffer);
      void     (*pfn_buffer_update_data)  (gfx_context_t* ctx, gfx_buffer_t* buffer, void* data, uint32_t size, uint32_t offset);
      void     (*pfn_buffer_destroy)      (gfx_context_t* ctx, gfx_buffer_t* buffer);
 
      // SHADER
-     void    (*pfn_shader_create)                   (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
+     gfx_result (*pfn_shader_create)                   (gfx_context_t* ctx, gfx_shader_desc_t* desc, gfx_shader_t** shader);
      uint32_t(*pfn_shader_get_descriptor_set_count) (gfx_shader_t* shader);
      uint32_t(*pfn_shader_get_uniforms)             (gfx_shader_t* shader, uint32_t set_index, gfx_uniform_t* uniforms); // new
      uint64_t(*pfn_uniform_location)                (gfx_shader_t* shader, const char* name);
      void    (*pfn_shader_destroy)                  (gfx_context_t* ctx, gfx_shader_t* shader);
 
      // DESCRIPTOR SET
-     void     (*pfn_descriptor_set_create)               (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
+     gfx_result (*pfn_descriptor_set_create)               (gfx_context_t* ctx, gfx_shader_t* shader, uint32_t set_idx, gfx_descriptor_set_t** descriptor);
      void     (*pfn_descriptor_set_write_buffer_data)    (gfx_descriptor_set_t* set, uint64_t handle, void* data, uint32_t size);
      void     (*pfn_descriptor_set_write_buffer)         (gfx_descriptor_set_t* set, uint64_t handle, gfx_buffer_t* buffer, uint32_t offset);
      void     (*pfn_descriptor_set_write_texture)        (gfx_descriptor_set_t* set, uint64_t handle, gfx_texture_t* texture);
@@ -46,11 +46,11 @@ bool                gfx_pixel_format_is_srgb(gfx_pixel_format f);
      void     (*pfn_descriptor_set_destroy)              (gfx_context_t* ctx, gfx_descriptor_set_t* descriptor);
 
      // SAMPLER
-     void     (*pfn_sampler_create)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
+     gfx_result (*pfn_sampler_create)  (gfx_context_t* ctx, gfx_sampler_desc_t* desc, gfx_sampler_t** sampler);
      void     (*pfn_sampler_destroy) (gfx_context_t* ctx, gfx_sampler_t* sampler);
 
      // TEXTURE
-     void     (*pfn_texture_create)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
+     gfx_result (*pfn_texture_create)          (gfx_context_t* ctx, gfx_texture_desc_t* desc, gfx_texture_t** texture);
      void     (*pfn_texture_update_data)     (gfx_context_t* ctx, gfx_texture_t* texture, void* data, uint32_t size, uint32_t offset);
      void     (*pfn_texture_update_bindless) (gfx_context_t* ctx, gfx_texture_t* texture, uint32_t idx);
      void     (*pfn_texture_generate_mipmap) (gfx_context_t* ctx, gfx_texture_t* texture);
@@ -59,14 +59,14 @@ bool                gfx_pixel_format_is_srgb(gfx_pixel_format f);
      void     (*pfn_texture_destroy)         (gfx_context_t* ctx, gfx_texture_t* texture);
 
      // PIPELINE
-     void     (*pfn_pipeline_create)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
-     void     (*pfn_mesh_pipeline_create)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+     gfx_result (*pfn_pipeline_create)          (gfx_context_t* ctx, gfx_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
+     gfx_result (*pfn_mesh_pipeline_create)     (gfx_context_t* ctx, gfx_mesh_pipeline_desc_t* desc, gfx_pipeline_t** pipeline);
      void     (*pfn_pipeline_destroy)         (gfx_context_t* ctx, gfx_pipeline_t* pipeline);
 
-     void     (*pfn_pipeline_compute_create)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
+     gfx_result (*pfn_pipeline_compute_create)  (gfx_context_t* ctx, gfx_compute_pipeline_desc_t* desc, gfx_pipeline_compute_t** pipeline);
      void     (*pfn_pipeline_compute_destroy) (gfx_context_t* ctx, gfx_pipeline_compute_t* pipeline);
 
-     void     (*pfn_pipeline_raytrace_create) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
+     gfx_result (*pfn_pipeline_raytrace_create) (gfx_context_t* ctx, gfx_raytrace_pipeline_desc_t* desc, gfx_pipeline_raytrace_t** pipeline);
      void     (*pfn_pipeline_raytrace_destroy)(gfx_context_t* ctx, gfx_pipeline_raytrace_t* pipeline);
 
      // COMMAND BUFFER
@@ -92,9 +92,9 @@ bool                gfx_pixel_format_is_srgb(gfx_pixel_format f);
      void     (*pfn_cmd_draw_mesh_tasks_indirect)    (gfx_command_buffer_t* cmd, gfx_buffer_t* buffer, uint32_t offset, uint32_t draw_count, uint32_t stride); // new
 
      // Ray Tracing
-     void     (*pfn_acceleration_structure_create)   (gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** acceleration_struct);
+     gfx_result (*pfn_acceleration_structure_create)   (gfx_context_t* ctx, gfx_acceleration_structure_desc_t* desc, gfx_acceleration_structure_t** acceleration_struct);
      void     (*pfn_acceleration_structure_destroy)  (gfx_context_t* ctx, gfx_acceleration_structure_t* acceleration_structure);
-     void     (*pfn_sbt_create)                      (gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** sbt);
+     gfx_result (*pfn_sbt_create)                      (gfx_context_t* ctx, gfx_sbt_desc_t* desc, gfx_sbt_t** sbt);
      void     (*pfn_sbt_destroy)                     (gfx_context_t* ctx, gfx_sbt_t* sbt);
      void     (*pfn_cmd_build_acceleration_structure)(gfx_command_buffer_t* cmd, gfx_acceleration_structure_t* dst, gfx_acceleration_structure_t* src);
      void     (*pfn_cmd_trace_rays)                  (gfx_command_buffer_t* cmd, gfx_pipeline_raytrace_t* pipeline, gfx_sbt_t sbt, uint32_t width, uint32_t height, uint32_t depth);
